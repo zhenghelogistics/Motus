@@ -305,27 +305,47 @@ export default function JobDetail() {
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
     doc.text(`Prepared: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 21, { align: 'right' })
 
-    // Job info — autoTable so long names wrap
+    // Job info
     const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
     const valCol   = { cellWidth: vw }
-    const infoRows = [
-      ['Job No.',      job.job_number,             'Mode',     job.mode || '—'],
-      ['Customer Ref', job.customer_ref || '—',    'Agent',    job.agent || '—'],
-      ['Shipper',      job.shipper || '—',          'Deadline', job.deadline_date || '—'],
-      ['Consignee',    job.consignee || '—',        'Status',   job.status || '—'],
-    ]
-    if (job.customer_name) infoRows.push(['Customer', job.customer_name, 'Cust. Email', job.customer_email || '—'])
     autoTable(doc, {
       startY: 35,
-      body: infoRows,
+      body: [
+        ['Job No.',      job.job_number,          'Mode',     job.mode || '—'],
+        ['Customer Ref', job.customer_ref || '—', 'Agent',    job.agent || '—'],
+        ['Shipper',      job.shipper || '—',       'Deadline', job.deadline_date || '—'],
+        ['Consignee',    job.consignee || '—',     'Status',   job.status || '—'],
+      ],
       columnStyles: { 0: labelCol, 1: valCol, 2: labelCol, 3: { cellWidth: 'auto' } },
       styles: { fontSize: 8.5, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' },
       margin: { left: ml, right: mr },
       tableWidth: tw,
     })
 
-    // Billing to customer
-    let y = doc.lastAutoTable.finalY + 6
+    // Billing party contact box — always shown so accounts can reach customer directly
+    let y = doc.lastAutoTable.finalY + 5
+    const billingPartyName    = job.customer_name    || job.shipper    || '—'
+    const billingPartyContact = job.customer_contact_name  || '—'
+    const billingPartyPhone   = job.customer_contact_number || '—'
+    const billingPartyEmail   = job.customer_email   || '—'
+    const bpLabel = { fontStyle: 'bold', fillColor: [4, 44, 83], textColor: [255, 255, 255], cellWidth: lw }
+    const bpVal   = { fillColor: [232, 241, 250] }
+    autoTable(doc, {
+      startY: y,
+      head: [[{ content: 'BILLING PARTY / CUSTOMER DETAILS', colSpan: 4, styles: { fillColor: navy, textColor: [255,255,255], fontStyle: 'bold', fontSize: 9, halign: 'left' } }]],
+      body: [
+        [{ content: 'Company',  styles: bpLabel }, { content: billingPartyName,    styles: { ...bpVal, fontStyle: 'bold', fontSize: 9 }, colSpan: 3 }],
+        [{ content: 'Contact',  styles: bpLabel }, { content: billingPartyContact, styles: bpVal }, { content: 'Phone', styles: bpLabel }, { content: billingPartyPhone, styles: bpVal }],
+        [{ content: 'Email',    styles: bpLabel }, { content: billingPartyEmail,   styles: bpVal, colSpan: 3 }],
+      ],
+      columnStyles: { 0: { cellWidth: lw }, 1: { cellWidth: vw }, 2: { cellWidth: lw }, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Billing lines
+    y = doc.lastAutoTable.finalY + 6
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
     doc.text('BILLING TO CUSTOMER', ml, y); y += 2
     const totalSale = job.billing_lines.reduce((s, l) => s + (l.rate||0)*(l.qty||1), 0)
