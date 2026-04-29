@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { getJobs } from '../api'
 
-const MODES = ['', 'Air Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
+const MODES = ['', 'Air Express', 'LCL Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
 const STATUSES = ['', 'New', 'In Progress', 'Completed', 'On Hold']
 
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -253,6 +253,7 @@ export default function MovementTracker() {
 function ModeTag({ mode }) {
   const colors = {
     'Air Express': { bg: '#EDE9FE', color: '#5B21B6' },
+    'LCL Express': { bg: '#FEF3C7', color: '#92400E' },
     'Sea FCL': { bg: '#DBEAFE', color: '#1D4ED8' },
     'Sea LCL': { bg: '#BFDBFE', color: '#1E40AF' },
     'Local Delivery': { bg: '#D1FAE5', color: '#065F46' },

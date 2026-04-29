@@ -9,7 +9,7 @@ import {
   uploadDocument, deleteDocument, parseInvoice
 } from '../api'
 
-const MODES = ['Air Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
+const MODES = ['Air Express', 'LCL Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold']
 const DOC_TYPES = ['CI', 'PL', 'DO', 'Invoice', 'Other']
 const navy = [4, 44, 83]
@@ -348,6 +348,191 @@ export default function JobDetail() {
     doc.save(`ZHL_${job.job_number.replace('/','-')}_Accounts.pdf`)
   }
 
+  // ── Pickup Request Order PDF ──────────────────────────────────────────────
+  function exportPickupOrder() {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pw = 210
+    let y = 15
+
+    doc.setFillColor(...navy)
+    doc.rect(0, 0, pw, 28, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
+    doc.text('ZHENGHE LOGISTICS PTE LTD', 14, 11)
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text('Tel: +65 6123 4567  |  info@zhenghe.com.sg', 14, 18)
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+    doc.text('PICKUP REQUEST ORDER', pw - 14, 11, { align: 'right' })
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text(`Date: ${new Date().toLocaleDateString('en-SG')}`, pw - 14, 18, { align: 'right' })
+    y = 36
+
+    // Job ref strip
+    doc.setFillColor(245, 247, 250)
+    doc.roundedRect(14, y, pw - 28, 16, 2, 2, 'F')
+    const refs = [['Job No.', job.job_number], ['Customer Ref', job.customer_ref||'—'], ['Mode', job.mode||'—'], ['Status', job.status||'—']]
+    refs.forEach(([label, val], i) => {
+      const x = 18 + i * 46
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text(label, x, y + 5)
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+      doc.text(String(val), x, y + 11)
+    })
+    y += 22
+
+    // Pickup details
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('PICKUP DETAILS', 14, y); y += 2
+    doc.setDrawColor(...navy); doc.line(14, y, pw - 14, y); y += 5
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+    const pickupRows = [
+      ['Shipper', job.shipper||'—'],
+      ['Pickup Address', job.pickup_address||'—'],
+      ['Contact Name', job.pickup_contact_name||'—'],
+      ['Contact Number', job.pickup_contact_number||'—'],
+    ]
+    pickupRows.forEach(([label, val]) => {
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text(label + ':', 14, y)
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+      doc.text(val, 55, y); y += 7
+    })
+    y += 4
+
+    // Cargo details
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('CARGO DETAILS', 14, y); y += 2
+    doc.line(14, y, pw - 14, y); y += 5
+    autoTable(doc, {
+      startY: y,
+      head: [['Consignee', 'Commodity', 'Packages', 'Weight (kg)', 'Dimensions', 'CBM']],
+      body: [[
+        job.consignee||'—', job.commodity||'—',
+        job.packages??'—', job.weight ? `${job.weight} kg` : '—',
+        job.dimensions||'—', job.cbm??'—'
+      ]],
+      headStyles: { fillColor: navy, fontSize: 8 },
+      styles: { fontSize: 9, cellPadding: 4 },
+      margin: { left: 14, right: 14 },
+    })
+    y = doc.lastAutoTable.finalY + 8
+
+    if (job.notes) {
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('SPECIAL INSTRUCTIONS', 14, y); y += 2
+      doc.line(14, y, pw - 14, y); y += 5
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+      doc.text(doc.splitTextToSize(job.notes, pw - 28), 14, y)
+      y += 14
+    }
+
+    y = Math.max(y, 230)
+    doc.setDrawColor(180, 180, 180)
+    doc.line(14, y, 90, y); doc.line(120, y, pw - 14, y)
+    doc.setFontSize(8); doc.setTextColor(120, 120, 120)
+    doc.text('Driver Signature / Name', 14, y + 5)
+    doc.text('Date / Time Collected', 120, y + 5)
+
+    doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+    doc.text(`Zhenghe Logistics Pte Ltd — Pickup Request — ${job.job_number} — Generated ${new Date().toLocaleDateString('en-SG')}`, 14, 290)
+    doc.save(`ZHL_${job.job_number.replace('/','-')}_PickupOrder.pdf`)
+  }
+
+  // ── Delivery Order PDF ────────────────────────────────────────────────────
+  function exportDeliveryOrder() {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pw = 210
+    let y = 15
+
+    doc.setFillColor(...blue)
+    doc.rect(0, 0, pw, 28, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
+    doc.text('ZHENGHE LOGISTICS PTE LTD', 14, 11)
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text('Tel: +65 6123 4567  |  info@zhenghe.com.sg', 14, 18)
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+    doc.text('DELIVERY ORDER', pw - 14, 11, { align: 'right' })
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text(`DO Date: ${new Date().toLocaleDateString('en-SG')}`, pw - 14, 18, { align: 'right' })
+    y = 36
+
+    // Job ref strip
+    doc.setFillColor(245, 247, 250)
+    doc.roundedRect(14, y, pw - 28, 16, 2, 2, 'F')
+    const refs = [['Job No.', job.job_number], ['Customer Ref', job.customer_ref||'—'], ['Mode', job.mode||'—'], ['Date Out', job.date_out||'—']]
+    refs.forEach(([label, val], i) => {
+      const x = 18 + i * 46
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text(label, x, y + 5)
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+      doc.text(String(val), x, y + 11)
+    })
+    y += 22
+
+    // Delivery details
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text('DELIVERY DETAILS', 14, y); y += 2
+    doc.setDrawColor(...blue); doc.line(14, y, pw - 14, y); y += 5
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+    const delivRows = [
+      ['Consignee', job.consignee||'—'],
+      ['Delivery Address', job.delivery_address||'—'],
+      ['Contact Name', job.delivery_contact_name||'—'],
+      ['Contact Number', job.delivery_contact_number||'—'],
+    ]
+    delivRows.forEach(([label, val]) => {
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text(label + ':', 14, y)
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+      doc.text(val, 55, y); y += 7
+    })
+    y += 4
+
+    // Cargo details
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text('CARGO DESCRIPTION', 14, y); y += 2
+    doc.setDrawColor(...blue); doc.line(14, y, pw - 14, y); y += 5
+    autoTable(doc, {
+      startY: y,
+      head: [['Shipper', 'Commodity', 'Packages', 'Weight (kg)', 'Dimensions', 'CBM']],
+      body: [[
+        job.shipper||'—', job.commodity||'—',
+        job.packages??'—', job.weight ? `${job.weight} kg` : '—',
+        job.dimensions||'—', job.cbm??'—'
+      ]],
+      headStyles: { fillColor: blue, fontSize: 8 },
+      styles: { fontSize: 9, cellPadding: 4 },
+      margin: { left: 14, right: 14 },
+    })
+    y = doc.lastAutoTable.finalY + 8
+
+    if (job.notes) {
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('DELIVERY NOTES', 14, y); y += 2
+      doc.setDrawColor(...navy); doc.line(14, y, pw - 14, y); y += 5
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+      doc.text(doc.splitTextToSize(job.notes, pw - 28), 14, y)
+      y += 14
+    }
+
+    y = Math.max(y, 220)
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('ACKNOWLEDGEMENT OF RECEIPT', 14, y); y += 6
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
+    doc.text('I/We confirm that the above cargo has been received in good condition.', 14, y); y += 10
+    doc.setDrawColor(180, 180, 180)
+    doc.line(14, y, 90, y); doc.line(120, y, pw - 14, y)
+    doc.text('Receiver Signature / Name', 14, y + 5)
+    doc.text('Date / Time Received', 120, y + 5)
+    doc.line(14, y + 14, 90, y + 14)
+    doc.text('Company Stamp', 14, y + 19)
+
+    doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+    doc.text(`Zhenghe Logistics Pte Ltd — Delivery Order — ${job.job_number} — Generated ${new Date().toLocaleDateString('en-SG')}`, 14, 290)
+    doc.save(`ZHL_${job.job_number.replace('/','-')}_DO.pdf`)
+  }
+
   // ─── RENDER ────────────────────────────────────────────────────────────────
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><span className="spinner spinner-dark" style={{width:32,height:32}}></span></div>
   if (!job) return <div className="alert alert-error">Job not found.</div>
@@ -403,8 +588,10 @@ export default function JobDetail() {
           )}
           <StatusDropdown status={job.status} onChange={changeStatus} />
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-ghost btn-sm" onClick={exportPDF}>↓ Costing PDF</button>
+          <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}>🚛 Pickup Order</button>
+          <button className="btn btn-ghost btn-sm" onClick={exportDeliveryOrder}>📦 Delivery Order</button>
           <button className="btn btn-outline btn-sm" onClick={exportAccountsPDF}>📄 Accounts PDF</button>
           <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving}>
             {saving ? <><span className="spinner"></span> Saving...</> : '✓ Save Changes'}
@@ -602,6 +789,48 @@ function InfoEdit({ form, setField }) {
       <input type={type} className="form-control" value={form[key]||''} onChange={e => setField(key, e.target.value)} placeholder={placeholder} />
     </div>
   )
+
+  function parseDims(dims) {
+    if (!dims) return null
+    const m = dims.match(/(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)/)
+    if (!m) return null
+    let l = parseFloat(m[1]), w = parseFloat(m[2]), h = parseFloat(m[3])
+    const inMeters = !/cm/i.test(dims) && /\bm\b/i.test(dims)
+    return { l, w, h, inMeters }
+  }
+
+  function autoCBM(dims, pkgs) {
+    const d = parseDims(dims)
+    if (!d) return null
+    let { l, w, h, inMeters } = d
+    if (!inMeters) { l /= 100; w /= 100; h /= 100 }
+    return parseFloat((l * w * h * (parseInt(pkgs) || 1)).toFixed(4))
+  }
+
+  function autoVolWeight(dims, pkgs) {
+    const d = parseDims(dims)
+    if (!d) return null
+    let { l, w, h, inMeters } = d
+    if (inMeters) { l *= 100; w *= 100; h *= 100 }
+    return parseFloat(((l * w * h / 6000) * (parseInt(pkgs) || 1)).toFixed(2))
+  }
+
+  function handleDimsChange(val) {
+    setField('dimensions', val)
+    const cbm = autoCBM(val, form.packages)
+    if (cbm != null) setField('cbm', cbm)
+  }
+
+  function handlePkgsChange(val) {
+    setField('packages', val)
+    if (form.dimensions) {
+      const cbm = autoCBM(form.dimensions, val)
+      if (cbm != null) setField('cbm', cbm)
+    }
+  }
+
+  const volWeight = autoVolWeight(form.dimensions, form.packages)
+
   return (
     <div>
       <div className="form-grid-4 mb-4">
@@ -623,9 +852,39 @@ function InfoEdit({ form, setField }) {
         {inp('deadline_date','Deadline Date','date')}
         {inp('commodity','Commodity')}
       </div>
+
+      {/* Customer (billing party) */}
+      <div style={{ background:'var(--bg)', borderRadius:8, padding:14, marginBottom:14 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:'var(--navy)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:10 }}>Customer (Billing Party)</div>
+        <div className="form-grid-4" style={{ gap:10 }}>
+          {inp('customer_name','Customer Name','text','If different from shipper')}
+          {inp('customer_email','Email','email')}
+          {inp('customer_contact_name','Contact Name')}
+          {inp('customer_contact_number','Contact No.')}
+        </div>
+      </div>
+
       <div className="form-grid-4 mb-4">
-        {inp('packages','Packages','number')} {inp('weight','Weight (kg)','number')}
-        {inp('dimensions','Dimensions','text','60x40x30 cm')} {inp('cbm','CBM','number')}
+        <div className="form-group">
+          <label className="form-label">Packages</label>
+          <input type="number" className="form-control" value={form.packages||''} onChange={e => handlePkgsChange(e.target.value)} />
+        </div>
+        {inp('weight','Weight (kg)','number')}
+        <div className="form-group">
+          <label className="form-label">Dimensions</label>
+          <input className="form-control" value={form.dimensions||''} onChange={e => handleDimsChange(e.target.value)} placeholder="60x40x30 cm" />
+        </div>
+        <div className="form-group">
+          <label className="form-label">
+            CBM <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>(auto-calc)</span>
+          </label>
+          <input type="number" className="form-control" value={form.cbm||''} onChange={e => setField('cbm', e.target.value)} placeholder="Auto from dims" />
+          {volWeight != null && (
+            <div style={{ fontSize:11, color:'var(--blue)', marginTop:3, fontWeight:600 }}>
+              Vol Wt (air): {volWeight} kg
+            </div>
+          )}
+        </div>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
         <div className="sub-box">

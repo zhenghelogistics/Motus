@@ -63,6 +63,11 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  // Add customer columns if they don't exist yet
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_contact_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_contact_number TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_email TEXT DEFAULT ''`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cost_lines (
       id SERIAL PRIMARY KEY,
@@ -156,8 +161,9 @@ app.post('/api/jobs', async (req, res) => {
       INSERT INTO jobs (job_number, year, sequence, shipper, consignee, weight, packages,
         dimensions, cbm, pickup_address, pickup_contact_name, pickup_contact_number,
         delivery_address, delivery_contact_name, delivery_contact_number,
-        date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+        date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes,
+        customer_name, customer_contact_name, customer_contact_number, customer_email)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
       RETURNING *
     `, [
       job_number, year, sequence,
@@ -167,7 +173,8 @@ app.post('/api/jobs', async (req, res) => {
       f.delivery_address||'', f.delivery_contact_name||'', f.delivery_contact_number||'',
       f.date_out||null, f.date_delivered||null,
       f.agent||'', f.mode||'Local Delivery', f.status||'New',
-      f.customer_ref||'', f.deadline_date||null, f.commodity||'', f.notes||''
+      f.customer_ref||'', f.deadline_date||null, f.commodity||'', f.notes||'',
+      f.customer_name||'', f.customer_contact_name||'', f.customer_contact_number||'', f.customer_email||''
     ]);
     const job = result.rows[0];
 
@@ -192,7 +199,8 @@ app.get('/api/jobs/:id', async (req, res) => {
     const cost_lines = (await pool.query('SELECT * FROM cost_lines WHERE job_id=$1 ORDER BY id', [job.id])).rows;
     const billing_raw = (await pool.query('SELECT * FROM billing_lines WHERE job_id=$1 ORDER BY id', [job.id])).rows;
     const billing_lines = billing_raw.map(b => ({ ...b, total: parseFloat(((b.rate||0)*(b.qty||1)).toFixed(2)) }));
-    const documents = (await pool.query('SELECT * FROM documents WHERE job_id=$1 ORDER BY upload_date DESC', [job.id])).rows;
+    const docRows = (await pool.query('SELECT * FROM documents WHERE job_id=$1 ORDER BY upload_date DESC', [job.id])).rows;
+    const documents = docRows.map(d => ({ ...d, file_url: `/uploads/${path.basename(d.file_path)}` }));
     res.json({ ...await enrichJob(job), cost_lines, billing_lines, documents });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -203,7 +211,8 @@ app.put('/api/jobs/:id', async (req, res) => {
       'pickup_address','pickup_contact_name','pickup_contact_number',
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','agent','mode','status','customer_ref',
-      'deadline_date','commodity','notes','gp_override'];
+      'deadline_date','commodity','notes','gp_override',
+      'customer_name','customer_contact_name','customer_contact_number','customer_email'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) {
@@ -298,7 +307,8 @@ app.post('/api/jobs/:id/documents', upload.single('file'), async (req, res) => {
       'INSERT INTO documents (job_id,file_name,doc_type,file_path) VALUES ($1,$2,$3,$4) RETURNING *',
       [req.params.id, req.file.originalname, doc_type, req.file.path]
     );
-    res.status(201).json(r.rows[0]);
+    const doc = r.rows[0];
+    res.status(201).json({ ...doc, file_url: `/uploads/${path.basename(doc.file_path)}` });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -325,6 +335,10 @@ app.post('/api/parse-email', async (req, res) => {
 {
   "shipper": "shipper company name",
   "consignee": "consignee company name",
+  "customer_name": "billing customer company name if different from shipper",
+  "customer_contact_name": "customer contact person",
+  "customer_contact_number": "customer phone number",
+  "customer_email": "customer email address",
   "pickup_address": "full pickup address",
   "pickup_contact_name": "pickup contact person name",
   "pickup_contact_number": "pickup contact phone number",
@@ -336,7 +350,7 @@ app.post('/api/parse-email', async (req, res) => {
   "weight": <number in kg or null>,
   "cbm": <number or null>,
   "commodity": "description of goods",
-  "mode": "one of: Air Express / Local Delivery / Local Clearance & Delivery / Sea FCL / Sea LCL",
+  "mode": "one of: Air Express / LCL Express / Local Delivery / Local Clearance & Delivery / Sea FCL / Sea LCL",
   "agent": "agent name if mentioned",
   "deadline_date": "YYYY-MM-DD or null",
   "customer_ref": "customer reference number e.g. KPS1137",
@@ -352,6 +366,64 @@ Email/Job Order:\n${text}` }]
   } catch (err) {
     console.error('Claude error:', err.message);
     res.status(500).json({ error: 'AI parsing failed: ' + err.message });
+  }
+});
+
+// ─── PARSE EMAIL FILE (PDF / .eml / .txt) ────────────────────────────────────
+app.post('/api/parse-email-file', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    let text = '';
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (ext === '.pdf') {
+      const pdfParse = require('pdf-parse');
+      const dataBuffer = fs.readFileSync(req.file.path);
+      const data = await pdfParse(dataBuffer);
+      text = data.text;
+    } else {
+      text = fs.readFileSync(req.file.path, 'utf8');
+    }
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      system: 'You are a freight forwarding operations assistant for Zhenghe Logistics (ZHL), Singapore. Extract job details from emails and job orders. Always return valid JSON only, no other text.',
+      messages: [{ role: 'user', content: `Parse this email/job order and return a JSON object with these exact fields (null for missing):
+{
+  "shipper": "shipper company name",
+  "consignee": "consignee company name",
+  "customer_name": "billing customer company name if different from shipper",
+  "customer_contact_name": "customer contact person",
+  "customer_contact_number": "customer phone number",
+  "customer_email": "customer email address",
+  "pickup_address": "full pickup address",
+  "pickup_contact_name": "pickup contact person name",
+  "pickup_contact_number": "pickup contact phone number",
+  "delivery_address": "full delivery address",
+  "delivery_contact_name": "delivery contact person name",
+  "delivery_contact_number": "delivery contact phone number",
+  "packages": <integer or null>,
+  "dimensions": "e.g. 60x40x30 cm per box",
+  "weight": <number in kg or null>,
+  "cbm": <number or null>,
+  "commodity": "description of goods",
+  "mode": "one of: Air Express / LCL Express / Local Delivery / Local Clearance & Delivery / Sea FCL / Sea LCL",
+  "agent": "agent name if mentioned",
+  "deadline_date": "YYYY-MM-DD or null",
+  "customer_ref": "customer reference number e.g. KPS1137",
+  "notes": "any other relevant info",
+  "billing_lines": [{ "service": "Airfreight", "unit": "kg", "rate": 28, "qty": 136, "remarks": "min 20kg" }]
+}
+Email/Job Order:\n${text.substring(0, 8000)}` }]
+    });
+    const content = msg.content[0].text;
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) return res.status(422).json({ error: 'Could not parse AI response' });
+    res.json(JSON.parse(match[0]));
+  } catch (err) {
+    console.error('Email file parse error:', err.message);
+    res.status(500).json({ error: 'File parsing failed: ' + err.message });
   }
 });
 

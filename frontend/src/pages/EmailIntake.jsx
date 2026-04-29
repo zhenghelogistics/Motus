@@ -2,11 +2,12 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { parseEmail, parseEmailFile, createJob } from '../api'
 
-const MODES = ['Air Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
+const MODES = ['Air Express', 'LCL Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold']
 
 const emptyJob = {
   shipper: '', consignee: '',
+  customer_name: '', customer_contact_name: '', customer_contact_number: '', customer_email: '',
   pickup_address: '', pickup_contact_name: '', pickup_contact_number: '',
   delivery_address: '', delivery_contact_name: '', delivery_contact_number: '',
   packages: '', dimensions: '', weight: '', cbm: '', commodity: '',
@@ -203,6 +204,31 @@ export default function EmailIntake() {
             <div className="form-group">
               <label className="form-label">Consignee</label>
               <input className="form-control" value={form.consignee} onChange={e => setField('consignee', e.target.value)} />
+            </div>
+          </div>
+
+          {/* Customer (billing party) */}
+          <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 10 }}>Customer (Billing Party)</div>
+            <div className="form-grid-2 mb-2">
+              <div className="form-group">
+                <label className="form-label">Customer Name</label>
+                <input className="form-control" value={form.customer_name} onChange={e => setField('customer_name', e.target.value)} placeholder="If different from shipper" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Customer Email</label>
+                <input type="email" className="form-control" value={form.customer_email} onChange={e => setField('customer_email', e.target.value)} />
+              </div>
+            </div>
+            <div className="form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Contact Name</label>
+                <input className="form-control" value={form.customer_contact_name} onChange={e => setField('customer_contact_name', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Contact Number</label>
+                <input className="form-control" value={form.customer_contact_number} onChange={e => setField('customer_contact_number', e.target.value)} />
+              </div>
             </div>
           </div>
 
