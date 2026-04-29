@@ -10,7 +10,7 @@ import {
 } from '../api'
 
 const MODES = ['Air Express', 'LCL Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
-const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold']
+const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 const DOC_TYPES = ['CI', 'PL', 'DO', 'Invoice', 'Other']
 const navy = [4, 44, 83]
 const blue = [24, 95, 165]
@@ -36,6 +36,9 @@ export default function JobDetail() {
   const [infoForm, setInfoForm] = useState({})
   const [invoiceParsing, setInvoiceParsing] = useState(false)
   const [sendToAccountsModal, setSendToAccountsModal] = useState(false)
+  const [voidModal, setVoidModal] = useState(false)
+  const [voidReason, setVoidReason] = useState('')
+  const [voiding, setVoiding] = useState(false)
   const [gpEditing, setGpEditing] = useState(false)
   const [gpInput, setGpInput] = useState('')
   const invoiceRef = useRef()
@@ -151,10 +154,14 @@ export default function JobDetail() {
     setJob(j => ({ ...j, documents: j.documents.filter(d => d.id !== did) }))
   }
 
-  async function handleDelete() {
-    if (!confirm(`Delete job ${job.job_number}? This cannot be undone.`)) return
-    await deleteJob(id)
-    navigate('/jobs')
+  async function handleVoid() {
+    setVoiding(true)
+    try {
+      const r = await updateJob(id, { status: 'Voided', void_reason: voidReason.trim() })
+      setJob(j => ({ ...j, status: 'Voided', void_reason: r.data.void_reason }))
+      setVoidModal(false)
+      setVoidReason('')
+    } finally { setVoiding(false) }
   }
 
   // ── Full Costing Sheet PDF ────────────────────────────────────────────────
@@ -618,6 +625,53 @@ export default function JobDetail() {
         </div>
       )}
 
+      {/* Void confirmation modal */}
+      {voidModal && (
+        <div className="modal-overlay" onClick={() => setVoidModal(false)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Void {job.job_number}?</h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setVoidModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ padding: '20px 24px' }}>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+                The job number will be <strong>permanently reserved</strong> and cannot be reused or reassigned.
+                The job record is kept for audit purposes.
+              </p>
+              <div className="form-group">
+                <label className="form-label">Reason for voiding <span style={{ color: 'var(--red)' }}>*</span></label>
+                <textarea
+                  className="form-control"
+                  rows={3}
+                  value={voidReason}
+                  onChange={e => setVoidReason(e.target.value)}
+                  placeholder="e.g. Customer cancelled, duplicate entry, pricing error..."
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
+              <button className="btn btn-ghost" onClick={() => setVoidModal(false)}>Cancel</button>
+              <button className="btn btn-danger" onClick={handleVoid} disabled={!voidReason.trim() || voiding}>
+                {voiding ? <><span className="spinner"></span> Voiding...</> : 'Confirm Void'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Voided banner */}
+      {job.status === 'Voided' && (
+        <div style={{ background: '#FEF2F2', border: '1.5px solid #FECACA', borderRadius: 10, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <span style={{ fontSize: 20 }}>🚫</span>
+          <div>
+            <div style={{ fontWeight: 700, color: '#991B1B', fontSize: 14 }}>This job has been voided</div>
+            {job.void_reason && <div style={{ fontSize: 13, color: '#7F1D1D', marginTop: 3 }}>Reason: {job.void_reason}</div>}
+            <div style={{ fontSize: 12, color: '#B91C1C', marginTop: 4 }}>Job number {job.job_number} is permanently reserved and will not be reused.</div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex-between mb-4" style={{ flexWrap: 'wrap', gap: 12 }}>
         <div className="flex-center gap-2">
@@ -635,10 +689,13 @@ export default function JobDetail() {
           <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}>🚛 Pickup Order</button>
           <button className="btn btn-ghost btn-sm" onClick={exportDeliveryOrder}>📦 Delivery Order</button>
           <button className="btn btn-outline btn-sm" onClick={exportAccountsPDF}>📄 Accounts PDF</button>
-          <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving}>
+          <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving || job.status === 'Voided'}>
             {saving ? <><span className="spinner"></span> Saving...</> : '✓ Save Changes'}
           </button>
-          <button className="btn btn-danger btn-sm" onClick={handleDelete}>Delete</button>
+          {job.status !== 'Voided'
+            ? <button className="btn btn-danger btn-sm" onClick={() => { setVoidReason(''); setVoidModal(true) }}>Void Job</button>
+            : <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', padding: '0 4px' }}>Voided</span>
+          }
         </div>
       </div>
 
@@ -766,7 +823,7 @@ export default function JobDetail() {
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function StatusDropdown({ status, onChange }) {
-  const map = { 'New':'new', 'In Progress':'inprogress', 'Completed':'completed', 'On Hold':'onhold' }
+  const map = { 'New':'new', 'In Progress':'inprogress', 'Completed':'completed', 'On Hold':'onhold', 'Voided':'voided' }
   return (
     <select className={`pill pill-${map[status]||'new'}`} value={status} onChange={e => onChange(e.target.value)}
       style={{ border:'none', cursor:'pointer', fontFamily:'var(--font)', fontWeight:800, fontSize:10 }}>

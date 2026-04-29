@@ -427,11 +427,13 @@ body {
 .pill-inprogress { background: var(--blue-light); color: #1451A0; border: 1px solid rgba(24,95,165,0.2); }
 .pill-completed { background: var(--green-light); color: var(--green); border: 1px solid rgba(20,128,74,0.2); }
 .pill-onhold { background: var(--amber-light); color: var(--amber); border: 1px solid rgba(180,83,9,0.2); }
+.pill-voided { background: #F3F4F6; color: #6B7280; border: 1px solid #D1D5DB; text-decoration: line-through; }
 
 [data-theme="dark"] .pill-new { color: #9aacbf; }
 [data-theme="dark"] .pill-inprogress { color: #7ab3ff; }
 [data-theme="dark"] .pill-completed { color: #4ade80; }
 [data-theme="dark"] .pill-onhold { color: #f59e0b; }
+[data-theme="dark"] .pill-voided { background: #374151; color: #9CA3AF; border-color: #4B5563; }
 
 /* ─── Deadline ───────────────────────────────────────────────────────────── */
 .deadline-past { color: var(--red); font-weight: 700; }

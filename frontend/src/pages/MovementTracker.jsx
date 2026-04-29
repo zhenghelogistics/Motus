@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx'
 import { getJobs } from '../api'
 
 const MODES = ['', 'Air Express', 'LCL Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
-const STATUSES = ['', 'New', 'In Progress', 'Completed', 'On Hold']
+const STATUSES = ['', 'New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtGP = (n) => n == null || isNaN(n) ? '—' : `${Number(n).toFixed(1)}%`
@@ -27,7 +27,7 @@ function gpClass(gp) {
 }
 
 function StatusPill({ status }) {
-  const map = { 'New': 'new', 'In Progress': 'inprogress', 'Completed': 'completed', 'On Hold': 'onhold' }
+  const map = { 'New': 'new', 'In Progress': 'inprogress', 'Completed': 'completed', 'On Hold': 'onhold', 'Voided': 'voided' }
   return <span className={`pill pill-${map[status] || 'new'}`}>{status || 'New'}</span>
 }
 
@@ -56,6 +56,7 @@ export default function MovementTracker() {
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterMode, setFilterMode] = useState('')
+  const [showVoided, setShowVoided] = useState(false)
   const [sortKey, setSortKey] = useState('id')
   const [sortDir, setSortDir] = useState('desc')
   const navigate = useNavigate()
@@ -75,15 +76,19 @@ export default function MovementTracker() {
   }
 
   const sorted = useMemo(() => {
-    return [...jobs].sort((a, b) => {
-      const av = a[sortKey], bv = b[sortKey]
-      if (av == null && bv == null) return 0
-      if (av == null) return 1
-      if (bv == null) return -1
-      const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-  }, [jobs, sortKey, sortDir])
+    return [...jobs]
+      .filter(j => showVoided ? true : j.status !== 'Voided')
+      .sort((a, b) => {
+        const av = a[sortKey], bv = b[sortKey]
+        if (av == null && bv == null) return 0
+        if (av == null) return 1
+        if (bv == null) return -1
+        const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+  }, [jobs, sortKey, sortDir, showVoided])
+
+  const voidedCount = jobs.filter(j => j.status === 'Voided').length
 
   // Monthly summary from loaded jobs
   const now = new Date()
@@ -174,6 +179,12 @@ export default function MovementTracker() {
         {(search || filterStatus || filterMode) &&
           <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatus(''); setFilterMode('') }}>Clear</button>
         }
+        {voidedCount > 0 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none' }}>
+            <input type="checkbox" checked={showVoided} onChange={e => setShowVoided(e.target.checked)} />
+            Show voided ({voidedCount})
+          </label>
+        )}
       </div>
 
       {/* Desktop table */}
@@ -195,9 +206,11 @@ export default function MovementTracker() {
                 <tbody>
                   {sorted.map(job => {
                     const dl = deadlineInfo(job.deadline_date)
+                    const isVoided = job.status === 'Voided'
                     return (
-                      <tr key={job.id} className="tr-link" onClick={() => navigate(`/jobs/${job.id}`)}>
-                        <td style={{ fontWeight: 700, color: 'var(--navy)', whiteSpace: 'nowrap' }}>{job.job_number}</td>
+                      <tr key={job.id} className="tr-link" onClick={() => navigate(`/jobs/${job.id}`)}
+                        style={isVoided ? { opacity: 0.45, background: '#fafafa' } : {}}>
+                        <td style={{ fontWeight: 700, color: 'var(--navy)', whiteSpace: 'nowrap', textDecoration: isVoided ? 'line-through' : 'none' }}>{job.job_number}</td>
                         <td style={{ color: 'var(--blue)', fontWeight: 600 }}>{job.customer_ref || '—'}</td>
                         <td>{job.shipper || '—'}</td>
                         <td>{job.consignee || '—'}</td>
