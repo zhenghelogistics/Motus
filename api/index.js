@@ -160,6 +160,20 @@ app.use(async (req, res, next) => {
   }
 });
 
+// ─── HEALTH ─────────────────────────────────────────────────────────────────
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', db_url_set: !!process.env.DATABASE_URL });
+});
+
+app.get('/api/dbtest', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT NOW() as time');
+    res.json({ ok: true, time: r.rows[0].time });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 // ─── JOBS ───────────────────────────────────────────────────────────────────
 app.get('/api/jobs', async (req, res) => {
   try {
