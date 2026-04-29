@@ -26,6 +26,12 @@ export const deleteDocument = (jobId, did) => api.delete(`/jobs/${jobId}/documen
 
 export const parseEmail = (text) => api.post('/parse-email', { text })
 
+export const parseEmailFile = (file) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.post('/parse-email-file', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
+
 export const parseInvoice = (file) => {
   const fd = new FormData()
   fd.append('file', file)

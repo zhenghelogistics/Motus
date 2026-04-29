@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { parseEmail, createJob } from '../api'
+import { parseEmail, parseEmailFile, createJob } from '../api'
 
 const MODES = ['Air Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold']
@@ -21,7 +21,18 @@ export default function EmailIntake() {
   const [parseError, setParseError] = useState('')
   const [form, setForm] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef(null)
   const navigate = useNavigate()
+
+  function applyParsedData(data) {
+    const merged = { ...emptyJob }
+    Object.keys(merged).forEach(k => {
+      if (data[k] != null && data[k] !== '') merged[k] = data[k]
+    })
+    if (data.billing_lines) merged.billing_lines = data.billing_lines
+    setForm(merged)
+  }
 
   async function handleParse() {
     if (!emailText.trim()) return
@@ -29,15 +40,29 @@ export default function EmailIntake() {
     setParseError('')
     try {
       const { data } = await parseEmail(emailText)
-      // Merge parsed data into form, filtering nulls
-      const merged = { ...emptyJob }
-      Object.keys(merged).forEach(k => {
-        if (data[k] != null && data[k] !== '') merged[k] = data[k]
-      })
-      if (data.billing_lines) merged.billing_lines = data.billing_lines
-      setForm(merged)
+      applyParsedData(data)
     } catch (err) {
       setParseError(err.response?.data?.error || 'Parsing failed. Please try again.')
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  async function handleFileParse(file) {
+    if (!file) return
+    const allowed = ['.pdf', '.eml', '.msg', '.txt']
+    const ext = '.' + file.name.split('.').pop().toLowerCase()
+    if (!allowed.includes(ext)) {
+      setParseError('Please upload a PDF, .eml, or .msg file.')
+      return
+    }
+    setParsing(true)
+    setParseError('')
+    try {
+      const { data } = await parseEmailFile(file)
+      applyParsedData(data)
+    } catch (err) {
+      setParseError(err.response?.data?.error || 'File parsing failed. Please try again.')
     } finally {
       setParsing(false)
     }
@@ -97,17 +122,55 @@ export default function EmailIntake() {
         <p>Paste a customer email to auto-extract job details, or create manually.</p>
       </div>
 
-      {/* Email paste area */}
+      {/* AI Intake */}
       <div className="card mb-6">
-        <div className="section-title" style={{ borderBottom: 'none' }}>
-          Extract with AI
-        </div>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Paste any job order or confirmation email below. Claude will extract shipper, consignee, addresses, packages, weight, mode, rate, deadline, and customer reference.
+        <div className="section-title" style={{ borderBottom: 'none' }}>Extract with AI</div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+          Upload a PDF or .eml file, or paste email text — Claude will extract all job details automatically.
         </p>
+
+        {/* File drop zone */}
+        <div
+          onClick={() => !parsing && fileInputRef.current.click()}
+          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={e => { e.preventDefault(); setDragOver(false); handleFileParse(e.dataTransfer.files[0]) }}
+          style={{
+            border: `2px dashed ${dragOver ? 'var(--blue)' : 'var(--border)'}`,
+            borderRadius: 10,
+            padding: '24px 16px',
+            textAlign: 'center',
+            cursor: parsing ? 'not-allowed' : 'pointer',
+            background: dragOver ? 'rgba(24,95,165,0.04)' : 'var(--bg)',
+            marginBottom: 16,
+            transition: 'all 0.15s'
+          }}
+        >
+          <div style={{ fontSize: 28, marginBottom: 6 }}>📎</div>
+          <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)' }}>
+            {parsing ? 'Extracting...' : 'Drop file here or click to upload'}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+            PDF, .eml, .msg — Claude reads and extracts all fields
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.eml,.msg,.txt"
+            style={{ display: 'none' }}
+            onChange={e => handleFileParse(e.target.files[0])}
+          />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>OR PASTE TEXT</span>
+          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        </div>
+
         <textarea
           className="form-control"
-          style={{ minHeight: 180, fontFamily: 'monospace', fontSize: 12 }}
+          style={{ minHeight: 140, fontFamily: 'monospace', fontSize: 12 }}
           placeholder="Paste email text here..."
           value={emailText}
           onChange={e => setEmailText(e.target.value)}

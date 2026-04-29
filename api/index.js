@@ -397,6 +397,58 @@ Email/Job Order:\n${text}` }]
   }
 });
 
+// ─── PARSE EMAIL FILE ───────────────────────────────────────────────────────
+app.post('/api/parse-email-file', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    let text = '';
+    const name = req.file.originalname.toLowerCase();
+    if (name.endsWith('.pdf')) {
+      const pdfParse = require('pdf-parse');
+      const data = await pdfParse(req.file.buffer);
+      text = data.text;
+    } else {
+      text = req.file.buffer.toString('utf-8');
+    }
+    if (!text.trim()) return res.status(422).json({ error: 'Could not extract text from file' });
+
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      system: 'You are a freight forwarding operations assistant for Zhenghe Logistics (ZHL), Singapore. Extract job details from emails and job orders. Always return valid JSON only, no other text.',
+      messages: [{ role: 'user', content: `Parse this email/job order and return a JSON object with these exact fields (null for missing):
+{
+  "shipper": "shipper company name",
+  "consignee": "consignee company name",
+  "pickup_address": "full pickup address",
+  "pickup_contact_name": "pickup contact person name",
+  "pickup_contact_number": "pickup contact phone number",
+  "delivery_address": "full delivery address",
+  "delivery_contact_name": "delivery contact person name",
+  "delivery_contact_number": "delivery contact phone number",
+  "packages": <integer or null>,
+  "dimensions": "e.g. 60x40x30 cm per box",
+  "weight": <number in kg or null>,
+  "cbm": <number or null>,
+  "commodity": "description of goods",
+  "mode": "one of: Air Express / Local Delivery / Local Clearance & Delivery / Sea FCL / Sea LCL",
+  "agent": "agent name if mentioned",
+  "deadline_date": "YYYY-MM-DD or null",
+  "customer_ref": "customer reference number",
+  "notes": "any other relevant info",
+  "billing_lines": [{ "service": "Airfreight", "unit": "kg", "rate": 28, "qty": 136, "remarks": "" }]
+}
+Email/Job Order:\n${text.substring(0, 8000)}` }]
+    });
+    const content = msg.content[0].text;
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) return res.status(422).json({ error: 'Could not parse AI response' });
+    res.json(JSON.parse(match[0]));
+  } catch (err) {
+    res.status(500).json({ error: 'File parsing failed: ' + err.message });
+  }
+});
+
 // ─── PARSE INVOICE ──────────────────────────────────────────────────────────
 app.post('/api/parse-invoice', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
