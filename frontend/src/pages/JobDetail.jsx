@@ -160,377 +160,419 @@ export default function JobDetail() {
   // ── Full Costing Sheet PDF ────────────────────────────────────────────────
   function exportPDF() {
     const doc = new jsPDF('p', 'mm', 'a4')
-    const pw = 210
-    let y = 15
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const lw = 30, vw = 61  // label / value col width — (lw+vw)×2 = 182
 
+    // Header
     doc.setFillColor(...navy)
-    doc.rect(0, 0, pw, 28, 'F')
+    doc.rect(0, 0, pw, 30, 'F')
     doc.setTextColor(255, 255, 255)
-    doc.setFontSize(16); doc.setFont('helvetica', 'bold')
-    doc.text('ZHENGHE LOGISTICS PTE LTD', 14, 12)
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
+    doc.text('ZHENGHE LOGISTICS PTE LTD', ml, 12)
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics  |  info@zhenghe.com.sg', ml, 21)
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold')
+    doc.text('COSTING SHEET', pw - mr, 12, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text('Freight Forwarding & Logistics', 14, 19)
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold')
-    doc.text('COSTING SHEET', pw - 14, 12, { align: 'right' })
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text(job.job_number, pw - 14, 19, { align: 'right' })
-    y = 36
+    doc.text(job.job_number, pw - mr, 21, { align: 'right' })
 
-    doc.setTextColor(0, 0, 0)
-    doc.setFillColor(245, 247, 250)
-    doc.roundedRect(14, y, pw - 28, 38, 2, 2, 'F')
-    doc.setFontSize(8)
-    const infoCol1 = [['Job No.', job.job_number], ['Customer Ref', job.customer_ref||'—'], ['Shipper', job.shipper||'—'], ['Consignee', job.consignee||'—']]
-    const infoCol2 = [['Mode', job.mode||'—'], ['Agent', job.agent||'—'], ['Deadline', job.deadline_date||'—'], ['Status', job.status||'—']]
-    const infoCol3 = [['Packages', job.packages??'—'], ['Weight', job.weight ? `${job.weight} kg` : '—'], ['Dimensions', job.dimensions||'—'], ['Commodity', job.commodity||'—']]
-    ;[[infoCol1,16],[infoCol2,80],[infoCol3,150]].forEach(([col,cx]) => {
-      col.forEach(([label, val], ri) => {
-        doc.setFont('helvetica','bold'); doc.setTextColor(...navy)
-        doc.text(label+':', cx, y+7+ri*8)
-        doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0)
-        doc.text(String(val), cx+22, y+7+ri*8)
-      })
+    // Info table — autoTable wraps long names automatically
+    const infoStyle = { fontSize: 8.5, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' }
+    const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
+    const valCol   = { cellWidth: vw }
+    autoTable(doc, {
+      startY: 35,
+      body: [
+        ['Job No.',     job.job_number,                       'Mode',      job.mode || '—'],
+        ['Customer Ref',job.customer_ref || '—',             'Agent',     job.agent || '—'],
+        ['Customer',    job.customer_name || '—',            'Status',    job.status || '—'],
+        ['Shipper',     job.shipper || '—',                  'Deadline',  job.deadline_date || '—'],
+        ['Consignee',   job.consignee || '—',                'Commodity', job.commodity || '—'],
+        ['Packages',    job.packages != null ? String(job.packages) : '—', 'Weight', job.weight ? `${job.weight} kg` : '—'],
+        ['Dimensions',  job.dimensions || '—',               'CBM',       job.cbm != null ? String(job.cbm) : '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: valCol, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: infoStyle,
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y += 44
 
-    if (job.pickup_address || job.delivery_address) {
-      doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(...blue)
-      doc.text('PICKUP', 14, y); doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0)
-      doc.text(job.pickup_address||'—', 38, y)
-      if (job.pickup_contact_name) doc.text(`PIC: ${job.pickup_contact_name} ${job.pickup_contact_number||''}`, 38, y+5)
-      doc.setFont('helvetica','bold'); doc.setTextColor(...blue)
-      doc.text('DELIVERY', 110, y); doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0)
-      doc.text(job.delivery_address||'—', 134, y)
-      if (job.delivery_contact_name) doc.text(`PIC: ${job.delivery_contact_name} ${job.delivery_contact_number||''}`, 134, y+5)
-      y += 14
-    }
+    // Pickup / Delivery side-by-side
+    const pu = `${job.pickup_address || '—'}${job.pickup_contact_name ? '\nPIC: ' + job.pickup_contact_name + (job.pickup_contact_number ? '   ' + job.pickup_contact_number : '') : ''}`
+    const dl = `${job.delivery_address || '—'}${job.delivery_contact_name ? '\nPIC: ' + job.delivery_contact_name + (job.delivery_contact_number ? '   ' + job.delivery_contact_number : '') : ''}`
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 3,
+      head: [[
+        { content: 'PICKUP',   styles: { fillColor: navy, textColor: [255,255,255], fontStyle: 'bold', fontSize: 8 } },
+        { content: 'DELIVERY', styles: { fillColor: navy, textColor: [255,255,255], fontStyle: 'bold', fontSize: 8 } },
+      ]],
+      body: [[pu, dl]],
+      columnStyles: { 0: { cellWidth: 'auto', fillColor: [245,247,250] }, 1: { cellWidth: 'auto', fillColor: [245,247,250] } },
+      styles: { fontSize: 8.5, cellPadding: 5, overflow: 'linebreak', valign: 'top' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
 
-    y += 4
-    doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(...navy)
-    doc.text('COST LINES', 14, y); y += 4
+    // Cost Lines
+    let y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('COST LINES', ml, y); y += 2
     autoTable(doc, {
       startY: y,
-      head: [['Vendor','Service','Invoice No.','Invoice Date','Amount (SGD)','Remarks']],
-      body: job.cost_lines.length ? job.cost_lines.map(l => [l.vendor,l.service,l.invoice_no,l.invoice_date||'',`$${Number(l.amount).toFixed(2)}`,l.remarks]) : [['—','','','','','']],
-      foot: [['','','','Total Cost',fmt(job.cost_sgd),'']],
-      headStyles: { fillColor: navy, fontSize: 8, fontStyle: 'bold' },
-      footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 9 },
-      styles: { fontSize: 8, cellPadding: 3 }, columnStyles: { 4: { halign: 'right' } }, margin: { left: 14, right: 14 },
+      head: [['Vendor', 'Service', 'Invoice No.', 'Invoice Date', 'Amount (SGD)', 'Remarks']],
+      body: job.cost_lines.length
+        ? job.cost_lines.map(l => [l.vendor || '—', l.service || '—', l.invoice_no || '—', l.invoice_date || '—', `$${Number(l.amount).toFixed(2)}`, l.remarks || ''])
+        : [['—', '', '', '', '', '']],
+      foot: [['', '', '', 'Total Cost', fmt(job.cost_sgd), '']],
+      headStyles: { fillColor: [55, 88, 120], fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 4: { halign: 'right', fontStyle: 'bold', cellWidth: 28 }, 5: { cellWidth: 32 } },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y = doc.lastAutoTable.finalY + 8
-    doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(...navy)
-    doc.text('BILLING LINES', 14, y); y += 4
+
+    // Billing Lines
+    y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text('BILLING LINES', ml, y); y += 2
     autoTable(doc, {
       startY: y,
-      head: [['Service','Unit','Rate (SGD)','Qty','Total (SGD)','Remarks']],
-      body: job.billing_lines.length ? job.billing_lines.map(l => [l.service,l.unit,`$${Number(l.rate).toFixed(2)}`,l.qty,fmt(l.total),l.remarks]) : [['—','','','','','']],
-      foot: [['','','','Total Sale',fmt(job.sale_sgd),'']],
-      headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold' },
-      footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 9 },
-      styles: { fontSize: 8, cellPadding: 3 }, columnStyles: { 2: { halign: 'right' }, 4: { halign: 'right' } }, margin: { left: 14, right: 14 },
+      head: [['Service', 'Unit', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
+      body: job.billing_lines.length
+        ? job.billing_lines.map(l => [l.service || '—', l.unit || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt(l.total), l.remarks || ''])
+        : [['—', '', '', '', '', '']],
+      foot: [['', '', '', 'Total Sale', fmt(job.sale_sgd), '']],
+      headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 2: { halign: 'right', cellWidth: 28 }, 4: { halign: 'right', fontStyle: 'bold', cellWidth: 28 }, 5: { cellWidth: 32 } },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y = doc.lastAutoTable.finalY + 8
+
+    // P&L Summary
+    y = doc.lastAutoTable.finalY + 5
     autoTable(doc, {
       startY: y,
-      body: [['Total Cost',fmt(job.cost_sgd)],['Total Sale',fmt(job.sale_sgd)],['Profit',fmt(job.profit_sgd)],['GP Margin',`${Number(job.gp_percent||0).toFixed(1)}%${job.gp_override != null ? ' (manual)' : ''}`]],
-      styles: { fontSize: 9, cellPadding: 3 },
-      columnStyles: { 0: { fontStyle:'bold', fillColor:[245,247,250], cellWidth: 140 }, 1: { halign:'right', fontStyle:'bold', cellWidth: 40 } },
-      margin: { left: pw - 14 - 180, right: 14 },
+      body: [
+        ['Total Cost',  fmt(job.cost_sgd)],
+        ['Total Sale',  fmt(job.sale_sgd)],
+        ['Profit',      fmt(job.profit_sgd)],
+        ['GP Margin',   `${Number(job.gp_percent||0).toFixed(1)}%${job.gp_override != null ? '  (manual)' : ''}`],
+      ],
+      styles: { fontSize: 9, cellPadding: 4 },
+      columnStyles: {
+        0: { fontStyle: 'bold', fillColor: [237,242,248], textColor: navy, cellWidth: 140 },
+        1: { halign: 'right', fontStyle: 'bold', cellWidth: 42 },
+      },
+      margin: { left: pw - mr - 182, right: mr },
+      tableWidth: 182,
     })
+
     const totalPages = doc.internal.getNumberOfPages()
     for (let p = 1; p <= totalPages; p++) {
-      doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150,150,150)
-      doc.text(`Generated ${new Date().toLocaleDateString('en-SG')} — Zhenghe Logistics Pte Ltd`, 14, 290)
-      doc.text(`Page ${p} of ${totalPages}`, pw - 14, 290, { align: 'right' })
+      doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+      doc.text(`Generated ${new Date().toLocaleDateString('en-SG')} — Zhenghe Logistics Pte Ltd`, ml, 290)
+      doc.text(`Page ${p} of ${totalPages}`, pw - mr, 290, { align: 'right' })
     }
-    doc.save(`ZHL_${job.job_number.replace('/','-')}_Costing.pdf`)
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_Costing.pdf`)
   }
 
   // ── Accounts Reference PDF (billing + cost for accounts team) ─────────────
   function exportAccountsPDF() {
     const doc = new jsPDF('p', 'mm', 'a4')
-    const pw = 210
-    let y = 15
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const lw = 30, vw = 61
 
     // Header
     doc.setFillColor(...blue)
-    doc.rect(0, 0, pw, 26, 'F')
+    doc.rect(0, 0, pw, 30, 'F')
     doc.setTextColor(255, 255, 255)
     doc.setFontSize(15); doc.setFont('helvetica', 'bold')
-    doc.text('ZHENGHE LOGISTICS PTE LTD', 14, 11)
+    doc.text('ZHENGHE LOGISTICS PTE LTD', ml, 12)
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics  |  info@zhenghe.com.sg', ml, 21)
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold')
+    doc.text('ACCOUNTS REFERENCE', pw - mr, 12, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text('Freight Forwarding & Logistics | info@zhenghe.com.sg', 14, 18)
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold')
-    doc.text('ACCOUNTS REFERENCE', pw - 14, 11, { align: 'right' })
-    doc.setFontSize(8); doc.setFont('helvetica', 'normal')
-    doc.text(`Prepared: ${new Date().toLocaleDateString('en-SG')}`, pw - 14, 18, { align: 'right' })
-    y = 34
+    doc.text(`Prepared: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 21, { align: 'right' })
 
-    // Job summary strip
-    doc.setFillColor(245, 247, 250)
-    doc.roundedRect(14, y, pw - 28, 22, 2, 2, 'F')
-    const stripItems = [
-      ['Job No.', job.job_number],
-      ['Cust. Ref', job.customer_ref || '—'],
-      ['Shipper', job.shipper || '—'],
-      ['Consignee', job.consignee || '—'],
-      ['Mode', job.mode || '—'],
-      ['Deadline', job.deadline_date || '—'],
+    // Job info — autoTable so long names wrap
+    const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
+    const valCol   = { cellWidth: vw }
+    const infoRows = [
+      ['Job No.',      job.job_number,             'Mode',     job.mode || '—'],
+      ['Customer Ref', job.customer_ref || '—',    'Agent',    job.agent || '—'],
+      ['Shipper',      job.shipper || '—',          'Deadline', job.deadline_date || '—'],
+      ['Consignee',    job.consignee || '—',        'Status',   job.status || '—'],
     ]
-    const colW = (pw - 28) / 3
-    stripItems.forEach(([label, val], i) => {
-      const col = i % 3, row = Math.floor(i / 3)
-      const x = 16 + col * colW
-      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text(label, x, y + 6 + row * 9)
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-      doc.text(String(val), x + 18, y + 6 + row * 9)
+    if (job.customer_name) infoRows.push(['Customer', job.customer_name, 'Cust. Email', job.customer_email || '—'])
+    autoTable(doc, {
+      startY: 35,
+      body: infoRows,
+      columnStyles: { 0: labelCol, 1: valCol, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y += 28
 
-    // BILLING section (what customer owes)
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
-    doc.text('BILLING TO CUSTOMER', 14, y); y += 4
+    // Billing to customer
+    let y = doc.lastAutoTable.finalY + 6
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text('BILLING TO CUSTOMER', ml, y); y += 2
     const totalSale = job.billing_lines.reduce((s, l) => s + (l.rate||0)*(l.qty||1), 0)
     autoTable(doc, {
       startY: y,
       head: [['#', 'Service', 'Unit', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
       body: job.billing_lines.length
-        ? job.billing_lines.map((l, i) => [i+1, l.service, l.unit, `$${Number(l.rate).toFixed(2)}`, l.qty, fmt((l.rate||0)*(l.qty||1)), l.remarks||''])
+        ? job.billing_lines.map((l, i) => [i+1, l.service || '—', l.unit || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt((l.rate||0)*(l.qty||1)), l.remarks || ''])
         : [['', 'No billing lines', '', '', '', '', '']],
-      foot: [['', '', '', '', '', fmt(totalSale), '']],
+      foot: [['', '', '', '', 'Total Sale', fmt(totalSale), '']],
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
-      footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 9 },
-      styles: { fontSize: 8, cellPadding: 3 },
-      columnStyles: { 0:{cellWidth:8}, 3:{halign:'right'}, 5:{halign:'right', fontStyle:'bold'} },
-      margin: { left: 14, right: 14 },
+      footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 0:{cellWidth:8}, 3:{halign:'right', cellWidth:26}, 4:{cellWidth:14}, 5:{halign:'right', fontStyle:'bold', cellWidth:28} },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y = doc.lastAutoTable.finalY + 10
 
-    // COST section (what we owe vendors)
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-    doc.text('VENDOR COSTS', 14, y); y += 4
+    // Vendor costs
+    y = doc.lastAutoTable.finalY + 6
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('VENDOR COSTS', ml, y); y += 2
     const totalCost = job.cost_lines.reduce((s, l) => s + (l.amount||0), 0)
     autoTable(doc, {
       startY: y,
       head: [['#', 'Vendor', 'Service', 'Invoice No.', 'Invoice Date', 'Amount (SGD)', 'Remarks']],
       body: job.cost_lines.length
-        ? job.cost_lines.map((l, i) => [i+1, l.vendor, l.service, l.invoice_no||'—', l.invoice_date||'—', fmt(l.amount), l.remarks||''])
+        ? job.cost_lines.map((l, i) => [i+1, l.vendor || '—', l.service || '—', l.invoice_no || '—', l.invoice_date || '—', fmt(l.amount), l.remarks || ''])
         : [['', 'No cost lines', '', '', '', '', '']],
-      foot: [['', '', '', '', '', fmt(totalCost), '']],
-      headStyles: { fillColor: navy, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
-      footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 9 },
-      styles: { fontSize: 8, cellPadding: 3 },
-      columnStyles: { 0:{cellWidth:8}, 5:{halign:'right', fontStyle:'bold'} },
-      margin: { left: 14, right: 14 },
+      foot: [['', '', '', '', 'Total Cost', fmt(totalCost), '']],
+      headStyles: { fillColor: [55, 88, 120], fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 0:{cellWidth:8}, 4:{cellWidth:22}, 5:{halign:'right', fontStyle:'bold', cellWidth:28} },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y = doc.lastAutoTable.finalY + 10
 
-    // P&L Summary box
+    // P&L summary (autoTable instead of manual box)
+    y = doc.lastAutoTable.finalY + 6
     const profit = totalSale - totalCost
     const gp = totalSale > 0 ? (profit/totalSale)*100 : 0
     const gpDisplay = job.gp_override != null ? job.gp_override : gp
-    doc.setFillColor(...navy)
-    doc.roundedRect(pw - 14 - 90, y, 90, 36, 2, 2, 'F')
-    doc.setTextColor(255,255,255); doc.setFontSize(8); doc.setFont('helvetica','bold')
-    const summary = [['Total Sale', fmt(totalSale)], ['Total Cost', fmt(totalCost)], ['Profit', fmt(profit)], ['GP Margin', `${gpDisplay.toFixed(1)}%`]]
-    summary.forEach(([label, val], i) => {
-      doc.setFont('helvetica','bold'); doc.text(label, pw - 14 - 88, y + 7 + i * 7)
-      doc.setFont('helvetica','normal'); doc.text(val, pw - 16, y + 7 + i * 7, { align: 'right' })
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Total Sale',  fmt(totalSale)],
+        ['Total Cost',  fmt(totalCost)],
+        ['Profit',      fmt(profit)],
+        ['GP Margin',   `${gpDisplay.toFixed(1)}%`],
+      ],
+      styles: { fontSize: 9.5, cellPadding: 5 },
+      columnStyles: {
+        0: { fontStyle: 'bold', fillColor: navy, textColor: [255,255,255], cellWidth: 120 },
+        1: { halign: 'right', fontStyle: 'bold', fillColor: navy, textColor: [255,255,255], cellWidth: 62 },
+      },
+      margin: { left: pw - mr - 182, right: mr },
+      tableWidth: 182,
     })
 
     const totalPages = doc.internal.getNumberOfPages()
     for (let p = 1; p <= totalPages; p++) {
-      doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150,150,150)
-      doc.text(`Zhenghe Logistics Pte Ltd — Accounts Reference — ${job.job_number}`, 14, 290)
-      doc.text(`Page ${p} of ${totalPages}`, pw - 14, 290, { align: 'right' })
+      doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+      doc.text(`Zhenghe Logistics Pte Ltd — Accounts Reference — ${job.job_number}`, ml, 290)
+      doc.text(`Page ${p} of ${totalPages}`, pw - mr, 290, { align: 'right' })
     }
-    doc.save(`ZHL_${job.job_number.replace('/','-')}_Accounts.pdf`)
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_Accounts.pdf`)
   }
 
   // ── Pickup Request Order PDF ──────────────────────────────────────────────
   function exportPickupOrder() {
     const doc = new jsPDF('p', 'mm', 'a4')
-    const pw = 210
-    let y = 15
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const lw = 35
 
     doc.setFillColor(...navy)
-    doc.rect(0, 0, pw, 28, 'F')
+    doc.rect(0, 0, pw, 30, 'F')
     doc.setTextColor(255, 255, 255)
     doc.setFontSize(15); doc.setFont('helvetica', 'bold')
-    doc.text('ZHENGHE LOGISTICS PTE LTD', 14, 11)
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text('Tel: +65 6123 4567  |  info@zhenghe.com.sg', 14, 18)
+    doc.text('ZHENGHE LOGISTICS PTE LTD', ml, 12)
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
+    doc.text('info@zhenghe.com.sg', ml, 21)
     doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-    doc.text('PICKUP REQUEST ORDER', pw - 14, 11, { align: 'right' })
+    doc.text('PICKUP REQUEST ORDER', pw - mr, 12, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text(`Date: ${new Date().toLocaleDateString('en-SG')}`, pw - 14, 18, { align: 'right' })
-    y = 36
+    doc.text(`Date: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 21, { align: 'right' })
 
-    // Job ref strip
-    doc.setFillColor(245, 247, 250)
-    doc.roundedRect(14, y, pw - 28, 16, 2, 2, 'F')
-    const refs = [['Job No.', job.job_number], ['Customer Ref', job.customer_ref||'—'], ['Mode', job.mode||'—'], ['Status', job.status||'—']]
-    refs.forEach(([label, val], i) => {
-      const x = 18 + i * 46
-      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text(label, x, y + 5)
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-      doc.text(String(val), x, y + 11)
+    // Job ref
+    const labelCol = { fontStyle: 'bold', fillColor: [237,242,248], textColor: navy, cellWidth: lw }
+    autoTable(doc, {
+      startY: 35,
+      body: [
+        ['Job No.', job.job_number, 'Customer Ref', job.customer_ref || '—'],
+        ['Mode',    job.mode || '—', 'Status',       job.status || '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y += 22
 
     // Pickup details
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-    doc.text('PICKUP DETAILS', 14, y); y += 2
-    doc.setDrawColor(...navy); doc.line(14, y, pw - 14, y); y += 5
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-    const pickupRows = [
-      ['Shipper', job.shipper||'—'],
-      ['Pickup Address', job.pickup_address||'—'],
-      ['Contact Name', job.pickup_contact_name||'—'],
-      ['Contact Number', job.pickup_contact_number||'—'],
-    ]
-    pickupRows.forEach(([label, val]) => {
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text(label + ':', 14, y)
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-      doc.text(val, 55, y); y += 7
-    })
-    y += 4
-
-    // Cargo details
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-    doc.text('CARGO DETAILS', 14, y); y += 2
-    doc.line(14, y, pw - 14, y); y += 5
+    let y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('PICKUP DETAILS', ml, y); y += 2
     autoTable(doc, {
       startY: y,
-      head: [['Consignee', 'Commodity', 'Packages', 'Weight (kg)', 'Dimensions', 'CBM']],
-      body: [[
-        job.consignee||'—', job.commodity||'—',
-        job.packages??'—', job.weight ? `${job.weight} kg` : '—',
-        job.dimensions||'—', job.cbm??'—'
-      ]],
-      headStyles: { fillColor: navy, fontSize: 8 },
-      styles: { fontSize: 9, cellPadding: 4 },
-      margin: { left: 14, right: 14 },
+      body: [
+        ['Shipper',        { content: job.shipper || '—',               colSpan: 3 }],
+        ['Pickup Address', { content: job.pickup_address || '—',        colSpan: 3 }],
+        ['Contact Name',   job.pickup_contact_name || '—', 'Contact No.', job.pickup_contact_number || '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y = doc.lastAutoTable.finalY + 8
+
+    // Cargo
+    y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('CARGO DETAILS', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Consignee',  { content: job.consignee || '—', colSpan: 3 }],
+        ['Commodity',  { content: job.commodity || '—', colSpan: 3 }],
+        ['Packages', job.packages != null ? String(job.packages) : '—', 'Weight', job.weight ? `${job.weight} kg` : '—'],
+        ['Dimensions', job.dimensions || '—', 'CBM', job.cbm != null ? String(job.cbm) : '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
 
     if (job.notes) {
-      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text('SPECIAL INSTRUCTIONS', 14, y); y += 2
-      doc.line(14, y, pw - 14, y); y += 5
-      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-      doc.text(doc.splitTextToSize(job.notes, pw - 28), 14, y)
-      y += 14
+      y = doc.lastAutoTable.finalY + 5
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('SPECIAL INSTRUCTIONS', ml, y); y += 2
+      autoTable(doc, {
+        startY: y,
+        body: [[{ content: job.notes, styles: { fontSize: 8.5 } }]],
+        styles: { overflow: 'linebreak', cellPadding: 5, fillColor: [255,252,230] },
+        margin: { left: ml, right: mr },
+        tableWidth: tw,
+      })
     }
 
-    y = Math.max(y, 230)
-    doc.setDrawColor(180, 180, 180)
-    doc.line(14, y, 90, y); doc.line(120, y, pw - 14, y)
-    doc.setFontSize(8); doc.setTextColor(120, 120, 120)
-    doc.text('Driver Signature / Name', 14, y + 5)
-    doc.text('Date / Time Collected', 120, y + 5)
-
+    y = Math.max(doc.lastAutoTable.finalY + 12, 228)
+    doc.setDrawColor(160, 160, 160)
+    doc.line(ml, y, 95, y); doc.line(115, y, pw - mr, y)
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100)
+    doc.text('Driver Signature / Name', ml, y + 5)
+    doc.text('Date / Time Collected', 115, y + 5)
     doc.setFontSize(7); doc.setTextColor(150, 150, 150)
-    doc.text(`Zhenghe Logistics Pte Ltd — Pickup Request — ${job.job_number} — Generated ${new Date().toLocaleDateString('en-SG')}`, 14, 290)
-    doc.save(`ZHL_${job.job_number.replace('/','-')}_PickupOrder.pdf`)
+    doc.text(`Zhenghe Logistics Pte Ltd — Pickup Request — ${job.job_number} — ${new Date().toLocaleDateString('en-SG')}`, ml, 290)
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_PickupOrder.pdf`)
   }
 
   // ── Delivery Order PDF ────────────────────────────────────────────────────
   function exportDeliveryOrder() {
     const doc = new jsPDF('p', 'mm', 'a4')
-    const pw = 210
-    let y = 15
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const lw = 35
 
     doc.setFillColor(...blue)
-    doc.rect(0, 0, pw, 28, 'F')
+    doc.rect(0, 0, pw, 30, 'F')
     doc.setTextColor(255, 255, 255)
     doc.setFontSize(15); doc.setFont('helvetica', 'bold')
-    doc.text('ZHENGHE LOGISTICS PTE LTD', 14, 11)
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text('Tel: +65 6123 4567  |  info@zhenghe.com.sg', 14, 18)
+    doc.text('ZHENGHE LOGISTICS PTE LTD', ml, 12)
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
+    doc.text('info@zhenghe.com.sg', ml, 21)
     doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-    doc.text('DELIVERY ORDER', pw - 14, 11, { align: 'right' })
+    doc.text('DELIVERY ORDER', pw - mr, 12, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text(`DO Date: ${new Date().toLocaleDateString('en-SG')}`, pw - 14, 18, { align: 'right' })
-    y = 36
+    doc.text(`DO Date: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 21, { align: 'right' })
 
-    // Job ref strip
-    doc.setFillColor(245, 247, 250)
-    doc.roundedRect(14, y, pw - 28, 16, 2, 2, 'F')
-    const refs = [['Job No.', job.job_number], ['Customer Ref', job.customer_ref||'—'], ['Mode', job.mode||'—'], ['Date Out', job.date_out||'—']]
-    refs.forEach(([label, val], i) => {
-      const x = 18 + i * 46
-      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text(label, x, y + 5)
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-      doc.text(String(val), x, y + 11)
+    const labelCol = { fontStyle: 'bold', fillColor: [237,242,248], textColor: navy, cellWidth: lw }
+    autoTable(doc, {
+      startY: 35,
+      body: [
+        ['Job No.',      job.job_number,            'Customer Ref', job.customer_ref || '—'],
+        ['Mode',         job.mode || '—',           'Date Out',     job.date_out || '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y += 22
 
     // Delivery details
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
-    doc.text('DELIVERY DETAILS', 14, y); y += 2
-    doc.setDrawColor(...blue); doc.line(14, y, pw - 14, y); y += 5
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-    const delivRows = [
-      ['Consignee', job.consignee||'—'],
-      ['Delivery Address', job.delivery_address||'—'],
-      ['Contact Name', job.delivery_contact_name||'—'],
-      ['Contact Number', job.delivery_contact_number||'—'],
-    ]
-    delivRows.forEach(([label, val]) => {
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text(label + ':', 14, y)
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-      doc.text(val, 55, y); y += 7
-    })
-    y += 4
-
-    // Cargo details
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
-    doc.text('CARGO DESCRIPTION', 14, y); y += 2
-    doc.setDrawColor(...blue); doc.line(14, y, pw - 14, y); y += 5
+    let y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text('DELIVERY DETAILS', ml, y); y += 2
     autoTable(doc, {
       startY: y,
-      head: [['Shipper', 'Commodity', 'Packages', 'Weight (kg)', 'Dimensions', 'CBM']],
-      body: [[
-        job.shipper||'—', job.commodity||'—',
-        job.packages??'—', job.weight ? `${job.weight} kg` : '—',
-        job.dimensions||'—', job.cbm??'—'
-      ]],
-      headStyles: { fillColor: blue, fontSize: 8 },
-      styles: { fontSize: 9, cellPadding: 4 },
-      margin: { left: 14, right: 14 },
+      body: [
+        ['Consignee',        { content: job.consignee || '—',         colSpan: 3 }],
+        ['Delivery Address', { content: job.delivery_address || '—',  colSpan: 3 }],
+        ['Contact Name',     job.delivery_contact_name || '—', 'Contact No.', job.delivery_contact_number || '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
     })
-    y = doc.lastAutoTable.finalY + 8
+
+    // Cargo
+    y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('CARGO DESCRIPTION', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Shipper',    { content: job.shipper || '—',    colSpan: 3 }],
+        ['Commodity',  { content: job.commodity || '—',  colSpan: 3 }],
+        ['Packages',  job.packages != null ? String(job.packages) : '—', 'Weight', job.weight ? `${job.weight} kg` : '—'],
+        ['Dimensions', job.dimensions || '—', 'CBM', job.cbm != null ? String(job.cbm) : '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
 
     if (job.notes) {
-      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text('DELIVERY NOTES', 14, y); y += 2
-      doc.setDrawColor(...navy); doc.line(14, y, pw - 14, y); y += 5
-      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-      doc.text(doc.splitTextToSize(job.notes, pw - 28), 14, y)
-      y += 14
+      y = doc.lastAutoTable.finalY + 5
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('DELIVERY NOTES', ml, y); y += 2
+      autoTable(doc, {
+        startY: y,
+        body: [[{ content: job.notes, styles: { fontSize: 8.5 } }]],
+        styles: { overflow: 'linebreak', cellPadding: 5, fillColor: [255,252,230] },
+        margin: { left: ml, right: mr },
+        tableWidth: tw,
+      })
     }
 
-    y = Math.max(y, 220)
-    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-    doc.text('ACKNOWLEDGEMENT OF RECEIPT', 14, y); y += 6
-    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0)
-    doc.text('I/We confirm that the above cargo has been received in good condition.', 14, y); y += 10
-    doc.setDrawColor(180, 180, 180)
-    doc.line(14, y, 90, y); doc.line(120, y, pw - 14, y)
-    doc.text('Receiver Signature / Name', 14, y + 5)
-    doc.text('Date / Time Received', 120, y + 5)
-    doc.line(14, y + 14, 90, y + 14)
-    doc.text('Company Stamp', 14, y + 19)
-
+    y = Math.max(doc.lastAutoTable.finalY + 10, 215)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('ACKNOWLEDGEMENT OF RECEIPT', ml, y); y += 6
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80)
+    doc.text('I/We confirm that the above cargo has been received in good condition.', ml, y); y += 12
+    doc.setDrawColor(160, 160, 160)
+    doc.line(ml, y, 95, y); doc.line(115, y, pw - mr, y)
+    doc.setFontSize(8); doc.setTextColor(100, 100, 100)
+    doc.text('Receiver Signature / Name', ml, y + 5)
+    doc.text('Date / Time Received', 115, y + 5)
+    doc.line(ml, y + 16, 80, y + 16)
+    doc.text('Company Stamp', ml, y + 21)
     doc.setFontSize(7); doc.setTextColor(150, 150, 150)
-    doc.text(`Zhenghe Logistics Pte Ltd — Delivery Order — ${job.job_number} — Generated ${new Date().toLocaleDateString('en-SG')}`, 14, 290)
-    doc.save(`ZHL_${job.job_number.replace('/','-')}_DO.pdf`)
+    doc.text(`Zhenghe Logistics Pte Ltd — Delivery Order — ${job.job_number} — ${new Date().toLocaleDateString('en-SG')}`, ml, 290)
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_DO.pdf`)
   }
 
   // ─── RENDER ────────────────────────────────────────────────────────────────
