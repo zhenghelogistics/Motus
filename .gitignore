@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Database & uploads (local only)
+backend/zhl.db
+backend/zhl.db-shm
+backend/zhl.db-wal
+backend/uploads/
+
+# Environment variables (never commit)
+backend/.env
+.env
+
+# Build output
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
