@@ -139,9 +139,25 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
 app.use(cors());
 app.use(express.json());
 
+// Vercel rewrites /api/foo → /api/index?path=foo — restore the original path
+app.use((req, res, next) => {
+  if (req.query.path !== undefined) {
+    const slug = Array.isArray(req.query.path) ? req.query.path.join('/') : req.query.path;
+    const rest = { ...req.query };
+    delete rest.path;
+    const qs = new URLSearchParams(rest).toString();
+    req.url = '/api/' + slug + (qs ? '?' + qs : '');
+  }
+  console.log(`[ZHL] ${req.method} ${req.url}`);
+  next();
+});
+
 app.use(async (req, res, next) => {
   try { await ensureDB(); next(); }
-  catch (err) { res.status(500).json({ error: 'Database init failed: ' + err.message }); }
+  catch (err) {
+    console.error('[ZHL] DB init error:', err.message);
+    res.status(500).json({ error: 'Database init failed: ' + err.message });
+  }
 });
 
 // ─── JOBS ───────────────────────────────────────────────────────────────────
