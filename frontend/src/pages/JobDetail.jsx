@@ -41,6 +41,7 @@ export default function JobDetail() {
   const [voiding, setVoiding] = useState(false)
   const [gpEditing, setGpEditing] = useState(false)
   const [gpInput, setGpInput] = useState('')
+  const [docUploading, setDocUploading] = useState(false)
   const invoiceRef = useRef()
 
   function loadJob() {
@@ -159,8 +160,15 @@ export default function JobDetail() {
   // ── Documents ─────────────────────────────────────────────────────────────
   async function handleDocUpload(file, docType) {
     if (!file) return
-    const r = await uploadDocument(id, file, docType || 'Other')
-    setJob(j => ({ ...j, documents: [r.data, ...j.documents] }))
+    setDocUploading(true)
+    try {
+      const r = await uploadDocument(id, file, docType || 'Other')
+      setJob(j => ({ ...j, documents: [r.data, ...(j.documents || [])] }))
+    } catch (err) {
+      alert('Upload failed: ' + (err.response?.data?.error || err.message))
+    } finally {
+      setDocUploading(false)
+    }
   }
   async function removeDoc(did) {
     if (!confirm('Delete this document?')) return
@@ -846,9 +854,12 @@ export default function JobDetail() {
       <div className="card">
         <div className="section-title">
           Documents
-          <DocUploadButton onUpload={handleDocUpload} />
+          <div className="flex-center gap-2">
+            {docUploading && <span className="spinner spinner-dark" style={{ width: 16, height: 16 }}></span>}
+            <DocUploadButton onUpload={handleDocUpload} disabled={docUploading} />
+          </div>
         </div>
-        <DocDropZone onUpload={handleDocUpload} />
+        <DocDropZone onUpload={handleDocUpload} disabled={docUploading} />
         {(job.documents||[]).length > 0 && (
           <ul className="doc-list" style={{ marginTop: 12 }}>
             {job.documents.map(d => (
@@ -1155,27 +1166,29 @@ function BillingTable({ lines, onSave, onDelete }) {
   )
 }
 
-function DocUploadButton({ onUpload }) {
+function DocUploadButton({ onUpload, disabled }) {
   const [docType, setDocType] = useState('CI')
   const ref = useRef()
   return (
     <div className="flex gap-2">
-      <select className="form-control form-control-sm" value={docType} onChange={e => setDocType(e.target.value)} style={{ width:80 }}>
+      <select className="form-control form-control-sm" value={docType} onChange={e => setDocType(e.target.value)} style={{ width:80 }} disabled={disabled}>
         {DOC_TYPES.map(t => <option key={t}>{t}</option>)}
       </select>
-      <label className="btn btn-outline btn-sm" style={{ cursor:'pointer' }}>
-        ⬆ Upload
-        <input ref={ref} type="file" style={{ display:'none' }} onChange={e => { onUpload(e.target.files[0], docType); ref.current.value='' }} />
+      <label className={`btn btn-outline btn-sm${disabled ? ' disabled' : ''}`} style={{ cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1 }}>
+        {disabled ? 'Uploading...' : '⬆ Upload'}
+        <input ref={ref} type="file" style={{ display:'none' }} disabled={disabled}
+          onChange={e => { if (!disabled) { onUpload(e.target.files[0], docType); ref.current.value='' } }} />
       </label>
     </div>
   )
 }
 
-function DocDropZone({ onUpload }) {
+function DocDropZone({ onUpload, disabled }) {
   const [dragOver, setDragOver] = useState(false)
   const [docType, setDocType] = useState('Other')
   function handleDrop(e) {
     e.preventDefault(); setDragOver(false)
+    if (disabled) return
     const file = e.dataTransfer.files[0]
     if (file) onUpload(file, docType)
   }
@@ -1189,10 +1202,11 @@ function DocDropZone({ onUpload }) {
           </label>
         ))}
       </div>
-      <div className={`drop-zone${dragOver?' drag-over':''}`}
-        onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+      <div className={`drop-zone${dragOver && !disabled ? ' drag-over':''}`}
+        style={disabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}
+        onDragOver={e => { e.preventDefault(); if (!disabled) setDragOver(true) }}
         onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
-        Drag & drop CI, PL, DO, or any file here
+        {disabled ? 'Uploading...' : 'Drag & drop CI, PL, DO, or any file here'}
       </div>
     </div>
   )
