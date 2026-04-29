@@ -182,7 +182,7 @@ export default function MovementTracker() {
           ? <div style={{ padding: 40, textAlign: 'center' }}><span className="spinner spinner-dark" style={{width:28,height:28}}></span></div>
           : jobs.length === 0
             ? <div className="empty-state"><div className="empty-state-icon">📋</div><h3>No jobs found</h3><p>Create a new job to get started.</p></div>
-            : <table>
+            : <table className="spreadsheet">
                 <thead>
                   <tr>
                     {COLS.map(c => (

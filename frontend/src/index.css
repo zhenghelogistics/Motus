@@ -597,6 +597,22 @@ select.form-control { cursor: pointer; }
 .modal-body { padding: 24px; }
 .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border-solid); display: flex; justify-content: flex-end; gap: 10px; }
 
+/* ─── Spreadsheet Table (Movement Tracker) ───────────────────────────────── */
+.spreadsheet td {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.spreadsheet th {
+  padding: 8px 10px;
+  font-size: 10px;
+}
+.spreadsheet tbody tr:nth-child(even) td {
+  background: rgba(4, 44, 83, 0.018);
+}
+.spreadsheet tbody tr:hover td {
+  background: rgba(24, 95, 165, 0.05) !important;
+}
+
 /* ─── GP% Colors ─────────────────────────────────────────────────────────── */
 .gp-high { color: var(--green); font-weight: 700; }
 .gp-mid { color: var(--blue); font-weight: 700; }

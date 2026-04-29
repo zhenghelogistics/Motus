@@ -33,7 +33,6 @@ export default function JobDetail() {
   const [job, setJob] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [editingInfo, setEditingInfo] = useState(false)
   const [infoForm, setInfoForm] = useState({})
   const [invoiceParsing, setInvoiceParsing] = useState(false)
   const [sendToAccountsModal, setSendToAccountsModal] = useState(false)
@@ -45,16 +44,14 @@ export default function JobDetail() {
     return getJob(id).then(r => { setJob(r.data); setLoading(false) })
   }
   useEffect(() => { loadJob() }, [id])
+  useEffect(() => { if (job) setInfoForm(f => f.id === job.id ? f : { ...job }) }, [job?.id])
 
-  // ── Info editing ──────────────────────────────────────────────────────────
-  function startEdit() { setInfoForm({ ...job }); setEditingInfo(true) }
-
+  // ── Info editing (always-on, save on button click) ────────────────────────
   async function saveInfo() {
     setSaving(true)
     try {
       const r = await updateJob(id, infoForm)
       setJob(j => ({ ...j, ...r.data }))
-      setEditingInfo(false)
     } finally { setSaving(false) }
   }
 
@@ -409,23 +406,17 @@ export default function JobDetail() {
         <div className="flex gap-2">
           <button className="btn btn-ghost btn-sm" onClick={exportPDF}>↓ Costing PDF</button>
           <button className="btn btn-outline btn-sm" onClick={exportAccountsPDF}>📄 Accounts PDF</button>
-          {!editingInfo
-            ? <button className="btn btn-outline btn-sm" onClick={startEdit}>✎ Edit</button>
-            : <>
-                <button className="btn btn-ghost btn-sm" onClick={() => setEditingInfo(false)}>Cancel</button>
-                <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving}>
-                  {saving ? <span className="spinner"></span> : '✓ Save'}
-                </button>
-              </>
-          }
+          <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving}>
+            {saving ? <><span className="spinner"></span> Saving...</> : '✓ Save Changes'}
+          </button>
           <button className="btn btn-danger btn-sm" onClick={handleDelete}>Delete</button>
         </div>
       </div>
 
-      {/* Job Info */}
+      {/* Job Info — always editable */}
       <div className="card mb-4">
         <div className="section-title">Job Information</div>
-        {!editingInfo ? <InfoView job={job} dlCls={dlCls} /> : <InfoEdit form={infoForm} setField={setInfo} />}
+        <InfoEdit form={infoForm} setField={setInfo} />
       </div>
 
       {/* Cost Lines */}
@@ -528,7 +519,7 @@ export default function JobDetail() {
               <li key={d.id} className="doc-item">
                 <div className="flex-center gap-2">
                   <span style={{ fontSize: 18 }}>📎</span>
-                  <a href={`/uploads/${d.file_path.split('/').pop()}`} target="_blank" rel="noopener noreferrer"
+                  <a href={d.file_url} target="_blank" rel="noopener noreferrer"
                     style={{ color: 'var(--blue)', fontWeight: 600, fontSize: 13 }}>{d.file_name}</a>
                   <span className="doc-type-badge">{d.doc_type}</span>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{d.upload_date?.split('T')[0]}</span>
