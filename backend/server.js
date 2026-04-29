@@ -105,6 +105,32 @@ async function initDB() {
   console.log('Database ready');
 }
 
+// ─── CBM BACKFILL ─────────────────────────────────────────────────────────────
+function calcCBMFromText(dimensions, packages) {
+  if (!dimensions) return null;
+  const m = dimensions.match(/(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)/);
+  if (!m) return null;
+  let l = parseFloat(m[1]), w = parseFloat(m[2]), h = parseFloat(m[3]);
+  const inMeters = !/cm/i.test(dimensions) && /\bm\b/i.test(dimensions);
+  if (!inMeters) { l /= 100; w /= 100; h /= 100; }
+  return parseFloat((l * w * h * (parseInt(packages) || 1)).toFixed(4));
+}
+
+async function backfillCBM() {
+  const result = await pool.query(
+    "SELECT id, dimensions, packages FROM jobs WHERE dimensions IS NOT NULL AND dimensions != '' AND cbm IS NULL"
+  );
+  let updated = 0;
+  for (const job of result.rows) {
+    const cbm = calcCBMFromText(job.dimensions, job.packages);
+    if (cbm != null) {
+      await pool.query('UPDATE jobs SET cbm = $1 WHERE id = $2', [cbm, job.id]);
+      updated++;
+    }
+  }
+  if (updated > 0) console.log(`CBM backfill: calculated and saved CBM for ${updated} existing job(s)`);
+}
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 async function enrichJob(job) {
   const costs = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM cost_lines WHERE job_id=$1', [job.id]);
@@ -539,5 +565,6 @@ app.get('/api/dashboard', async (req, res) => {
 
 // ─── START ────────────────────────────────────────────────────────────────────
 initDB()
+  .then(() => backfillCBM())
   .then(() => app.listen(PORT, () => console.log(`ZHL backend running on port ${PORT}`)))
   .catch(err => { console.error('DB init failed:', err.message); process.exit(1); });

@@ -47,7 +47,21 @@ export default function JobDetail() {
     return getJob(id).then(r => { setJob(r.data); setLoading(false) })
   }
   useEffect(() => { loadJob() }, [id])
-  useEffect(() => { if (job) setInfoForm(f => f.id === job.id ? f : { ...job }) }, [job?.id])
+  useEffect(() => {
+    if (!job || job.id === infoForm.id) return
+    const form = { ...job }
+    // Auto-populate CBM from dimensions if not stored yet
+    if (form.dimensions && (form.cbm == null || form.cbm === '')) {
+      const m = form.dimensions.match(/(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)/)
+      if (m) {
+        let l = parseFloat(m[1]), w = parseFloat(m[2]), h = parseFloat(m[3])
+        const inMeters = !/cm/i.test(form.dimensions) && /\bm\b/i.test(form.dimensions)
+        if (!inMeters) { l /= 100; w /= 100; h /= 100 }
+        form.cbm = parseFloat((l * w * h * (parseInt(form.packages) || 1)).toFixed(4))
+      }
+    }
+    setInfoForm(form)
+  }, [job?.id])
 
   // ── Info editing (always-on, save on button click) ────────────────────────
   async function saveInfo() {
@@ -464,6 +478,23 @@ export default function JobDetail() {
       tableWidth: tw,
     })
 
+    // Delivery details
+    y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('DELIVERY DETAILS', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Consignee',        { content: job.consignee || '—',            colSpan: 3 }],
+        ['Delivery Address', { content: job.delivery_address || '—',     colSpan: 3 }],
+        ['Contact Name',     job.delivery_contact_name || '—', 'Contact No.', job.delivery_contact_number || '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
     // Cargo
     y = doc.lastAutoTable.finalY + 5
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
@@ -471,7 +502,6 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: y,
       body: [
-        ['Consignee',  { content: job.consignee || '—', colSpan: 3 }],
         ['Commodity',  { content: job.commodity || '—', colSpan: 3 }],
         ['Packages', job.packages != null ? String(job.packages) : '—', 'Weight', job.weight ? `${job.weight} kg` : '—'],
         ['Dimensions', job.dimensions || '—', 'CBM', job.cbm != null ? String(job.cbm) : '—'],
