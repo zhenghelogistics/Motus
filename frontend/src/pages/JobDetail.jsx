@@ -1127,13 +1127,13 @@ function InfoEdit({ form, setField }) {
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:7 }}>
                   <span style={{ fontSize:11, fontWeight:700, color:'var(--navy)', minWidth:44 }}>Box {i+1}</span>
                   <input type="number" className="form-control form-control-sm" placeholder="L" value={box.l}
-                    onChange={e => updateBox(i,'l',e.target.value)} style={{ width:68 }} />
+                    onChange={e => updateBox(i,'l',e.target.value)} style={{ flex:1, minWidth:50 }} />
                   <span style={{ fontSize:12, color:'var(--text-muted)' }}>×</span>
                   <input type="number" className="form-control form-control-sm" placeholder="W" value={box.w}
-                    onChange={e => updateBox(i,'w',e.target.value)} style={{ width:68 }} />
+                    onChange={e => updateBox(i,'w',e.target.value)} style={{ flex:1, minWidth:50 }} />
                   <span style={{ fontSize:12, color:'var(--text-muted)' }}>×</span>
                   <input type="number" className="form-control form-control-sm" placeholder="H" value={box.h}
-                    onChange={e => updateBox(i,'h',e.target.value)} style={{ width:68 }} />
+                    onChange={e => updateBox(i,'h',e.target.value)} style={{ flex:1, minWidth:50 }} />
                   <span style={{ fontSize:11, color:'var(--text-muted)' }}>cm</span>
                   {dimBoxes.length > 1 && (
                     <button onClick={() => removeBox(i)} title="Remove box"
