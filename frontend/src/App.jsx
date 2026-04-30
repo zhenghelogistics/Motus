@@ -184,9 +184,53 @@ function Sidebar({ onCurrencyClick }) {
   )
 }
 
+function HashErrorBanner() {
+  const hash = window.location.hash
+  if (!hash.includes('error=')) return null
+  const params = new URLSearchParams(hash.replace('#', ''))
+  const desc = params.get('error_description')?.replace(/\+/g, ' ') || 'Authentication error'
+  const code = params.get('error_code')
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, #042C53 0%, #185FA5 100%)',
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: 16, padding: '40px 36px', width: '100%', maxWidth: 380,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.25)', textAlign: 'center',
+      }}>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 56, height: 56, borderRadius: 14, background: '#042C53',
+          fontSize: 20, fontWeight: 900, color: '#fff', letterSpacing: '-1px', marginBottom: 16,
+        }}>ZHL</div>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#042C53', marginBottom: 8 }}>
+          {code === 'otp_expired' ? 'Link expired' : 'Verification failed'}
+        </div>
+        <div style={{ fontSize: 13, color: '#6B7E93', marginBottom: 8, lineHeight: 1.6 }}>
+          {code === 'otp_expired'
+            ? 'This confirmation link has expired. Please sign up again to receive a new one.'
+            : desc}
+        </div>
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%', justifyContent: 'center', height: 44, marginTop: 12 }}
+          onClick={() => { window.location.href = '/' }}
+        >
+          Back to Sign In
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function AppShell() {
   const { user, loading } = useAuth()
   const [showCurrency, setShowCurrency] = useState(false)
+
+  // Supabase redirects auth errors to root with #error=... hash fragments
+  if (window.location.hash.includes('error=')) return <HashErrorBanner />
 
   // Auth callback must be accessible without a session
   if (window.location.pathname === '/auth/callback') return <AuthCallback />
