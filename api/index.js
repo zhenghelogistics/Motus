@@ -4,8 +4,6 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
-const jwt = require('jsonwebtoken');
-
 const app = express();
 
 const pool = new Pool({
@@ -19,14 +17,23 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 // ─── AUTH MIDDLEWARE ─────────────────────────────────────────────────────────
-function requireAuth(req, res, next) {
+const SUPABASE_URL = 'https://wwaupgxlzardsrxikuvj.supabase.co'
+
+async function requireAuth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Unauthorized — no token' })
   try {
-    req.user = jwt.verify(token, Buffer.from(process.env.SUPABASE_JWT_SECRET, 'base64'))
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'apikey': process.env.SUPABASE_SERVICE_KEY
+      }
+    })
+    if (!r.ok) return res.status(401).json({ error: 'Unauthorized — invalid or expired session' })
+    req.user = await r.json()
     next()
-  } catch {
-    res.status(401).json({ error: 'Unauthorized — invalid or expired session' })
+  } catch (e) {
+    res.status(401).json({ error: 'Unauthorized — ' + e.message })
   }
 }
 
