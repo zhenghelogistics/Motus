@@ -34,8 +34,12 @@ export default function Dashboard() {
     getDashboard()
       .then(r => { setData(r.data); setLoading(false) })
       .catch(err => {
-        const msg = err.response?.data?.error || err.response?.statusText || err.message || 'Unknown error'
-        setError(`${err.response?.status ? err.response.status + ' — ' : ''}${msg}`)
+        const status = err.response?.status
+        const body = err.response?.data
+        const msg = (typeof body === 'object' ? body?.error : String(body)) || err.response?.statusText || err.message || 'Unknown error'
+        const full = `[${status ?? 'no response'}] ${msg}`
+        console.error('Dashboard load failed:', full, err)
+        setError(full)
         setLoading(false)
       })
   }, [])
