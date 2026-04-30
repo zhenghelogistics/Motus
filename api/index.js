@@ -4,6 +4,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 
@@ -16,6 +17,18 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Memory storage — no disk in serverless
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+// ─── AUTH MIDDLEWARE ─────────────────────────────────────────────────────────
+function requireAuth(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '')
+  if (!token) return res.status(401).json({ error: 'Unauthorized — no token' })
+  try {
+    req.user = jwt.verify(token, process.env.SUPABASE_JWT_SECRET)
+    next()
+  } catch {
+    res.status(401).json({ error: 'Unauthorized — invalid or expired session' })
+  }
+}
 
 // ─── DB INIT (lazy, once per cold start) ────────────────────────────────────
 let _dbReady = false;
@@ -53,6 +66,11 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_contact_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_contact_number TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_email TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS void_reason TEXT DEFAULT ''`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cost_lines (
       id SERIAL PRIMARY KEY,
@@ -160,6 +178,12 @@ app.use(async (req, res, next) => {
   }
 });
 
+// ─── AUTH GUARD (all /api/* except health checks) ───────────────────────────
+app.use('/api', (req, res, next) => {
+  if (req.url === '/health' || req.url === '/dbtest') return next()
+  requireAuth(req, res, next)
+})
+
 // ─── HEALTH ─────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', db_url_set: !!process.env.DATABASE_URL });
@@ -249,7 +273,8 @@ app.put('/api/jobs/:id', async (req, res) => {
       'pickup_address','pickup_contact_name','pickup_contact_number',
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','agent','mode','status','customer_ref',
-      'deadline_date','commodity','notes','gp_override'];
+      'deadline_date','commodity','notes','gp_override',
+      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) {
