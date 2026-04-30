@@ -27,12 +27,20 @@ export function AuthProvider({ children }) {
     if (error) throw error
   }
 
+  async function signUp(email, password) {
+    if (!email.toLowerCase().endsWith('@zhenghe.com.sg')) {
+      throw new Error('Only @zhenghe.com.sg email addresses are allowed')
+    }
+    const { error } = await supabase.auth.signUp({ email, password })
+    if (error) throw error
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   )
