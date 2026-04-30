@@ -27,14 +27,21 @@ function gpClass(gp) {
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => {
-    getDashboard().then(r => { setData(r.data); setLoading(false) }).catch(() => setLoading(false))
+    getDashboard()
+      .then(r => { setData(r.data); setLoading(false) })
+      .catch(err => {
+        const msg = err.response?.data?.error || err.response?.statusText || err.message || 'Unknown error'
+        setError(`${err.response?.status ? err.response.status + ' — ' : ''}${msg}`)
+        setLoading(false)
+      })
   }, [])
 
   if (loading) return <div className="empty-state"><div className="spinner spinner-dark" style={{width:32,height:32,margin:'48px auto'}}></div></div>
-  if (!data) return <div className="alert alert-error">Failed to load dashboard.</div>
+  if (!data) return <div className="alert alert-error">Failed to load dashboard: {error}</div>
 
   const { this_month: m, by_mode, trend, upcoming_deadlines, flagged_jobs } = data
 
