@@ -10,9 +10,61 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Uploads directory
+// Uploads directory (kept for backward-compat serving of old local files)
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+// Supabase Storage
+const _projRef = (process.env.DATABASE_URL || '').match(/postgres\.([a-z0-9]+)/)?.[1];
+const SUPABASE_URL = process.env.SUPABASE_URL || (_projRef ? `https://${_projRef}.supabase.co` : null);
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const STORAGE_BUCKET = 'documents';
+
+async function initStorage() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) { console.log('Supabase Storage: not configured'); return; }
+  const check = await fetch(`${SUPABASE_URL}/storage/v1/bucket/${STORAGE_BUCKET}`, {
+    headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` }
+  });
+  if (check.ok) { console.log('Supabase Storage bucket ready:', STORAGE_BUCKET); return; }
+  if (check.status === 404) {
+    const create = await fetch(`${SUPABASE_URL}/storage/v1/bucket`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: STORAGE_BUCKET, name: STORAGE_BUCKET, public: true })
+    });
+    if (create.ok) console.log('Created Supabase Storage bucket:', STORAGE_BUCKET);
+    else { const e = await create.json(); console.warn('Could not create bucket:', e); }
+  }
+}
+
+async function uploadToStorage(buffer, filename, mimetype) {
+  const safe = `${Date.now()}-${Math.round(Math.random()*1e9)}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${safe}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': mimetype || 'application/octet-stream', 'x-upsert': 'false' },
+    body: buffer,
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error('Storage upload failed: ' + JSON.stringify(e)); }
+  return `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${safe}`;
+}
+
+async function deleteFromStorage(fileUrl) {
+  if (!fileUrl || !fileUrl.startsWith('http')) return;
+  const prefix = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/`;
+  if (!fileUrl.startsWith(prefix)) return;
+  const filePath = fileUrl.slice(prefix.length);
+  await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefixes: [filePath] }),
+  }).catch(() => {});
+}
+
+function getFileUrl(d) {
+  if (!d.file_path) return null;
+  if (d.file_path.startsWith('http')) return d.file_path;
+  return `/uploads/${path.basename(d.file_path)}`;
+}
 
 // PostgreSQL pool (Supabase)
 const pool = new Pool({
@@ -23,12 +75,8 @@ const pool = new Pool({
 // Anthropic client
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Multer
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.round(Math.random()*1e9) + path.extname(file.originalname))
-});
-const upload = multer({ storage, limits: { fileSize: 20*1024*1024 } });
+// Multer — memory storage; files go to Supabase Storage, not local disk
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20*1024*1024 } });
 
 // ─── DB INIT ──────────────────────────────────────────────────────────────────
 async function initDB() {
@@ -227,7 +275,7 @@ app.get('/api/jobs/:id', async (req, res) => {
     const billing_raw = (await pool.query('SELECT * FROM billing_lines WHERE job_id=$1 ORDER BY id', [job.id])).rows;
     const billing_lines = billing_raw.map(b => ({ ...b, total: parseFloat(((b.rate||0)*(b.qty||1)).toFixed(2)) }));
     const docRows = (await pool.query('SELECT * FROM documents WHERE job_id=$1 ORDER BY upload_date DESC', [job.id])).rows;
-    const documents = docRows.map(d => ({ ...d, file_url: `/uploads/${path.basename(d.file_path)}` }));
+    const documents = docRows.map(d => ({ ...d, file_url: getFileUrl(d) }));
     res.json({ ...await enrichJob(job), cost_lines, billing_lines, documents });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -258,7 +306,7 @@ app.put('/api/jobs/:id', async (req, res) => {
 app.delete('/api/jobs/:id', async (req, res) => {
   try {
     const docs = (await pool.query('SELECT file_path FROM documents WHERE job_id=$1', [req.params.id])).rows;
-    docs.forEach(d => { try { fs.unlinkSync(d.file_path); } catch (_) {} });
+    for (const d of docs) await deleteFromStorage(d.file_path).catch(() => {});
     await pool.query('DELETE FROM jobs WHERE id=$1', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -331,12 +379,13 @@ app.post('/api/jobs/:id/documents', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const { doc_type='Other' } = req.body;
+    const fileUrl = await uploadToStorage(req.file.buffer, req.file.originalname, req.file.mimetype);
     const r = await pool.query(
       'INSERT INTO documents (job_id,file_name,doc_type,file_path) VALUES ($1,$2,$3,$4) RETURNING *',
-      [req.params.id, req.file.originalname, doc_type, req.file.path]
+      [req.params.id, req.file.originalname, doc_type, fileUrl]
     );
     const doc = r.rows[0];
-    res.status(201).json({ ...doc, file_url: `/uploads/${path.basename(doc.file_path)}` });
+    res.status(201).json({ ...doc, file_url: fileUrl });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -344,7 +393,7 @@ app.delete('/api/jobs/:id/documents/:did', async (req, res) => {
   try {
     const doc = (await pool.query('SELECT * FROM documents WHERE id=$1 AND job_id=$2', [req.params.did, req.params.id])).rows[0];
     if (!doc) return res.status(404).json({ error: 'Not found' });
-    try { fs.unlinkSync(doc.file_path); } catch (_) {}
+    await deleteFromStorage(doc.file_path);
     await pool.query('DELETE FROM documents WHERE id=$1', [req.params.did]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -405,13 +454,11 @@ app.post('/api/parse-email-file', upload.single('file'), async (req, res) => {
     const ext = path.extname(req.file.originalname).toLowerCase();
     if (ext === '.pdf') {
       const pdfParse = require('pdf-parse');
-      const dataBuffer = fs.readFileSync(req.file.path);
-      const data = await pdfParse(dataBuffer);
+      const data = await pdfParse(req.file.buffer);
       text = data.text;
     } else {
-      text = fs.readFileSync(req.file.path, 'utf8');
+      text = req.file.buffer.toString('utf8');
     }
-    try { fs.unlinkSync(req.file.path); } catch (_) {}
 
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -460,9 +507,7 @@ app.post('/api/parse-invoice', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const pdfParse = require('pdf-parse');
-    const dataBuffer = fs.readFileSync(req.file.path);
-    const data = await pdfParse(dataBuffer);
-    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    const data = await pdfParse(req.file.buffer);
 
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -566,5 +611,6 @@ app.get('/api/dashboard', async (req, res) => {
 // ─── START ────────────────────────────────────────────────────────────────────
 initDB()
   .then(() => backfillCBM())
+  .then(() => initStorage())
   .then(() => app.listen(PORT, () => console.log(`ZHL backend running on port ${PORT}`)))
   .catch(err => { console.error('DB init failed:', err.message); process.exit(1); });

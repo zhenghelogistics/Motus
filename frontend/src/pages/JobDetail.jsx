@@ -50,18 +50,7 @@ export default function JobDetail() {
   useEffect(() => { loadJob() }, [id])
   useEffect(() => {
     if (!job || job.id === infoForm.id) return
-    const form = { ...job }
-    // Auto-populate CBM from dimensions if not stored yet
-    if (form.dimensions && (form.cbm == null || form.cbm === '')) {
-      const m = form.dimensions.match(/(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)/)
-      if (m) {
-        let l = parseFloat(m[1]), w = parseFloat(m[2]), h = parseFloat(m[3])
-        const inMeters = !/cm/i.test(form.dimensions) && /\bm\b/i.test(form.dimensions)
-        if (!inMeters) { l /= 100; w /= 100; h /= 100 }
-        form.cbm = parseFloat((l * w * h * (parseInt(form.packages) || 1)).toFixed(4))
-      }
-    }
-    setInfoForm(form)
+    setInfoForm({ ...job })
   }, [job?.id])
 
   // ── Info editing (always-on, save on button click) ────────────────────────
@@ -950,46 +939,76 @@ function InfoEdit({ form, setField }) {
     </div>
   )
 
-  function parseDims(dims) {
-    if (!dims) return null
-    const m = dims.match(/(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)/)
-    if (!m) return null
-    let l = parseFloat(m[1]), w = parseFloat(m[2]), h = parseFloat(m[3])
-    const inMeters = !/cm/i.test(dims) && /\bm\b/i.test(dims)
-    return { l, w, h, inMeters }
+  const MAX_BOXES = 20
+
+  function parseToDimBoxes(dimStr, pkgCount) {
+    const count = Math.min(Math.max(parseInt(pkgCount) || 1, 1), MAX_BOXES)
+    const regex = /(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)/g
+    const matches = []
+    let m
+    if (dimStr) { while ((m = regex.exec(dimStr)) !== null) matches.push({ l: m[1], w: m[2], h: m[3] }) }
+    const last = matches.length > 0 ? matches[matches.length - 1] : { l: '', w: '', h: '' }
+    return Array(count).fill(null).map((_, i) => i < matches.length ? { ...matches[i] } : { ...last })
   }
 
-  function autoCBM(dims, pkgs) {
-    const d = parseDims(dims)
-    if (!d) return null
-    let { l, w, h, inMeters } = d
-    if (!inMeters) { l /= 100; w /= 100; h /= 100 }
-    return parseFloat((l * w * h * (parseInt(pkgs) || 1)).toFixed(4))
+  function serializeDimBoxes(boxes) {
+    return boxes.filter(b => b.l && b.w && b.h).map(b => `${b.l}x${b.w}x${b.h} cm`).join(', ')
   }
 
-  function autoVolWeight(dims, pkgs) {
-    const d = parseDims(dims)
-    if (!d) return null
-    let { l, w, h, inMeters } = d
-    if (inMeters) { l *= 100; w *= 100; h *= 100 }
-    return parseFloat(((l * w * h / 6000) * (parseInt(pkgs) || 1)).toFixed(2))
+  function calcCBM(boxes) {
+    let total = 0, any = false
+    for (const { l, w, h } of boxes) {
+      const lv = parseFloat(l), wv = parseFloat(w), hv = parseFloat(h)
+      if (lv > 0 && wv > 0 && hv > 0) { total += (lv/100)*(wv/100)*(hv/100); any = true }
+    }
+    return any ? parseFloat(total.toFixed(4)) : null
   }
 
-  function handleDimsChange(val) {
-    setField('dimensions', val)
-    const cbm = autoCBM(val, form.packages)
+  function calcVolWt(boxes) {
+    let total = 0, any = false
+    for (const { l, w, h } of boxes) {
+      const lv = parseFloat(l), wv = parseFloat(w), hv = parseFloat(h)
+      if (lv > 0 && wv > 0 && hv > 0) { total += (lv*wv*hv)/6000; any = true }
+    }
+    return any ? parseFloat(total.toFixed(2)) : null
+  }
+
+  const [dimBoxes, setDimBoxes] = useState(() => parseToDimBoxes(form.dimensions, form.packages))
+
+  useEffect(() => {
+    const boxes = parseToDimBoxes(form.dimensions, form.packages)
+    setDimBoxes(boxes)
+    const cbm = calcCBM(boxes)
     if (cbm != null) setField('cbm', cbm)
+  }, [form.id])
+
+  function updateBox(i, key, val) {
+    setDimBoxes(prev => {
+      const next = prev.map((b, idx) => idx === i ? { ...b, [key]: val } : b)
+      setField('dimensions', serializeDimBoxes(next))
+      const cbm = calcCBM(next)
+      if (cbm != null) setField('cbm', cbm)
+      return next
+    })
   }
 
   function handlePkgsChange(val) {
     setField('packages', val)
-    if (form.dimensions) {
-      const cbm = autoCBM(form.dimensions, val)
+    const count = Math.min(Math.max(parseInt(val) || 1, 1), MAX_BOXES)
+    setDimBoxes(prev => {
+      const last = prev.length > 0 ? prev[prev.length - 1] : { l: '', w: '', h: '' }
+      const next = count >= prev.length
+        ? [...prev, ...Array(count - prev.length).fill(null).map(() => ({ ...last }))]
+        : prev.slice(0, count)
+      setField('dimensions', serializeDimBoxes(next))
+      const cbm = calcCBM(next)
       if (cbm != null) setField('cbm', cbm)
-    }
+      return next
+    })
   }
 
-  const volWeight = autoVolWeight(form.dimensions, form.packages)
+  const tooMany = (parseInt(form.packages) || 0) > MAX_BOXES
+  const volWeight = calcVolWt(dimBoxes)
 
   return (
     <div>
@@ -1024,28 +1043,52 @@ function InfoEdit({ form, setField }) {
         </div>
       </div>
 
-      <div className="form-grid-4 mb-4">
+      {/* Packages / Weight / CBM row */}
+      <div className="form-grid-4 mb-2">
         <div className="form-group">
           <label className="form-label">Packages</label>
-          <input type="number" className="form-control" value={form.packages||''} onChange={e => handlePkgsChange(e.target.value)} />
+          <input type="number" className="form-control" value={form.packages||''} min="1" onChange={e => handlePkgsChange(e.target.value)} />
         </div>
         {inp('weight','Weight (kg)','number')}
         <div className="form-group">
-          <label className="form-label">Dimensions</label>
-          <input className="form-control" value={form.dimensions||''} onChange={e => handleDimsChange(e.target.value)} placeholder="60x40x30 cm" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">
-            CBM <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>(auto-calc)</span>
-          </label>
+          <label className="form-label">CBM <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>(auto-calc)</span></label>
           <input type="number" className="form-control" value={form.cbm||''} onChange={e => setField('cbm', e.target.value)} placeholder="Auto from dims" />
           {volWeight != null && (
-            <div style={{ fontSize:11, color:'var(--blue)', marginTop:3, fontWeight:600 }}>
-              Vol Wt (air): {volWeight} kg
-            </div>
+            <div style={{ fontSize:11, color:'var(--blue)', marginTop:3, fontWeight:600 }}>Vol Wt (air): {volWeight} kg</div>
           )}
         </div>
       </div>
+
+      {/* Per-box dimensions */}
+      <div style={{ background:'var(--bg)', borderRadius:8, padding:14, marginBottom:14 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:'var(--navy)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:10 }}>
+          Dimensions <span style={{ fontWeight:400, fontSize:11, textTransform:'none', color:'var(--text-muted)' }}>— L × W × H (cm) per box</span>
+        </div>
+        {tooMany ? (
+          <div>
+            <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:8 }}>More than 20 boxes — enter summary dimensions:</p>
+            <input className="form-control" value={form.dimensions||''} onChange={e => setField('dimensions', e.target.value)} placeholder="e.g. 60x40x30 cm" />
+          </div>
+        ) : (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:8 }}>
+            {dimBoxes.map((box, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', minWidth:40 }}>Box {i+1}</span>
+                <input type="number" className="form-control form-control-sm" placeholder="L" value={box.l}
+                  onChange={e => updateBox(i,'l',e.target.value)} style={{ width:64 }} />
+                <span style={{ fontSize:13, color:'var(--text-muted)' }}>×</span>
+                <input type="number" className="form-control form-control-sm" placeholder="W" value={box.w}
+                  onChange={e => updateBox(i,'w',e.target.value)} style={{ width:64 }} />
+                <span style={{ fontSize:13, color:'var(--text-muted)' }}>×</span>
+                <input type="number" className="form-control form-control-sm" placeholder="H" value={box.h}
+                  onChange={e => updateBox(i,'h',e.target.value)} style={{ width:64 }} />
+                <span style={{ fontSize:10, color:'var(--text-muted)' }}>cm</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
         <div className="sub-box">
           <div className="sub-box-label">Pickup</div>
