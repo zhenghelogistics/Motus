@@ -6,9 +6,22 @@ const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// ─── AUTH MIDDLEWARE ──────────────────────────────────────────────────────────
+function requireAuth(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '')
+  if (!token) return res.status(401).json({ error: 'Unauthorized — no token' })
+  try {
+    req.user = jwt.verify(token, process.env.SUPABASE_JWT_SECRET)
+    next()
+  } catch {
+    res.status(401).json({ error: 'Unauthorized — invalid or expired session' })
+  }
+}
 
 // Uploads directory (kept for backward-compat serving of old local files)
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
@@ -203,6 +216,9 @@ async function generateJobNumber() {
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
+
+// All /api/* routes require a valid login session
+app.use('/api', requireAuth);
 
 // ─── JOBS ─────────────────────────────────────────────────────────────────────
 app.get('/api/jobs', async (req, res) => {

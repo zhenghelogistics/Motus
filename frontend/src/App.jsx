@@ -4,6 +4,8 @@ import Dashboard from './pages/Dashboard'
 import MovementTracker from './pages/MovementTracker'
 import JobDetail from './pages/JobDetail'
 import EmailIntake from './pages/EmailIntake'
+import Login from './pages/Login'
+import { AuthProvider, useAuth } from './lib/AuthContext'
 
 const NAV = [
   { to: '/',       icon: '▦',  label: 'Dashboard',         exact: true },
@@ -122,6 +124,8 @@ function CurrencyConverter({ onClose }) {
 }
 
 function Sidebar({ onCurrencyClick }) {
+  const { user, signOut } = useAuth()
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -157,29 +161,65 @@ function Sidebar({ onCurrencyClick }) {
           <span className="sidebar-icon">$</span>
           Currency Converter
         </button>
+
+        {/* Logged-in user + sign out */}
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 10, marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 6, paddingLeft: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user?.email}
+          </div>
+          <button
+            className="sidebar-link"
+            onClick={signOut}
+            style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 13 }}
+          >
+            <span className="sidebar-icon" style={{ opacity: 0.6 }}>⏻</span>
+            Sign Out
+          </button>
+        </div>
+
         <div className="sidebar-version">ZHL Ops v1.0</div>
       </div>
     </aside>
   )
 }
 
-export default function App() {
+function AppShell() {
+  const { user, loading } = useAuth()
   const [showCurrency, setShowCurrency] = useState(false)
 
+  // Show nothing while we check if the user is already logged in
+  if (loading) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#042C53' }}>
+      <span className="spinner" style={{ width: 32, height: 32, borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }}></span>
+    </div>
+  )
+
+  // Not logged in → show login page
+  if (!user) return <Login />
+
+  // Logged in → show the app
+  return (
+    <div className="app-layout">
+      <Sidebar onCurrencyClick={() => setShowCurrency(true)} />
+      <main className="main-content">
+        <Routes>
+          <Route path="/"         element={<Dashboard />} />
+          <Route path="/jobs"     element={<MovementTracker />} />
+          <Route path="/jobs/:id" element={<JobDetail />} />
+          <Route path="/intake"   element={<EmailIntake />} />
+        </Routes>
+      </main>
+      {showCurrency && <CurrencyConverter onClose={() => setShowCurrency(false)} />}
+    </div>
+  )
+}
+
+export default function App() {
   return (
     <BrowserRouter>
-      <div className="app-layout">
-        <Sidebar onCurrencyClick={() => setShowCurrency(true)} />
-        <main className="main-content">
-          <Routes>
-            <Route path="/"        element={<Dashboard />} />
-            <Route path="/jobs"    element={<MovementTracker />} />
-            <Route path="/jobs/:id" element={<JobDetail />} />
-            <Route path="/intake"  element={<EmailIntake />} />
-          </Routes>
-        </main>
-      </div>
-      {showCurrency && <CurrencyConverter onClose={() => setShowCurrency(false)} />}
+      <AuthProvider>
+        <AppShell />
+      </AuthProvider>
     </BrowserRouter>
   )
 }

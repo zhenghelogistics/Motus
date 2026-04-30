@@ -1,6 +1,16 @@
 import axios from 'axios'
+import { supabase } from './lib/supabase'
 
 const api = axios.create({ baseURL: '/api' })
+
+// Attach the auth token to every request automatically
+api.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`
+  }
+  return config
+})
 
 export const getJobs = (params) => api.get('/jobs', { params })
 export const createJob = (data) => api.post('/jobs', data)
