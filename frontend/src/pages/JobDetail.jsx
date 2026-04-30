@@ -196,24 +196,26 @@ export default function JobDetail() {
 
     // Header
     doc.setFillColor(...navy)
-    doc.rect(0, 0, pw, 30, 'F')
-    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', ml, 2, 26, 26)
+    doc.rect(0, 0, pw, 38, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 8, 3, 46, 32)
     doc.setTextColor(255, 255, 255)
-    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
-    doc.text('ZHENGHE LOGISTICS PTE LTD', ml + 28, 12)
-    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
-    doc.text('Freight Forwarding & Logistics  |  rfq@zhenghe.com.sg', ml + 28, 21)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 57, 15)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.25)
+    doc.line(57, 20, pw - mr, 20)
+    doc.setDrawColor(0); doc.setLineWidth(0.1)
+    doc.text('rfq@zhenghe.com.sg', 57, 28)
     doc.setFontSize(12); doc.setFont('helvetica', 'bold')
-    doc.text('COSTING SHEET', pw - mr, 12, { align: 'right' })
+    doc.text('COSTING SHEET', pw - mr, 15, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text(job.job_number, pw - mr, 21, { align: 'right' })
+    doc.text(job.job_number, pw - mr, 28, { align: 'right' })
 
     // Info table — autoTable wraps long names automatically
     const infoStyle = { fontSize: 8.5, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' }
     const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
     const valCol   = { cellWidth: vw }
     autoTable(doc, {
-      startY: 35,
+      startY: 43,
       body: [
         ['Job No.',     job.job_number,                       'Mode',      job.mode || '—'],
         ['Customer Ref',job.customer_ref || '—',             'Agent',     job.agent || '—'],
@@ -319,23 +321,25 @@ export default function JobDetail() {
 
     // Header
     doc.setFillColor(...blue)
-    doc.rect(0, 0, pw, 30, 'F')
-    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', ml, 2, 26, 26)
+    doc.rect(0, 0, pw, 38, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 8, 3, 46, 32)
     doc.setTextColor(255, 255, 255)
-    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
-    doc.text('ZHENGHE LOGISTICS PTE LTD', ml + 28, 12)
-    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
-    doc.text('Freight Forwarding & Logistics  |  rfq@zhenghe.com.sg', ml + 28, 21)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 57, 15)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.25)
+    doc.line(57, 20, pw - mr, 20)
+    doc.setDrawColor(0); doc.setLineWidth(0.1)
+    doc.text('rfq@zhenghe.com.sg', 57, 28)
     doc.setFontSize(12); doc.setFont('helvetica', 'bold')
-    doc.text('ACCOUNTS REFERENCE', pw - mr, 12, { align: 'right' })
+    doc.text('ACCOUNTS REFERENCE', pw - mr, 15, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text(`Prepared: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 21, { align: 'right' })
+    doc.text(`Prepared: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 28, { align: 'right' })
 
     // Job info
     const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
     const valCol   = { cellWidth: vw }
     autoTable(doc, {
-      startY: 35,
+      startY: 43,
       body: [
         ['Job No.',      job.job_number,          'Mode',     job.mode || '—'],
         ['Customer Ref', job.customer_ref || '—', 'Agent',    job.agent || '—'],
@@ -448,22 +452,24 @@ export default function JobDetail() {
     const lw = 35
 
     doc.setFillColor(...navy)
-    doc.rect(0, 0, pw, 30, 'F')
-    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', ml, 2, 26, 26)
+    doc.rect(0, 0, pw, 38, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 8, 3, 46, 32)
     doc.setTextColor(255, 255, 255)
-    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
-    doc.text('ZHENGHE LOGISTICS PTE LTD', ml + 28, 12)
-    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
-    doc.text('rfq@zhenghe.com.sg', ml + 28, 21)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 57, 15)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.25)
+    doc.line(57, 20, pw - mr, 20)
+    doc.setDrawColor(0); doc.setLineWidth(0.1)
+    doc.text('rfq@zhenghe.com.sg', 57, 28)
     doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-    doc.text('PICKUP REQUEST ORDER', pw - mr, 12, { align: 'right' })
+    doc.text('PICKUP REQUEST ORDER', pw - mr, 15, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text(`Date: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 21, { align: 'right' })
+    doc.text(`Date: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 28, { align: 'right' })
 
     // Job ref
     const labelCol = { fontStyle: 'bold', fillColor: [237,242,248], textColor: navy, cellWidth: lw }
     autoTable(doc, {
-      startY: 35,
+      startY: 43,
       body: [
         ['Job No.', job.job_number, 'Customer Ref', job.customer_ref || '—'],
         ['Mode',    job.mode || '—', 'Status',       job.status || '—'],
@@ -556,21 +562,23 @@ export default function JobDetail() {
     const lw = 35
 
     doc.setFillColor(...blue)
-    doc.rect(0, 0, pw, 30, 'F')
-    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', ml, 2, 26, 26)
+    doc.rect(0, 0, pw, 38, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 8, 3, 46, 32)
     doc.setTextColor(255, 255, 255)
-    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
-    doc.text('ZHENGHE LOGISTICS PTE LTD', ml + 28, 12)
-    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
-    doc.text('rfq@zhenghe.com.sg', ml + 28, 21)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 57, 15)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.25)
+    doc.line(57, 20, pw - mr, 20)
+    doc.setDrawColor(0); doc.setLineWidth(0.1)
+    doc.text('rfq@zhenghe.com.sg', 57, 28)
     doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-    doc.text('DELIVERY ORDER', pw - mr, 12, { align: 'right' })
+    doc.text('DELIVERY ORDER', pw - mr, 15, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text(`DO Date: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 21, { align: 'right' })
+    doc.text(`DO Date: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 28, { align: 'right' })
 
     const labelCol = { fontStyle: 'bold', fillColor: [237,242,248], textColor: navy, cellWidth: lw }
     autoTable(doc, {
-      startY: 35,
+      startY: 43,
       body: [
         ['Job No.',      job.job_number,            'Customer Ref', job.customer_ref || '—'],
         ['Mode',         job.mode || '—',           'Date Out',     job.date_out || '—'],
