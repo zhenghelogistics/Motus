@@ -5,6 +5,7 @@ import MovementTracker from './pages/MovementTracker'
 import JobDetail from './pages/JobDetail'
 import EmailIntake from './pages/EmailIntake'
 import Login from './pages/Login'
+import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
 
 const NAV = [
@@ -187,6 +188,9 @@ function AppShell() {
   const { user, loading } = useAuth()
   const [showCurrency, setShowCurrency] = useState(false)
 
+  // Auth callback must be accessible without a session
+  if (window.location.pathname === '/auth/callback') return <AuthCallback />
+
   // Show nothing while we check if the user is already logged in
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#042C53' }}>
@@ -207,6 +211,7 @@ function AppShell() {
           <Route path="/jobs"     element={<MovementTracker />} />
           <Route path="/jobs/:id" element={<JobDetail />} />
           <Route path="/intake"   element={<EmailIntake />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
         </Routes>
       </main>
       {showCurrency && <CurrencyConverter onClose={() => setShowCurrency(false)} />}
