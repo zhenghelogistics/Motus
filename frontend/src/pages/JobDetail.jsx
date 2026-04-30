@@ -1032,6 +1032,30 @@ function InfoEdit({ form, setField }) {
     })
   }
 
+  function addBox() {
+    setDimBoxes(prev => {
+      const last = prev.length > 0 ? { ...prev[prev.length - 1] } : { l: '', w: '', h: '' }
+      const next = [...prev, { ...last }]
+      setField('packages', next.length)
+      setField('dimensions', serializeDimBoxes(next))
+      const cbm = calcCBM(next)
+      if (cbm != null) setField('cbm', cbm)
+      return next
+    })
+  }
+
+  function removeBox(idx) {
+    setDimBoxes(prev => {
+      if (prev.length <= 1) return prev
+      const next = prev.filter((_, i) => i !== idx)
+      setField('packages', next.length)
+      setField('dimensions', serializeDimBoxes(next))
+      const cbm = calcCBM(next)
+      if (cbm != null) setField('cbm', cbm)
+      return next
+    })
+  }
+
   const tooMany = (parseInt(form.packages) || 0) > MAX_BOXES
   const volWeight = calcVolWt(dimBoxes)
 
@@ -1086,7 +1110,7 @@ function InfoEdit({ form, setField }) {
 
       {/* Per-box dimensions */}
       <div style={{ background:'var(--bg)', borderRadius:8, padding:14, marginBottom:14 }}>
-        <div style={{ fontSize:12, fontWeight:700, color:'var(--navy)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:10 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:'var(--navy)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:12 }}>
           Dimensions <span style={{ fontWeight:400, fontSize:11, textTransform:'none', color:'var(--text-muted)' }}>— L × W × H (cm) per box</span>
         </div>
         {tooMany ? (
@@ -1095,21 +1119,61 @@ function InfoEdit({ form, setField }) {
             <input className="form-control" value={form.dimensions||''} onChange={e => setField('dimensions', e.target.value)} placeholder="e.g. 60x40x30 cm" />
           </div>
         ) : (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:8 }}>
-            {dimBoxes.map((box, i) => (
-              <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
-                <span style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', minWidth:40 }}>Box {i+1}</span>
-                <input type="number" className="form-control form-control-sm" placeholder="L" value={box.l}
-                  onChange={e => updateBox(i,'l',e.target.value)} style={{ width:64 }} />
-                <span style={{ fontSize:13, color:'var(--text-muted)' }}>×</span>
-                <input type="number" className="form-control form-control-sm" placeholder="W" value={box.w}
-                  onChange={e => updateBox(i,'w',e.target.value)} style={{ width:64 }} />
-                <span style={{ fontSize:13, color:'var(--text-muted)' }}>×</span>
-                <input type="number" className="form-control form-control-sm" placeholder="H" value={box.h}
-                  onChange={e => updateBox(i,'h',e.target.value)} style={{ width:64 }} />
-                <span style={{ fontSize:10, color:'var(--text-muted)' }}>cm</span>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 168px', gap:16, alignItems:'start' }}>
+
+            {/* Box rows */}
+            <div>
+              {dimBoxes.map((box, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:7 }}>
+                  <span style={{ fontSize:11, fontWeight:700, color:'var(--navy)', minWidth:44 }}>Box {i+1}</span>
+                  <input type="number" className="form-control form-control-sm" placeholder="L" value={box.l}
+                    onChange={e => updateBox(i,'l',e.target.value)} style={{ width:68 }} />
+                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>×</span>
+                  <input type="number" className="form-control form-control-sm" placeholder="W" value={box.w}
+                    onChange={e => updateBox(i,'w',e.target.value)} style={{ width:68 }} />
+                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>×</span>
+                  <input type="number" className="form-control form-control-sm" placeholder="H" value={box.h}
+                    onChange={e => updateBox(i,'h',e.target.value)} style={{ width:68 }} />
+                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>cm</span>
+                  {dimBoxes.length > 1 && (
+                    <button onClick={() => removeBox(i)} title="Remove box"
+                      style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#9CA3AF', fontSize:18, lineHeight:1, padding:'0 2px' }}>×</button>
+                  )}
+                </div>
+              ))}
+              <button onClick={addBox}
+                style={{ marginTop:4, background:'none', border:'1px dashed var(--border-solid)', borderRadius:6, color:'var(--blue)', fontSize:12, fontWeight:600, padding:'5px 14px', cursor:'pointer' }}>
+                + Add Box
+              </button>
+            </div>
+
+            {/* CBM breakdown panel */}
+            <div style={{ background:'var(--bg-hover,#EEF3F8)', borderRadius:8, padding:12 }}>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--navy)', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.4px' }}>CBM Breakdown</div>
+              {dimBoxes.map((box, i) => {
+                const lv = parseFloat(box.l), wv = parseFloat(box.w), hv = parseFloat(box.h)
+                const bc = lv > 0 && wv > 0 && hv > 0 ? (lv/100)*(wv/100)*(hv/100) : null
+                return (
+                  <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:11, marginBottom:5 }}>
+                    <span style={{ color:'var(--text-muted)' }}>Box {i+1}</span>
+                    <span style={{ fontWeight:600 }}>{bc != null ? bc.toFixed(4) : '—'}</span>
+                  </div>
+                )
+              })}
+              <div style={{ borderTop:'1px solid var(--border-solid,#D1DCE8)', marginTop:8, paddingTop:8 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, fontWeight:700, color:'var(--navy)', marginBottom:4 }}>
+                  <span>Total</span>
+                  <span>{calcCBM(dimBoxes)?.toFixed(4) ?? '—'} m³</span>
+                </div>
+                {volWeight != null && (
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--blue)', fontWeight:600 }}>
+                    <span>Vol Wt</span>
+                    <span>{volWeight} kg</span>
+                  </div>
+                )}
               </div>
-            ))}
+            </div>
+
           </div>
         )}
       </div>
