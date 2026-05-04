@@ -139,7 +139,6 @@ async function generateJobNumber() {
   return { job_number, year, sequence: seq };
 }
 
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://wwaupgxlzardsrxikuvj.supabase.co'
 let _bucketReady = false
 async function ensureBucket() {
   if (_bucketReady) return
