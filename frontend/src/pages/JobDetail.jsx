@@ -9,7 +9,7 @@ import {
   uploadDocument, deleteDocument, parseInvoice
 } from '../api'
 
-const MODES = ['Air Express', 'LCL Express', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
+const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 const DOC_TYPES = ['CI', 'PL', 'DO', 'Invoice', 'Other']
 const navy = [4, 44, 83]
@@ -583,8 +583,126 @@ export default function JobDetail() {
     doc.save(`ZHL_${job.job_number.replace('/', '-')}_PickupOrder.pdf`)
   }
 
-  // ── Delivery Order PDF ────────────────────────────────────────────────────
+  // ── Delivery Order PDF (auto-splits: Local vs International based on mode) ──
   function exportDeliveryOrder() {
+    const isLocal = ['Local Delivery', 'Local Clearance & Delivery'].includes(job.mode)
+    isLocal ? exportLocalDO() : exportInternationalDO()
+  }
+
+  function exportLocalDO() {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const lw = 35
+
+    doc.setFillColor(...blue)
+    doc.rect(0, 0, pw, 38, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 6, 1, 28, 36)
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 38, 15)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.25)
+    doc.line(38, 20, pw - mr, 20)
+    doc.setDrawColor(0); doc.setLineWidth(0.1)
+    doc.text('rfq@zhenghe.com.sg', 38, 28)
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+    doc.text('LOCAL DELIVERY ORDER', pw - mr, 15, { align: 'right' })
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text(`DO Date: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 28, { align: 'right' })
+
+    const labelCol = { fontStyle: 'bold', fillColor: [237,242,248], textColor: navy, cellWidth: lw }
+    autoTable(doc, {
+      startY: 43,
+      body: [
+        ['Job No.',      job.job_number,   'Customer Ref', job.customer_ref || '—'],
+        ['Mode',         job.mode || '—',  'Date Out',     job.date_out || '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Agent details (consignee on this DO is the local agent)
+    let y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text('AGENT / CARRIER', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Agent', { content: job.agent || '—', colSpan: 3 }],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Delivery details (end recipient)
+    y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text('DELIVER TO', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Consignee',        { content: job.consignee || '—',         colSpan: 3 }],
+        ['Delivery Address', { content: job.delivery_address || '—',  colSpan: 3 }],
+        ['Contact Name',     job.delivery_contact_name || '—', 'Contact No.', job.delivery_contact_number || '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Cargo — shipper is always Zhenghe for local DO
+    y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('CARGO DESCRIPTION', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Shipper',   { content: 'Zhenghe Logistics Pte Ltd', colSpan: 3 }],
+        ['Commodity', { content: job.commodity || '—', colSpan: 3 }],
+        ['Packages',  job.packages != null ? String(job.packages) : '—', 'Weight', job.weight ? `${job.weight} kg` : '—'],
+        ['Dimensions', job.dimensions || '—', 'CBM', job.cbm != null ? String(job.cbm) : '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    if (job.notes) {
+      y = doc.lastAutoTable.finalY + 5
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('NOTES', ml, y); y += 2
+      autoTable(doc, {
+        startY: y,
+        body: [[{ content: job.notes, styles: { fontSize: 8.5 } }]],
+        styles: { overflow: 'linebreak', cellPadding: 5, fillColor: [255, 252, 230] },
+        margin: { left: ml, right: mr },
+        tableWidth: tw,
+      })
+    }
+
+    y = Math.max(doc.lastAutoTable.finalY + 10, 215)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('ACKNOWLEDGEMENT OF RECEIPT', ml, y); y += 6
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80)
+    doc.text('I/We confirm that the above cargo has been received in good condition.', ml, y); y += 12
+    doc.setDrawColor(160, 160, 160)
+    doc.line(ml, y, 95, y); doc.line(115, y, pw - mr, y)
+    doc.setFontSize(8); doc.setTextColor(100, 100, 100)
+    doc.text('Driver Signature / Name', ml, y + 5)
+    doc.text('Date / Time Received', 115, y + 5)
+    doc.line(ml, y + 16, 80, y + 16)
+    doc.text('Company Stamp', ml, y + 21)
+    doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+    doc.text(`Zhenghe Logistics Pte Ltd — Local Delivery Order — ${job.job_number} — ${new Date().toLocaleDateString('en-SG')}`, ml, 290)
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_LocalDO.pdf`)
+  }
+
+  function exportInternationalDO() {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 35
@@ -617,7 +735,6 @@ export default function JobDetail() {
       tableWidth: tw,
     })
 
-    // Delivery details
     let y = doc.lastAutoTable.finalY + 5
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
     doc.text('DELIVERY DETAILS', ml, y); y += 2
@@ -634,7 +751,6 @@ export default function JobDetail() {
       tableWidth: tw,
     })
 
-    // Cargo
     y = doc.lastAutoTable.finalY + 5
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
     doc.text('CARGO DESCRIPTION', ml, y); y += 2
