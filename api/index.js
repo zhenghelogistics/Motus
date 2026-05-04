@@ -139,10 +139,25 @@ async function generateJobNumber() {
   return { job_number, year, sequence: seq };
 }
 
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://wwaupgxlzardsrxikuvj.supabase.co'
+let _bucketReady = false
+async function ensureBucket() {
+  if (_bucketReady) return
+  const key = process.env.SUPABASE_SERVICE_KEY
+  // Try to create the bucket — if it already exists Supabase returns a 409, which is fine
+  await fetch(`${SUPABASE_URL}/storage/v1/bucket`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 'documents', name: 'documents', public: true })
+  })
+  _bucketReady = true
+}
+
 async function uploadToSupabaseStorage(buffer, filename, contentType) {
-  const supabaseUrl = process.env.SUPABASE_URL || `https://wwaupgxlzardsrxikuvj.supabase.co`;
+  const supabaseUrl = SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_KEY;
   if (!key) throw new Error('SUPABASE_SERVICE_KEY not configured');
+  await ensureBucket()
 
   const res = await fetch(`${supabaseUrl}/storage/v1/object/documents/${filename}`, {
     method: 'POST',
