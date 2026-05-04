@@ -148,7 +148,7 @@ async function ensureBucket() {
   await fetch(`${SUPABASE_URL}/storage/v1/bucket`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: 'documents', name: 'documents', public: true })
+    body: JSON.stringify({ id: 'Documents', name: 'Documents', public: true })
   })
   _bucketReady = true
 }
@@ -159,7 +159,7 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
   if (!key) throw new Error('SUPABASE_SERVICE_KEY not configured');
   await ensureBucket()
 
-  const res = await fetch(`${supabaseUrl}/storage/v1/object/documents/${filename}`, {
+  const res = await fetch(`${supabaseUrl}/storage/v1/object/Documents/${filename}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${key}`,
@@ -172,7 +172,7 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
     const err = await res.text();
     throw new Error(`Storage upload failed: ${err}`);
   }
-  return `${supabaseUrl}/storage/v1/object/public/documents/${filename}`;
+  return `${supabaseUrl}/storage/v1/object/public/Documents/${filename}`;
 }
 
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────────────
