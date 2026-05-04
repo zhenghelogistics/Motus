@@ -608,14 +608,21 @@ app.get('/api/dashboard', async (req, res) => {
     const monthProfit  = monthRevenue - monthCost;
     const monthGP      = monthRevenue > 0 ? (monthProfit / monthRevenue) * 100 : 0;
 
-    const trend = trendRes.rows.map(r => {
-      const rev  = parseFloat(r.revenue);
-      const cost = parseFloat(r.cost);
+    // Build full 6-month array, filling zeros for months with no jobs
+    const trendMap = {};
+    for (const r of trendRes.rows) {
+      const key = new Date(r.month).toISOString().slice(0, 7); // "2026-04"
+      trendMap[key] = { revenue: parseFloat(r.revenue), cost: parseFloat(r.cost) };
+    }
+    const trend = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.toISOString().slice(0, 7);
+      const { revenue: rev = 0, cost = 0 } = trendMap[key] || {};
       const profit = rev - cost;
       const gp = rev > 0 ? parseFloat(((profit / rev) * 100).toFixed(1)) : 0;
-      const d = new Date(r.month);
-      return { month: d.toLocaleString('default', { month: 'short', year: '2-digit' }), gp_percent: gp, revenue: parseFloat(rev.toFixed(2)) };
-    });
+      trend.push({ month: d.toLocaleString('default', { month: 'short', year: '2-digit' }), gp_percent: gp, revenue: parseFloat(rev.toFixed(2)) });
+    }
 
     res.json({
       this_month: {
