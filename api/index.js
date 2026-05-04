@@ -224,21 +224,38 @@ app.get('/api/dbtest', async (req, res) => {
 app.get('/api/jobs', async (req, res) => {
   try {
     const { search, status, mode, agent } = req.query;
-    let q = 'SELECT * FROM jobs WHERE 1=1';
+    // Single query with aggregated cost/billing via subquery joins — no N+1
+    let where = 'WHERE 1=1';
     const p = [];
     let i = 1;
     if (search) {
       const s = `%${search}%`;
-      q += ` AND (job_number ILIKE $${i} OR shipper ILIKE $${i+1} OR consignee ILIKE $${i+2} OR customer_ref ILIKE $${i+3} OR agent ILIKE $${i+4})`;
+      where += ` AND (j.job_number ILIKE $${i} OR j.shipper ILIKE $${i+1} OR j.consignee ILIKE $${i+2} OR j.customer_ref ILIKE $${i+3} OR j.agent ILIKE $${i+4})`;
       p.push(s, s, s, s, s); i += 5;
     }
-    if (status) { q += ` AND status=$${i}`; p.push(status); i++; }
-    if (mode)   { q += ` AND mode=$${i}`;   p.push(mode);   i++; }
-    if (agent)  { q += ` AND agent ILIKE $${i}`; p.push(`%${agent}%`); i++; }
-    q += ' ORDER BY id DESC';
+    if (status) { where += ` AND j.status=$${i}`;       p.push(status); i++; }
+    if (mode)   { where += ` AND j.mode=$${i}`;         p.push(mode);   i++; }
+    if (agent)  { where += ` AND j.agent ILIKE $${i}`;  p.push(`%${agent}%`); i++; }
+
+    const q = `
+      SELECT j.*,
+        ROUND(COALESCE(c.total,0)::numeric, 2) AS cost_sgd,
+        ROUND(COALESCE(b.total,0)::numeric, 2) AS sale_sgd,
+        ROUND((COALESCE(b.total,0) - COALESCE(c.total,0))::numeric, 2) AS profit_sgd,
+        CASE
+          WHEN j.gp_override IS NOT NULL THEN ROUND(j.gp_override::numeric, 1)
+          WHEN COALESCE(b.total,0) > 0   THEN ROUND(((COALESCE(b.total,0) - COALESCE(c.total,0)) / b.total * 100)::numeric, 1)
+          ELSE 0
+        END AS gp_percent,
+        COALESCE(j.gp_override, NULL) AS computed_gp
+      FROM jobs j
+      LEFT JOIN (SELECT job_id, SUM(amount)    AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+      LEFT JOIN (SELECT job_id, SUM(rate*qty)  AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+      ${where}
+      ORDER BY j.id DESC
+    `;
     const result = await pool.query(q, p);
-    const jobs = await Promise.all(result.rows.map(enrichJob));
-    res.json(jobs);
+    res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -532,69 +549,86 @@ app.get('/api/dashboard', async (req, res) => {
   try {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
     const today = now.toISOString().split('T')[0];
     const in7days = new Date(now.getTime() + 7*24*60*60*1000).toISOString().split('T')[0];
 
-    const monthJobsResult = await pool.query('SELECT id FROM jobs WHERE created_at >= $1', [monthStart]);
-    const monthIds = monthJobsResult.rows.map(j => j.id);
+    // All 5 queries run in parallel — no loops, no N+1
+    const [monthRes, byModeRes, trendRes, upcomingRes, flaggedRes] = await Promise.all([
+      // This month KPIs
+      pool.query(`
+        SELECT COUNT(DISTINCT j.id) AS jobs,
+          COALESCE(SUM(b.total),0) AS revenue,
+          COALESCE(SUM(c.total),0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        WHERE j.created_at >= $1
+      `, [monthStart]),
 
-    let monthRevenue = 0, monthCost = 0;
-    for (const id of monthIds) {
-      const c = await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM cost_lines WHERE job_id=$1', [id]);
-      const b = await pool.query('SELECT COALESCE(SUM(rate*qty),0) as t FROM billing_lines WHERE job_id=$1', [id]);
-      monthCost += parseFloat(c.rows[0].t);
-      monthRevenue += parseFloat(b.rows[0].t);
-    }
-    const monthProfit = monthRevenue - monthCost;
-    const monthGP = monthRevenue > 0 ? (monthProfit / monthRevenue) * 100 : 0;
+      // Jobs by mode
+      pool.query(`
+        SELECT j.mode,
+          COUNT(j.id) AS count,
+          COALESCE(SUM(b.total),0) AS revenue
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        GROUP BY j.mode
+        ORDER BY count DESC
+      `),
 
-    const allJobs = (await pool.query('SELECT id, mode FROM jobs')).rows;
-    const modeMap = {};
-    for (const j of allJobs) {
-      if (!modeMap[j.mode]) modeMap[j.mode] = { count: 0, revenue: 0 };
-      modeMap[j.mode].count++;
-      const b = await pool.query('SELECT COALESCE(SUM(rate*qty),0) as t FROM billing_lines WHERE job_id=$1', [j.id]);
-      modeMap[j.mode].revenue += parseFloat(b.rows[0].t);
-    }
-    const by_mode = Object.entries(modeMap).map(([mode, data]) => ({ mode, ...data }));
+      // 6-month GP% trend
+      pool.query(`
+        SELECT DATE_TRUNC('month', j.created_at) AS month,
+          COALESCE(SUM(b.total),0) AS revenue,
+          COALESCE(SUM(c.total),0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        WHERE j.created_at >= $1
+        GROUP BY DATE_TRUNC('month', j.created_at)
+        ORDER BY month
+      `, [sixMonthsAgo]),
 
-    const trend = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const start = new Date(d.getFullYear(), d.getMonth(), 1);
-      const end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-      const ids = (await pool.query('SELECT id FROM jobs WHERE created_at >= $1 AND created_at < $2', [start, end])).rows.map(j => j.id);
-      let rev = 0, cost = 0;
-      for (const id of ids) {
-        const c = await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM cost_lines WHERE job_id=$1', [id]);
-        const b = await pool.query('SELECT COALESCE(SUM(rate*qty),0) as t FROM billing_lines WHERE job_id=$1', [id]);
-        cost += parseFloat(c.rows[0].t); rev += parseFloat(b.rows[0].t);
-      }
+      // Upcoming deadlines
+      pool.query(
+        "SELECT id,job_number,shipper,consignee,deadline_date,status FROM jobs WHERE deadline_date >= $1 AND deadline_date <= $2 AND status != 'Completed' ORDER BY deadline_date",
+        [today, in7days]
+      ),
+
+      // Flagged — no billing lines
+      pool.query(
+        'SELECT j.id,j.job_number,j.shipper,j.status FROM jobs j WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id) ORDER BY j.id DESC LIMIT 10'
+      ),
+    ]);
+
+    const m = monthRes.rows[0];
+    const monthRevenue = parseFloat(m.revenue);
+    const monthCost    = parseFloat(m.cost);
+    const monthProfit  = monthRevenue - monthCost;
+    const monthGP      = monthRevenue > 0 ? (monthProfit / monthRevenue) * 100 : 0;
+
+    const trend = trendRes.rows.map(r => {
+      const rev  = parseFloat(r.revenue);
+      const cost = parseFloat(r.cost);
       const profit = rev - cost;
       const gp = rev > 0 ? parseFloat(((profit / rev) * 100).toFixed(1)) : 0;
-      trend.push({ month: d.toLocaleString('default', { month: 'short', year: '2-digit' }), gp_percent: gp, revenue: parseFloat(rev.toFixed(2)) });
-    }
-
-    const upcoming = (await pool.query(
-      "SELECT id,job_number,shipper,consignee,deadline_date,status FROM jobs WHERE deadline_date >= $1 AND deadline_date <= $2 AND status != 'Completed' ORDER BY deadline_date",
-      [today, in7days]
-    )).rows;
-
-    const flagged = (await pool.query(
-      'SELECT j.id,j.job_number,j.shipper,j.status FROM jobs j WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id) ORDER BY j.id DESC LIMIT 10'
-    )).rows;
+      const d = new Date(r.month);
+      return { month: d.toLocaleString('default', { month: 'short', year: '2-digit' }), gp_percent: gp, revenue: parseFloat(rev.toFixed(2)) };
+    });
 
     res.json({
       this_month: {
-        jobs: monthIds.length,
+        jobs: parseInt(m.jobs),
         revenue: parseFloat(monthRevenue.toFixed(2)),
         cost: parseFloat(monthCost.toFixed(2)),
         profit: parseFloat(monthProfit.toFixed(2)),
         gp_percent: parseFloat(monthGP.toFixed(1))
       },
-      by_mode, trend,
-      upcoming_deadlines: upcoming,
-      flagged_jobs: flagged
+      by_mode: byModeRes.rows.map(r => ({ mode: r.mode, count: parseInt(r.count), revenue: parseFloat(r.revenue) })),
+      trend,
+      upcoming_deadlines: upcomingRes.rows,
+      flagged_jobs: flaggedRes.rows
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
