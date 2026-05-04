@@ -146,7 +146,7 @@ async function ensureBucket() {
   // Try to create the bucket — if it already exists Supabase returns a 409, which is fine
   await fetch(`${SUPABASE_URL}/storage/v1/bucket`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: 'Documents', name: 'Documents', public: true })
   })
   _bucketReady = true
@@ -162,6 +162,7 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${key}`,
+      apikey: key,
       'Content-Type': contentType || 'application/octet-stream',
       'x-upsert': 'true'
     },

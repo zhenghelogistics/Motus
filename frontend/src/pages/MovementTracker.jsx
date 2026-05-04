@@ -90,11 +90,9 @@ export default function MovementTracker() {
 
   const voidedCount = jobs.filter(j => j.status === 'Voided').length
 
-  // Monthly summary from loaded jobs
-  const now = new Date()
-  const monthJobs = jobs.filter(j => j.created_at && j.created_at.startsWith(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`))
-  const mRevenue = monthJobs.reduce((s, j) => s + (j.sale_sgd||0), 0)
-  const mCost = monthJobs.reduce((s, j) => s + (j.cost_sgd||0), 0)
+  // Summary from currently visible jobs
+  const mRevenue = sorted.reduce((s, j) => s + (j.sale_sgd||0), 0)
+  const mCost = sorted.reduce((s, j) => s + (j.cost_sgd||0), 0)
   const mProfit = mRevenue - mCost
   const mGP = mRevenue > 0 ? (mProfit/mRevenue)*100 : 0
 
@@ -141,8 +139,8 @@ export default function MovementTracker() {
       {/* Metric cards */}
       <div className="metric-grid" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>
         <div className="metric-card">
-          <div className="metric-label">Jobs This Month</div>
-          <div className="metric-value blue">{monthJobs.length}</div>
+          <div className="metric-label">Jobs Shown</div>
+          <div className="metric-value blue">{sorted.length}</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Revenue</div>
