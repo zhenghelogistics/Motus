@@ -596,8 +596,8 @@ app.get('/api/dashboard', async (req, res) => {
     const today = now.toISOString().split('T')[0];
     const in7days = new Date(now.getTime() + 7*24*60*60*1000).toISOString().split('T')[0];
 
-    // All 5 queries run in parallel — no loops, no N+1
-    const [monthRes, byModeRes, trendRes, upcomingRes, flaggedRes] = await Promise.all([
+    // All queries run in parallel — no loops, no N+1
+    const [monthRes, byModeRes, trendRes, upcomingRes, flaggedRes, statusRes, missingCountRes] = await Promise.all([
       // This month KPIs
       pool.query(`
         SELECT COUNT(DISTINCT j.id) AS jobs,
@@ -643,6 +643,22 @@ app.get('/api/dashboard', async (req, res) => {
       pool.query(
         'SELECT j.id,j.job_number,j.shipper,j.status FROM jobs j WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id) ORDER BY j.id DESC LIMIT 10'
       ),
+
+      // Status counts (for status overview widget)
+      pool.query(`
+        SELECT status, COUNT(id) AS count
+        FROM jobs
+        WHERE status != 'Voided'
+        GROUP BY status
+      `),
+
+      // Total missing costing count (not limited to 10)
+      pool.query(`
+        SELECT COUNT(j.id) AS count
+        FROM jobs j
+        WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id)
+          AND j.status != 'Voided'
+      `),
     ]);
 
     const m = monthRes.rows[0];
@@ -678,7 +694,9 @@ app.get('/api/dashboard', async (req, res) => {
       by_mode: byModeRes.rows.map(r => ({ mode: r.mode, count: parseInt(r.count), revenue: parseFloat(r.revenue) })),
       trend,
       upcoming_deadlines: upcomingRes.rows,
-      flagged_jobs: flaggedRes.rows
+      flagged_jobs: flaggedRes.rows,
+      status_counts: Object.fromEntries(statusRes.rows.map(r => [r.status, parseInt(r.count)])),
+      missing_costing_count: parseInt(missingCountRes.rows[0].count)
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
