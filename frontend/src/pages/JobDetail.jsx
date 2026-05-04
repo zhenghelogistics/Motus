@@ -436,6 +436,21 @@ export default function JobDetail() {
       tableWidth: 182,
     })
 
+    // Notes
+    if (job.notes) {
+      y = doc.lastAutoTable.finalY + 6
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('NOTES', ml, y); y += 2
+      autoTable(doc, {
+        startY: y,
+        body: [[{ content: job.notes, styles: { fontSize: 8.5 } }]],
+        styles: { cellPadding: { top: 5, bottom: 5, left: 8, right: 8 }, overflow: 'linebreak', textColor: [50, 50, 50] },
+        columnStyles: { 0: { fillColor: [245, 247, 250] } },
+        margin: { left: ml, right: mr },
+        tableWidth: tw,
+      })
+    }
+
     const totalPages = doc.internal.getNumberOfPages()
     for (let p = 1; p <= totalPages; p++) {
       doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150, 150, 150)
