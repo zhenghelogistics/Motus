@@ -255,7 +255,13 @@ app.get('/api/jobs', async (req, res) => {
       ORDER BY j.id DESC
     `;
     const result = await pool.query(q, p);
-    res.json(result.rows);
+    res.json(result.rows.map(r => ({
+      ...r,
+      cost_sgd:   parseFloat(r.cost_sgd)   || 0,
+      sale_sgd:   parseFloat(r.sale_sgd)   || 0,
+      profit_sgd: parseFloat(r.profit_sgd) || 0,
+      gp_percent: parseFloat(r.gp_percent) || 0,
+    })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
