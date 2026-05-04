@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { parseEmail, parseEmailFile, createJob } from '../api'
+import { parseEmail, parseEmailFile, createJob, getJobs, getCustomers } from '../api'
+import DimensionBoxes from '../components/DimensionBoxes'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold']
@@ -23,6 +24,18 @@ export default function EmailIntake() {
   const [form, setForm] = useState(null)
   const [saving, setSaving] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [dimResetKey, setDimResetKey] = useState(0)
+
+  // Copy from previous job modal
+  const [copyModal, setCopyModal] = useState(false)
+  const [recentJobs, setRecentJobs] = useState([])
+  const [copySearch, setCopySearch] = useState('')
+  const [copyLoading, setCopyLoading] = useState(false)
+
+  // Customer autocomplete
+  const [customerSuggestions, setCustomerSuggestions] = useState([])
+  const [showCustomerDrop, setShowCustomerDrop] = useState(false)
+
   const fileInputRef = useRef(null)
   const navigate = useNavigate()
 
@@ -33,6 +46,7 @@ export default function EmailIntake() {
     })
     if (data.billing_lines) merged.billing_lines = data.billing_lines
     setForm(merged)
+    setDimResetKey(k => k + 1)
   }
 
   async function handleParse() {
@@ -82,11 +96,11 @@ export default function EmailIntake() {
   }
 
   function addBillingLine() {
-    setForm(f => ({ ...f, billing_lines: [...(f.billing_lines||[]), { service:'', unit:'', rate:'', qty:'1', remarks:'' }] }))
+    setForm(f => ({ ...f, billing_lines: [...(f.billing_lines || []), { service: '', unit: '', rate: '', qty: '1', remarks: '' }] }))
   }
 
   function removeBillingLine(idx) {
-    setForm(f => ({ ...f, billing_lines: f.billing_lines.filter((_,i) => i !== idx) }))
+    setForm(f => ({ ...f, billing_lines: f.billing_lines.filter((_, i) => i !== idx) }))
   }
 
   async function handleCreate() {
@@ -114,10 +128,122 @@ export default function EmailIntake() {
 
   function handleManual() {
     setForm({ ...emptyJob })
+    setDimResetKey(k => k + 1)
+  }
+
+  // ── Copy from previous job ────────────────────────────────────────────────
+  async function openCopyModal() {
+    setCopyModal(true)
+    setCopySearch('')
+    setCopyLoading(true)
+    try {
+      const { data } = await getJobs({ limit: 50 })
+      setRecentJobs(data)
+    } catch {
+      setRecentJobs([])
+    } finally {
+      setCopyLoading(false)
+    }
+  }
+
+  function copyFromJob(j) {
+    const copied = {
+      shipper: j.shipper || '',
+      consignee: j.consignee || '',
+      customer_name: j.customer_name || '',
+      customer_email: j.customer_email || '',
+      customer_contact_name: j.customer_contact_name || '',
+      customer_contact_number: j.customer_contact_number || '',
+      pickup_address: j.pickup_address || '',
+      pickup_contact_name: j.pickup_contact_name || '',
+      pickup_contact_number: j.pickup_contact_number || '',
+      delivery_address: j.delivery_address || '',
+      delivery_contact_name: j.delivery_contact_name || '',
+      delivery_contact_number: j.delivery_contact_number || '',
+      mode: j.mode || 'Air Express',
+      agent: j.agent || '',
+      commodity: j.commodity || '',
+      notes: j.notes || '',
+      // reset shipment-specific fields
+      packages: '', dimensions: '', weight: '', cbm: '',
+      customer_ref: '', deadline_date: '',
+      status: 'New',
+      billing_lines: [],
+    }
+    setForm({ ...emptyJob, ...copied })
+    setDimResetKey(k => k + 1)
+    setCopyModal(false)
+  }
+
+  const filteredRecentJobs = recentJobs.filter(j => {
+    if (!copySearch) return true
+    const q = copySearch.toLowerCase()
+    return [j.job_number, j.shipper, j.consignee, j.customer_ref, j.customer_name]
+      .some(v => v?.toLowerCase().includes(q))
+  })
+
+  // ── Customer autocomplete ─────────────────────────────────────────────────
+  async function searchCustomers(q) {
+    try {
+      const { data } = await getCustomers(q)
+      setCustomerSuggestions(data)
+      setShowCustomerDrop(data.length > 0)
+    } catch {
+      setShowCustomerDrop(false)
+    }
+  }
+
+  function selectCustomer(c) {
+    setField('customer_name', c.customer_name || c.display_name || '')
+    setField('customer_email', c.customer_email || '')
+    setField('customer_contact_name', c.customer_contact_name || '')
+    setField('customer_contact_number', c.customer_contact_number || '')
+    setShowCustomerDrop(false)
   }
 
   return (
     <div>
+      {/* Copy from previous job modal */}
+      {copyModal && (
+        <div className="modal-overlay" onClick={() => setCopyModal(false)}>
+          <div className="modal" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Copy from Previous Job</h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setCopyModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ padding: '16px 20px' }}>
+              <input className="form-control mb-3" placeholder="Search by job no., shipper, consignee, ref..."
+                value={copySearch} onChange={e => setCopySearch(e.target.value)} autoFocus />
+              {copyLoading
+                ? <div style={{ textAlign: 'center', padding: 32 }}><span className="spinner spinner-dark" /></div>
+                : (
+                  <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                    {filteredRecentJobs.length === 0
+                      ? <p className="text-muted" style={{ fontSize: 13, padding: '12px 0' }}>No jobs found.</p>
+                      : filteredRecentJobs.map(j => (
+                        <div key={j.id} onClick={() => copyFromJob(j)}
+                          style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer', borderBottom: '1px solid var(--border)', transition: 'background 0.1s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--navy)', fontSize: 13 }}>{j.job_number}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{j.mode}</span>
+                          </div>
+                          <div style={{ fontSize: 12, marginTop: 3, color: 'var(--text)' }}>
+                            {j.shipper || '—'} → {j.consignee || '—'}
+                          </div>
+                          {j.customer_ref && <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 2 }}>Ref: {j.customer_ref}</div>}
+                        </div>
+                      ))
+                    }
+                  </div>
+                )
+              }
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
         <h1>New Job</h1>
         <p>Paste a customer email to auto-extract job details, or create manually.</p>
@@ -182,6 +308,7 @@ export default function EmailIntake() {
             {parsing ? <><span className="spinner"></span> Extracting...</> : '⚡ Extract with AI'}
           </button>
           <button className="btn btn-ghost" onClick={handleManual}>Create Manually</button>
+          <button className="btn btn-ghost" onClick={openCopyModal}>⎘ Copy from Previous Job</button>
         </div>
       </div>
 
@@ -211,9 +338,33 @@ export default function EmailIntake() {
           <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 10 }}>Customer (Billing Party)</div>
             <div className="form-grid-2 mb-2">
-              <div className="form-group">
+              <div className="form-group" style={{ position: 'relative' }}>
                 <label className="form-label">Customer Name</label>
-                <input className="form-control" value={form.customer_name} onChange={e => setField('customer_name', e.target.value)} placeholder="If different from shipper" />
+                <input className="form-control" value={form.customer_name}
+                  placeholder="Type to search past customers..."
+                  onChange={e => { setField('customer_name', e.target.value); searchCustomers(e.target.value) }}
+                  onFocus={() => searchCustomers(form.customer_name)}
+                  onBlur={() => setTimeout(() => setShowCustomerDrop(false), 180)}
+                />
+                {showCustomerDrop && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
+                    background: 'white', border: '1px solid var(--border-solid)', borderRadius: 8,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto'
+                  }}>
+                    {customerSuggestions.map((c, i) => (
+                      <div key={i}
+                        onMouseDown={() => selectCustomer(c)}
+                        style={{ padding: '9px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)', fontSize: 13 }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}>
+                        <div style={{ fontWeight: 700, color: 'var(--navy)' }}>{c.display_name}</div>
+                        {c.customer_email && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.customer_email}</div>}
+                        {c.customer_contact_name && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.customer_contact_name} {c.customer_contact_number}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Customer Email</label>
@@ -287,27 +438,35 @@ export default function EmailIntake() {
             </div>
           </div>
 
-          {/* Shipment details */}
-          <div className="form-grid-4 mb-4">
-            <div className="form-group">
-              <label className="form-label">Packages</label>
-              <input type="number" className="form-control" value={form.packages} onChange={e => setField('packages', e.target.value)} />
-            </div>
+          {/* Shipment details: weight + dimensions (with per-box CBM) */}
+          <div className="form-grid-2 mb-3" style={{ maxWidth: 360 }}>
             <div className="form-group">
               <label className="form-label">Weight (kg)</label>
               <input type="number" className="form-control" value={form.weight} onChange={e => setField('weight', e.target.value)} />
             </div>
             <div className="form-group">
-              <label className="form-label">Dimensions</label>
-              <input className="form-control" value={form.dimensions} onChange={e => setField('dimensions', e.target.value)} placeholder="e.g. 60x40x30 cm" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">CBM</label>
-              <input type="number" className="form-control" value={form.cbm} onChange={e => setField('cbm', e.target.value)} />
+              <label className="form-label">CBM <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>(auto-calc)</span></label>
+              <input type="number" className="form-control" value={form.cbm} onChange={e => setField('cbm', e.target.value)} placeholder="Auto from dims" />
             </div>
           </div>
 
-          <div className="form-grid-3 mb-4">
+          <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 12 }}>
+              Dimensions <span style={{ fontWeight: 400, fontSize: 11, textTransform: 'none', color: 'var(--text-muted)' }}>— L × W × H (cm) per box</span>
+            </div>
+            <DimensionBoxes
+              packages={form.packages}
+              dimensions={form.dimensions}
+              syncKey={dimResetKey}
+              onChange={({ packages, dimensions, cbm }) => {
+                if (packages !== undefined) setField('packages', packages)
+                if (dimensions !== undefined) setField('dimensions', dimensions)
+                if (cbm !== undefined) setField('cbm', cbm != null ? cbm : form.cbm)
+              }}
+            />
+          </div>
+
+          <div className="form-grid-2 mb-4">
             <div className="form-group">
               <label className="form-label">Commodity</label>
               <input className="form-control" value={form.commodity} onChange={e => setField('commodity', e.target.value)} />
@@ -316,6 +475,9 @@ export default function EmailIntake() {
               <label className="form-label">Agent</label>
               <input className="form-control" value={form.agent} onChange={e => setField('agent', e.target.value)} />
             </div>
+          </div>
+
+          <div className="form-grid-2 mb-4">
             <div className="form-group">
               <label className="form-label">Status</label>
               <select className="form-control" value={form.status} onChange={e => setField('status', e.target.value)}>
@@ -336,30 +498,30 @@ export default function EmailIntake() {
           </div>
           {form.billing_lines && form.billing_lines.length > 0
             ? <table className="inline-table" style={{ marginBottom: 12 }}>
-                <thead>
-                  <tr>
-                    <th>Service</th><th>Unit</th><th style={{width:90}}>Rate (SGD)</th>
-                    <th style={{width:80}}>Qty</th><th style={{width:100}}>Total</th>
-                    <th>Remarks</th><th style={{width:40}}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {form.billing_lines.map((bl, i) => {
-                    const total = (parseFloat(bl.rate)||0) * (parseFloat(bl.qty)||1)
-                    return (
-                      <tr key={i}>
-                        <td><input className="form-control form-control-sm" value={bl.service||''} onChange={e => setBillingLine(i,'service',e.target.value)} /></td>
-                        <td><input className="form-control form-control-sm" value={bl.unit||''} onChange={e => setBillingLine(i,'unit',e.target.value)} /></td>
-                        <td><input type="number" className="form-control form-control-sm" value={bl.rate||''} onChange={e => setBillingLine(i,'rate',e.target.value)} /></td>
-                        <td><input type="number" className="form-control form-control-sm" value={bl.qty||''} onChange={e => setBillingLine(i,'qty',e.target.value)} /></td>
-                        <td className="text-right font-bold">${total.toFixed(2)}</td>
-                        <td><input className="form-control form-control-sm" value={bl.remarks||''} onChange={e => setBillingLine(i,'remarks',e.target.value)} /></td>
-                        <td><button className="btn btn-ghost btn-xs" onClick={() => removeBillingLine(i)} style={{color:'var(--red)'}}>✕</button></td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+              <thead>
+                <tr>
+                  <th>Service</th><th>Unit</th><th style={{ width: 90 }}>Rate (SGD)</th>
+                  <th style={{ width: 80 }}>Qty</th><th style={{ width: 100 }}>Total</th>
+                  <th>Remarks</th><th style={{ width: 40 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {form.billing_lines.map((bl, i) => {
+                  const total = (parseFloat(bl.rate) || 0) * (parseFloat(bl.qty) || 1)
+                  return (
+                    <tr key={i}>
+                      <td><input className="form-control form-control-sm" value={bl.service || ''} onChange={e => setBillingLine(i, 'service', e.target.value)} /></td>
+                      <td><input className="form-control form-control-sm" value={bl.unit || ''} onChange={e => setBillingLine(i, 'unit', e.target.value)} /></td>
+                      <td><input type="number" className="form-control form-control-sm" value={bl.rate || ''} onChange={e => setBillingLine(i, 'rate', e.target.value)} /></td>
+                      <td><input type="number" className="form-control form-control-sm" value={bl.qty || ''} onChange={e => setBillingLine(i, 'qty', e.target.value)} /></td>
+                      <td className="text-right font-bold">${total.toFixed(2)}</td>
+                      <td><input className="form-control form-control-sm" value={bl.remarks || ''} onChange={e => setBillingLine(i, 'remarks', e.target.value)} /></td>
+                      <td><button className="btn btn-ghost btn-xs" onClick={() => removeBillingLine(i)} style={{ color: 'var(--red)' }}>✕</button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
             : <p className="text-muted" style={{ fontSize: 13, marginBottom: 12 }}>No billing lines extracted. Add them after creating the job or add manually above.</p>
           }
 

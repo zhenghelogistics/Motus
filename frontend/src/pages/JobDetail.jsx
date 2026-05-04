@@ -8,6 +8,7 @@ import {
   addBillingLine, updateBillingLine, deleteBillingLine,
   uploadDocument, deleteDocument, parseInvoice
 } from '../api'
+import DimensionBoxes from '../components/DimensionBoxes'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold', 'Voided']
@@ -42,6 +43,7 @@ export default function JobDetail() {
   const [gpEditing, setGpEditing] = useState(false)
   const [gpInput, setGpInput] = useState('')
   const [docUploading, setDocUploading] = useState(false)
+  const [doModal, setDoModal] = useState(null)
   const invoiceRef = useRef()
   const logoRef = useRef(null)
 
@@ -583,13 +585,34 @@ export default function JobDetail() {
     doc.save(`ZHL_${job.job_number.replace('/', '-')}_PickupOrder.pdf`)
   }
 
-  // ── Delivery Order PDF (auto-splits: Local vs International based on mode) ──
-  function exportDeliveryOrder() {
+  // ── Delivery Order — opens modal for editing before PDF generation ─────────
+  function openDOModal() {
     const isLocal = ['Local Delivery', 'Local Clearance & Delivery'].includes(job.mode)
-    isLocal ? exportLocalDO() : exportInternationalDO()
+    setDoModal({
+      type: isLocal ? 'local' : 'international',
+      consignee: job.consignee || '',
+      delivery_address: job.delivery_address || '',
+      delivery_contact_name: job.delivery_contact_name || '',
+      delivery_contact_number: job.delivery_contact_number || '',
+      agent: job.agent || '',
+      shipper: job.shipper || '',
+      commodity: job.commodity || '',
+      packages: job.packages != null ? String(job.packages) : '',
+      weight: job.weight != null ? String(job.weight) : '',
+      dimensions: job.dimensions || '',
+      cbm: job.cbm != null ? String(job.cbm) : '',
+      notes: job.notes || '',
+    })
   }
 
-  function exportLocalDO() {
+  function handleDOGenerate(type, fields) {
+    const d = { ...job, ...fields, packages: fields.packages ? parseInt(fields.packages) : job.packages, weight: fields.weight ? parseFloat(fields.weight) : job.weight, cbm: fields.cbm ? parseFloat(fields.cbm) : job.cbm }
+    if (type === 'local' || type === 'both') exportLocalDO(d)
+    if (type === 'international' || type === 'both') exportInternationalDO(d)
+    setDoModal(null)
+  }
+
+  function exportLocalDO(d = job) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 35
@@ -613,8 +636,8 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: 43,
       body: [
-        ['Job No.',      job.job_number,   'Customer Ref', job.customer_ref || '—'],
-        ['Mode',         job.mode || '—',  'Date Out',     job.date_out || '—'],
+        ['Job No.',      d.job_number,   'Customer Ref', d.customer_ref || '—'],
+        ['Mode',         d.mode || '—',  'Date Out',     d.date_out || '—'],
       ],
       columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
       styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
@@ -629,7 +652,7 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: y,
       body: [
-        ['Agent', { content: job.agent || '—', colSpan: 3 }],
+        ['Agent', { content: d.agent || '—', colSpan: 3 }],
       ],
       columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
       styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
@@ -644,9 +667,9 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: y,
       body: [
-        ['Consignee',        { content: job.consignee || '—',         colSpan: 3 }],
-        ['Delivery Address', { content: job.delivery_address || '—',  colSpan: 3 }],
-        ['Contact Name',     job.delivery_contact_name || '—', 'Contact No.', job.delivery_contact_number || '—'],
+        ['Consignee',        { content: d.consignee || '—',         colSpan: 3 }],
+        ['Delivery Address', { content: d.delivery_address || '—',  colSpan: 3 }],
+        ['Contact Name',     d.delivery_contact_name || '—', 'Contact No.', d.delivery_contact_number || '—'],
       ],
       columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
       styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
@@ -662,9 +685,9 @@ export default function JobDetail() {
       startY: y,
       body: [
         ['Shipper',   { content: 'Zhenghe Logistics Pte Ltd', colSpan: 3 }],
-        ['Commodity', { content: job.commodity || '—', colSpan: 3 }],
-        ['Packages',  job.packages != null ? String(job.packages) : '—', 'Weight', job.weight ? `${job.weight} kg` : '—'],
-        ['Dimensions', job.dimensions || '—', 'CBM', job.cbm != null ? String(job.cbm) : '—'],
+        ['Commodity', { content: d.commodity || '—', colSpan: 3 }],
+        ['Packages',  d.packages != null ? String(d.packages) : '—', 'Weight', d.weight ? `${d.weight} kg` : '—'],
+        ['Dimensions', d.dimensions || '—', 'CBM', d.cbm != null ? String(d.cbm) : '—'],
       ],
       columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
       styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
@@ -672,13 +695,13 @@ export default function JobDetail() {
       tableWidth: tw,
     })
 
-    if (job.notes) {
+    if (d.notes) {
       y = doc.lastAutoTable.finalY + 5
       doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
       doc.text('NOTES', ml, y); y += 2
       autoTable(doc, {
         startY: y,
-        body: [[{ content: job.notes, styles: { fontSize: 8.5 } }]],
+        body: [[{ content: d.notes, styles: { fontSize: 8.5 } }]],
         styles: { overflow: 'linebreak', cellPadding: 5, fillColor: [255, 252, 230] },
         margin: { left: ml, right: mr },
         tableWidth: tw,
@@ -702,7 +725,7 @@ export default function JobDetail() {
     doc.save(`ZHL_${job.job_number.replace('/', '-')}_LocalDO.pdf`)
   }
 
-  function exportInternationalDO() {
+  function exportInternationalDO(d = job) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 35
@@ -726,8 +749,8 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: 43,
       body: [
-        ['Job No.',      job.job_number,            'Customer Ref', job.customer_ref || '—'],
-        ['Mode',         job.mode || '—',           'Date Out',     job.date_out || '—'],
+        ['Job No.',      d.job_number,            'Customer Ref', d.customer_ref || '—'],
+        ['Mode',         d.mode || '—',           'Date Out',     d.date_out || '—'],
       ],
       columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
       styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
@@ -741,9 +764,9 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: y,
       body: [
-        ['Consignee',        { content: job.consignee || '—',         colSpan: 3 }],
-        ['Delivery Address', { content: job.delivery_address || '—',  colSpan: 3 }],
-        ['Contact Name',     job.delivery_contact_name || '—', 'Contact No.', job.delivery_contact_number || '—'],
+        ['Consignee',        { content: d.consignee || '—',         colSpan: 3 }],
+        ['Delivery Address', { content: d.delivery_address || '—',  colSpan: 3 }],
+        ['Contact Name',     d.delivery_contact_name || '—', 'Contact No.', d.delivery_contact_number || '—'],
       ],
       columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
       styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
@@ -757,10 +780,10 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: y,
       body: [
-        ['Shipper',    { content: job.shipper || '—',    colSpan: 3 }],
-        ['Commodity',  { content: job.commodity || '—',  colSpan: 3 }],
-        ['Packages',  job.packages != null ? String(job.packages) : '—', 'Weight', job.weight ? `${job.weight} kg` : '—'],
-        ['Dimensions', job.dimensions || '—', 'CBM', job.cbm != null ? String(job.cbm) : '—'],
+        ['Shipper',    { content: d.shipper || '—',    colSpan: 3 }],
+        ['Commodity',  { content: d.commodity || '—',  colSpan: 3 }],
+        ['Packages',  d.packages != null ? String(d.packages) : '—', 'Weight', d.weight ? `${d.weight} kg` : '—'],
+        ['Dimensions', d.dimensions || '—', 'CBM', d.cbm != null ? String(d.cbm) : '—'],
       ],
       columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
       styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
@@ -768,13 +791,13 @@ export default function JobDetail() {
       tableWidth: tw,
     })
 
-    if (job.notes) {
+    if (d.notes) {
       y = doc.lastAutoTable.finalY + 5
       doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
       doc.text('NOTES', ml, y); y += 2
       autoTable(doc, {
         startY: y,
-        body: [[{ content: job.notes, styles: { fontSize: 8.5 } }]],
+        body: [[{ content: d.notes, styles: { fontSize: 8.5 } }]],
         styles: { overflow: 'linebreak', cellPadding: 5, fillColor: [255, 252, 230] },
         margin: { left: ml, right: mr },
         tableWidth: tw,
@@ -811,6 +834,15 @@ export default function JobDetail() {
 
   return (
     <div>
+      {/* Delivery Order Modal */}
+      {doModal && (
+        <DOModal
+          modal={doModal}
+          onClose={() => setDoModal(null)}
+          onGenerate={handleDOGenerate}
+        />
+      )}
+
       {/* Send to Accounts Modal */}
       {sendToAccountsModal && (
         <div className="modal-overlay" onClick={() => setSendToAccountsModal(false)}>
@@ -903,7 +935,7 @@ export default function JobDetail() {
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-ghost btn-sm" onClick={exportPDF}>↓ Costing PDF</button>
           <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}>🚛 Pickup Order</button>
-          <button className="btn btn-ghost btn-sm" onClick={exportDeliveryOrder}>📦 Delivery Order</button>
+          <button className="btn btn-ghost btn-sm" onClick={openDOModal}>📦 Delivery Order</button>
           <button className="btn btn-outline btn-sm" onClick={exportAccountsPDF}>📄 Accounts PDF</button>
           <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving || job.status === 'Voided'}>
             {saving ? <><span className="spinner"></span> Saving...</> : '✓ Save Changes'}
@@ -1108,101 +1140,6 @@ function InfoEdit({ form, setField }) {
     </div>
   )
 
-  const MAX_BOXES = 20
-
-  function parseToDimBoxes(dimStr, pkgCount) {
-    const count = Math.min(Math.max(parseInt(pkgCount) || 1, 1), MAX_BOXES)
-    const regex = /(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)\s*[xX×*]\s*(\d+\.?\d*)/g
-    const matches = []
-    let m
-    if (dimStr) { while ((m = regex.exec(dimStr)) !== null) matches.push({ l: m[1], w: m[2], h: m[3] }) }
-    const last = matches.length > 0 ? matches[matches.length - 1] : { l: '', w: '', h: '' }
-    return Array(count).fill(null).map((_, i) => i < matches.length ? { ...matches[i] } : { ...last })
-  }
-
-  function serializeDimBoxes(boxes) {
-    return boxes.filter(b => b.l && b.w && b.h).map(b => `${b.l}x${b.w}x${b.h} cm`).join(', ')
-  }
-
-  function calcCBM(boxes) {
-    let total = 0, any = false
-    for (const { l, w, h } of boxes) {
-      const lv = parseFloat(l), wv = parseFloat(w), hv = parseFloat(h)
-      if (lv > 0 && wv > 0 && hv > 0) { total += (lv/100)*(wv/100)*(hv/100); any = true }
-    }
-    return any ? parseFloat(total.toFixed(4)) : null
-  }
-
-  function calcVolWt(boxes) {
-    let total = 0, any = false
-    for (const { l, w, h } of boxes) {
-      const lv = parseFloat(l), wv = parseFloat(w), hv = parseFloat(h)
-      if (lv > 0 && wv > 0 && hv > 0) { total += (lv*wv*hv)/6000; any = true }
-    }
-    return any ? parseFloat(total.toFixed(2)) : null
-  }
-
-  const [dimBoxes, setDimBoxes] = useState(() => parseToDimBoxes(form.dimensions, form.packages))
-
-  useEffect(() => {
-    const boxes = parseToDimBoxes(form.dimensions, form.packages)
-    setDimBoxes(boxes)
-    const cbm = calcCBM(boxes)
-    if (cbm != null) setField('cbm', cbm)
-  }, [form.id])
-
-  function updateBox(i, key, val) {
-    setDimBoxes(prev => {
-      const next = prev.map((b, idx) => idx === i ? { ...b, [key]: val } : b)
-      setField('dimensions', serializeDimBoxes(next))
-      const cbm = calcCBM(next)
-      if (cbm != null) setField('cbm', cbm)
-      return next
-    })
-  }
-
-  function handlePkgsChange(val) {
-    setField('packages', val)
-    const count = Math.min(Math.max(parseInt(val) || 1, 1), MAX_BOXES)
-    setDimBoxes(prev => {
-      const last = prev.length > 0 ? prev[prev.length - 1] : { l: '', w: '', h: '' }
-      const next = count >= prev.length
-        ? [...prev, ...Array(count - prev.length).fill(null).map(() => ({ ...last }))]
-        : prev.slice(0, count)
-      setField('dimensions', serializeDimBoxes(next))
-      const cbm = calcCBM(next)
-      if (cbm != null) setField('cbm', cbm)
-      return next
-    })
-  }
-
-  function addBox() {
-    setDimBoxes(prev => {
-      const last = prev.length > 0 ? { ...prev[prev.length - 1] } : { l: '', w: '', h: '' }
-      const next = [...prev, { ...last }]
-      setField('packages', next.length)
-      setField('dimensions', serializeDimBoxes(next))
-      const cbm = calcCBM(next)
-      if (cbm != null) setField('cbm', cbm)
-      return next
-    })
-  }
-
-  function removeBox(idx) {
-    setDimBoxes(prev => {
-      if (prev.length <= 1) return prev
-      const next = prev.filter((_, i) => i !== idx)
-      setField('packages', next.length)
-      setField('dimensions', serializeDimBoxes(next))
-      const cbm = calcCBM(next)
-      if (cbm != null) setField('cbm', cbm)
-      return next
-    })
-  }
-
-  const tooMany = (parseInt(form.packages) || 0) > MAX_BOXES
-  const volWeight = calcVolWt(dimBoxes)
-
   return (
     <div>
       <div className="form-grid-4 mb-4">
@@ -1236,19 +1173,12 @@ function InfoEdit({ form, setField }) {
         </div>
       </div>
 
-      {/* Packages / Weight / CBM row */}
-      <div className="form-grid-4 mb-2">
-        <div className="form-group">
-          <label className="form-label">Packages</label>
-          <input type="number" className="form-control" value={form.packages||''} min="1" onChange={e => handlePkgsChange(e.target.value)} />
-        </div>
+      {/* Weight / CBM */}
+      <div className="form-grid-3 mb-2" style={{ maxWidth: 420 }}>
         {inp('weight','Weight (kg)','number')}
         <div className="form-group">
           <label className="form-label">CBM <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>(auto-calc)</span></label>
           <input type="number" className="form-control" value={form.cbm||''} onChange={e => setField('cbm', e.target.value)} placeholder="Auto from dims" />
-          {volWeight != null && (
-            <div style={{ fontSize:11, color:'var(--blue)', marginTop:3, fontWeight:600 }}>Vol Wt (air): {volWeight} kg</div>
-          )}
         </div>
       </div>
 
@@ -1257,69 +1187,16 @@ function InfoEdit({ form, setField }) {
         <div style={{ fontSize:12, fontWeight:700, color:'var(--navy)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:12 }}>
           Dimensions <span style={{ fontWeight:400, fontSize:11, textTransform:'none', color:'var(--text-muted)' }}>— L × W × H (cm) per box</span>
         </div>
-        {tooMany ? (
-          <div>
-            <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:8 }}>More than 20 boxes — enter summary dimensions:</p>
-            <input className="form-control" value={form.dimensions||''} onChange={e => setField('dimensions', e.target.value)} placeholder="e.g. 60x40x30 cm" />
-          </div>
-        ) : (
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 168px', gap:16, alignItems:'start' }}>
-
-            {/* Box rows */}
-            <div>
-              {dimBoxes.map((box, i) => (
-                <div key={i} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:7 }}>
-                  <span style={{ fontSize:11, fontWeight:700, color:'var(--navy)', minWidth:44 }}>Box {i+1}</span>
-                  <input type="number" className="form-control form-control-sm" placeholder="L" value={box.l}
-                    onChange={e => updateBox(i,'l',e.target.value)} style={{ flex:1, minWidth:50 }} />
-                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>×</span>
-                  <input type="number" className="form-control form-control-sm" placeholder="W" value={box.w}
-                    onChange={e => updateBox(i,'w',e.target.value)} style={{ flex:1, minWidth:50 }} />
-                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>×</span>
-                  <input type="number" className="form-control form-control-sm" placeholder="H" value={box.h}
-                    onChange={e => updateBox(i,'h',e.target.value)} style={{ flex:1, minWidth:50 }} />
-                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>cm</span>
-                  {dimBoxes.length > 1 && (
-                    <button onClick={() => removeBox(i)} title="Remove box"
-                      style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#9CA3AF', fontSize:18, lineHeight:1, padding:'0 2px' }}>×</button>
-                  )}
-                </div>
-              ))}
-              <button onClick={addBox}
-                style={{ marginTop:4, background:'none', border:'1px dashed var(--border-solid)', borderRadius:6, color:'var(--blue)', fontSize:12, fontWeight:600, padding:'5px 14px', cursor:'pointer' }}>
-                + Add Box
-              </button>
-            </div>
-
-            {/* CBM breakdown panel */}
-            <div style={{ background:'var(--bg-hover,#EEF3F8)', borderRadius:8, padding:12 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:'var(--navy)', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.4px' }}>CBM Breakdown</div>
-              {dimBoxes.map((box, i) => {
-                const lv = parseFloat(box.l), wv = parseFloat(box.w), hv = parseFloat(box.h)
-                const bc = lv > 0 && wv > 0 && hv > 0 ? (lv/100)*(wv/100)*(hv/100) : null
-                return (
-                  <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:11, marginBottom:5 }}>
-                    <span style={{ color:'var(--text-muted)' }}>Box {i+1}</span>
-                    <span style={{ fontWeight:600 }}>{bc != null ? bc.toFixed(4) : '—'}</span>
-                  </div>
-                )
-              })}
-              <div style={{ borderTop:'1px solid var(--border-solid,#D1DCE8)', marginTop:8, paddingTop:8 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, fontWeight:700, color:'var(--navy)', marginBottom:4 }}>
-                  <span>Total</span>
-                  <span>{calcCBM(dimBoxes)?.toFixed(4) ?? '—'} m³</span>
-                </div>
-                {volWeight != null && (
-                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--blue)', fontWeight:600 }}>
-                    <span>Vol Wt</span>
-                    <span>{volWeight} kg</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-          </div>
-        )}
+        <DimensionBoxes
+          packages={form.packages}
+          dimensions={form.dimensions}
+          syncKey={form.id}
+          onChange={({ packages, dimensions, cbm }) => {
+            if (packages !== undefined) setField('packages', packages)
+            if (dimensions !== undefined) setField('dimensions', dimensions)
+            if (cbm !== null && cbm !== undefined) setField('cbm', cbm)
+          }}
+        />
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
@@ -1483,6 +1360,88 @@ function DocDropZone({ onUpload, disabled }) {
         onDragOver={e => { e.preventDefault(); if (!disabled) setDragOver(true) }}
         onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
         {disabled ? 'Uploading...' : 'Drag & drop CI, PL, DO, or any file here'}
+      </div>
+    </div>
+  )
+}
+
+// ── Delivery Order Modal ──────────────────────────────────────────────────────
+function DOModal({ modal, onClose, onGenerate }) {
+  const [type, setType] = useState(modal.type)
+  const [fields, setFields] = useState({ ...modal })
+  const f = (k, v) => setFields(prev => ({ ...prev, [k]: v }))
+
+  const inp = (key, label, inputType = 'text') => (
+    <div className="form-group">
+      <label className="form-label">{label}</label>
+      <input type={inputType} className="form-control" value={fields[key] || ''} onChange={e => f(key, e.target.value)} />
+    </div>
+  )
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 620 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Delivery Order</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{ padding: '20px 24px', maxHeight: '72vh', overflowY: 'auto' }}>
+
+          {/* DO Type */}
+          <div className="form-group mb-4">
+            <label className="form-label">DO Type</label>
+            <div style={{ display: 'flex', gap: 24, marginTop: 4 }}>
+              {[['local', 'Local DO'], ['international', 'International DO'], ['both', 'Both (generate 2 PDFs)']].map(([v, l]) => (
+                <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13, fontWeight: type === v ? 700 : 400, color: type === v ? 'var(--navy)' : 'var(--text-muted)' }}>
+                  <input type="radio" name="do-type" value={v} checked={type === v} onChange={() => setType(v)} />
+                  {l}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-grid-2 mb-3">
+            {inp('consignee', 'Consignee')}
+            {inp('agent', 'Agent / Carrier')}
+          </div>
+          <div className="form-group mb-3">
+            <label className="form-label">Delivery Address</label>
+            <input className="form-control" value={fields.delivery_address || ''} onChange={e => f('delivery_address', e.target.value)} />
+          </div>
+          <div className="form-grid-2 mb-3">
+            {inp('delivery_contact_name', 'Contact Name')}
+            {inp('delivery_contact_number', 'Contact Number')}
+          </div>
+          {(type === 'international' || type === 'both') && (
+            <div className="form-group mb-3">
+              <label className="form-label">Shipper</label>
+              <input className="form-control" value={fields.shipper || ''} onChange={e => f('shipper', e.target.value)} />
+            </div>
+          )}
+          <div className="form-group mb-3">
+            <label className="form-label">Commodity</label>
+            <input className="form-control" value={fields.commodity || ''} onChange={e => f('commodity', e.target.value)} />
+          </div>
+          <div className="form-grid-4 mb-3">
+            {inp('packages', 'Packages', 'number')}
+            {inp('weight', 'Weight (kg)', 'number')}
+            {inp('cbm', 'CBM', 'number')}
+          </div>
+          <div className="form-group mb-3">
+            <label className="form-label">Dimensions</label>
+            <input className="form-control" value={fields.dimensions || ''} onChange={e => f('dimensions', e.target.value)} placeholder="e.g. 60x40x30 cm" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Notes</label>
+            <textarea className="form-control" rows={2} value={fields.notes || ''} onChange={e => f('notes', e.target.value)} />
+          </div>
+        </div>
+        <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-navy" onClick={() => onGenerate(type, fields)}>
+            📄 Generate PDF{type === 'both' ? 's' : ''}
+          </button>
+        </div>
       </div>
     </div>
   )

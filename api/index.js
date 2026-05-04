@@ -240,6 +240,8 @@ app.get('/api/jobs', async (req, res) => {
     if (mode)   { where += ` AND j.mode=$${i}`;         p.push(mode);   i++; }
     if (agent)  { where += ` AND j.agent ILIKE $${i}`;  p.push(`%${agent}%`); i++; }
 
+    const limitVal = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 500) : null
+    const limitClause = limitVal ? `LIMIT ${limitVal}` : ''
     const q = `
       SELECT j.*,
         ROUND(COALESCE(c.total,0)::numeric, 2) AS cost_sgd,
@@ -256,6 +258,7 @@ app.get('/api/jobs', async (req, res) => {
       LEFT JOIN (SELECT job_id, SUM(rate*qty)  AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
       ${where}
       ORDER BY j.id DESC
+      ${limitClause}
     `;
     const result = await pool.query(q, p);
     res.json(result.rows.map(r => ({
@@ -427,6 +430,37 @@ app.delete('/api/jobs/:id/documents/:did', async (req, res) => {
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ─── CUSTOMERS ──────────────────────────────────────────────────────────────
+app.get('/api/customers', async (req, res) => {
+  try {
+    const { search } = req.query
+    const p = search ? [`%${search}%`] : []
+    const whereExtra = search
+      ? `AND (COALESCE(NULLIF(j.customer_name,''), j.shipper) ILIKE $1)`
+      : ''
+    const r = await pool.query(`
+      SELECT j.customer_name, j.customer_email, j.customer_contact_name, j.customer_contact_number,
+             COALESCE(NULLIF(j.customer_name,''), j.shipper) AS display_name
+      FROM jobs j
+      WHERE COALESCE(NULLIF(j.customer_name,''), j.shipper) IS NOT NULL
+        AND COALESCE(NULLIF(j.customer_name,''), j.shipper) != ''
+        ${whereExtra}
+      ORDER BY j.id DESC
+      LIMIT 100
+    `, p)
+    const seen = new Set()
+    const unique = []
+    for (const row of r.rows) {
+      if (!seen.has(row.display_name)) {
+        seen.add(row.display_name)
+        unique.push(row)
+        if (unique.length >= 15) break
+      }
+    }
+    res.json(unique)
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
 
 // ─── PARSE EMAIL ────────────────────────────────────────────────────────────
 app.post('/api/parse-email', async (req, res) => {

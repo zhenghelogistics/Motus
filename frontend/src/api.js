@@ -50,4 +50,6 @@ export const parseInvoice = (file) => {
 
 export const getDashboard = () => api.get('/dashboard')
 
+export const getCustomers = (search) => api.get('/customers', { params: search ? { search } : {} })
+
 export default api
