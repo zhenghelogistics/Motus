@@ -31,7 +31,7 @@ function requireAuth(req, res, next) {
     next()
   } catch (e) {
     console.error('[ZHL] requireAuth failed:', e.constructor.name, e.message)
-    res.status(401).json({ error: 'Unauthorized — invalid or expired token' })
+    res.status(401).json({ error: 'Unauthorized — invalid or expired token', _debug: e.constructor.name })
   }
 }
 
@@ -206,7 +206,14 @@ app.use('/api', (req, res, next) => {
 
 // ─── HEALTH ─────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', db_url_set: !!process.env.DATABASE_URL });
+  const s = process.env.SUPABASE_JWT_SECRET
+  res.json({
+    status: 'ok',
+    db_url_set: !!process.env.DATABASE_URL,
+    jwt_secret_set: !!s,
+    jwt_secret_length: s?.length || 0,
+    jwt_secret_prefix: s ? s.substring(0, 4) : null,
+  });
 });
 
 app.get('/api/dbtest', async (req, res) => {
