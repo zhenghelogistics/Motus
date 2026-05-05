@@ -3,6 +3,15 @@
 
 export const CHANGELOG = [
   {
+    id: 'subcert-export',
+    date: '2026-05-05',
+    title: 'Subsidiary Export Certificate PDF',
+    description:
+      'A "Sub Cert" button is now on every job. Click it, enter ETD Singapore, Outward Permit No, and Destination — everything else (exporter, consignee, invoice details, weight) is pre-filled from the job. Generates a properly formatted Subsidiary Export Certificate PDF for GST claims.',
+    route: '/jobs',
+    routeLabel: 'Open Movement Tracker',
+  },
+  {
     id: 'job-status-widget',
     date: '2026-05-05',
     title: 'Job Status Overview on Dashboard',

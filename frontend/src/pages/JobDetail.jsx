@@ -44,6 +44,7 @@ export default function JobDetail() {
   const [gpInput, setGpInput] = useState('')
   const [docUploading, setDocUploading] = useState(false)
   const [doModal, setDoModal] = useState(null)
+  const [subCertModal, setSubCertModal] = useState(null)
   const invoiceRef = useRef()
   const logoRef = useRef(null)
 
@@ -612,6 +613,113 @@ export default function JobDetail() {
     setDoModal(null)
   }
 
+  function openSubCertModal() {
+    setSubCertModal({ etd: '', permit_no: '', destination: '' })
+  }
+
+  function exportSubCert(fields) {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pw = 210, ph = 297
+
+    function ordSuffix(n) {
+      if (n >= 11 && n <= 13) return 'TH'
+      return ['TH','ST','ND','RD','TH','TH','TH','TH','TH','TH'][n % 10]
+    }
+    const now = new Date()
+    const MONTHS = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER']
+    const dateStr = `${now.getDate()}${ordSuffix(now.getDate())} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`
+
+    const totalSaleVal = (job.billing_lines||[]).reduce((s,l) => s + (l.rate||0)*(l.qty||1), 0)
+    const invoiceVal = totalSaleVal > 0
+      ? `SGD ${totalSaleVal.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : '—'
+
+    let y = 10
+
+    // Logo + company header (centered)
+    if (logoRef.current) {
+      doc.addImage(logoRef.current, 'PNG', (pw - 40) / 2, y, 40, 22)
+      y += 26
+    } else { y += 4 }
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0, 0, 0)
+    doc.text('ZHENGHE LOGISTICS PTE LTD', pw / 2, y, { align: 'center' }); y += 6
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9)
+    doc.text('75 Bukit Timah Road #05-01 Boon Siew Building', pw / 2, y, { align: 'center' }); y += 4.5
+    doc.text('Singapore 229833', pw / 2, y, { align: 'center' }); y += 4.5
+    doc.text('Reg No: 201734570K', pw / 2, y, { align: 'center' }); y += 4.5
+    doc.text('Tel: 6955 8298  Fax: 6980 2095', pw / 2, y, { align: 'center' }); y += 7
+
+    // Divider line
+    doc.setDrawColor(0); doc.setLineWidth(0.3)
+    doc.line(14, y, pw - 14, y); y += 9
+
+    // Title
+    doc.setFont('courier', 'bold'); doc.setFontSize(16)
+    doc.text('SUBSIDIARY EXPORT CERTIFICATE', pw / 2, y, { align: 'center' })
+    const tw = doc.getTextWidth('SUBSIDIARY EXPORT CERTIFICATE')
+    doc.setLineWidth(0.5)
+    doc.line((pw - tw) / 2, y + 1.5, (pw + tw) / 2, y + 1.5)
+    y += 8
+
+    // OUR REF
+    doc.setFont('courier', 'normal'); doc.setFontSize(10)
+    doc.text(`OUR REF : ${job.job_number}`, pw / 2, y, { align: 'center' }); y += 14
+
+    // Field layout constants
+    const lx = 20      // label start x
+    const cx = 66      // colon x — wide enough for "OUTWARD PERMIT NO"
+    const vx = cx + 4  // value start x
+
+    function fieldLine(label, value) {
+      doc.setFont('courier', 'normal'); doc.setFontSize(10); doc.setTextColor(0, 0, 0)
+      doc.text(label, lx, y)
+      doc.text(': ' + (value || '—'), cx, y)
+      y += 5.5
+    }
+
+    function fieldBlock(label, lines) {
+      doc.setFont('courier', 'normal'); doc.setFontSize(10); doc.setTextColor(0, 0, 0)
+      doc.text(label, lx, y)
+      doc.text(':', cx, y)
+      lines.forEach((line, i) => { if (line.trim()) { doc.text(line.trim(), vx, y + i * 5) } })
+      y += Math.max(lines.filter(l => l.trim()).length, 1) * 5 + 3
+    }
+
+    // Exporter — shipper name + pickup address lines
+    const exporterLines = [job.shipper || '—', ...(job.pickup_address || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean)]
+    fieldBlock('EXPORTER NAME', exporterLines); y += 2
+
+    // Consignee — consignee name + delivery address lines
+    const consigneeLines = [job.consignee || '—', ...(job.delivery_address || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean)]
+    fieldBlock('CONSIGNEE NAME', consigneeLines); y += 2
+
+    fieldLine('ETD SINGAPORE', fields.etd || '—')
+    fieldLine('OUTWARD PERMIT NO', fields.permit_no || '—')
+    fieldLine('DESTINATION', fields.destination || '—')
+    y += 4
+
+    fieldLine('PCS', job.packages ? `${job.packages} Pcs` : '—')
+    fieldLine('WEIGHT', job.weight ? `${job.weight}kg` : '—')
+    fieldLine('INVOICE NO', job.customer_ref || job.job_number)
+    fieldLine('INVOICE VALUE', invoiceVal)
+    fieldLine('DATE', dateStr)
+    y += 14
+
+    // Signatory
+    doc.setFont('courier', 'normal'); doc.setFontSize(10); doc.setTextColor(0, 0, 0)
+    doc.text('BRANDON RODRIGUES', lx, y); y += 5
+    doc.text('SALES MANAGEMENT', lx, y); y += 5
+    doc.text('ZHENGHE LOGISTICS PTE LTD', lx, y)
+
+    // Footer
+    doc.setFont('courier', 'normal'); doc.setFontSize(8); doc.setTextColor(80, 80, 80)
+    doc.text('THIS IS COMPUTER GENERATED, NO SIGNATURE REQUIRED', pw / 2, ph - 10, { align: 'center' })
+
+    setSubCertModal(null)
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_SubCert.pdf`)
+  }
+
   function exportLocalDO(d = job) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
@@ -843,6 +951,15 @@ export default function JobDetail() {
         />
       )}
 
+      {/* Subsidiary Export Certificate Modal */}
+      {subCertModal && (
+        <SubCertModal
+          modal={subCertModal}
+          onClose={() => setSubCertModal(null)}
+          onGenerate={exportSubCert}
+        />
+      )}
+
       {/* Send to Accounts Modal */}
       {sendToAccountsModal && (
         <div className="modal-overlay" onClick={() => setSendToAccountsModal(false)}>
@@ -936,6 +1053,7 @@ export default function JobDetail() {
           <button className="btn btn-ghost btn-sm" onClick={exportPDF}>↓ Costing PDF</button>
           <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}>🚛 Pickup Order</button>
           <button className="btn btn-ghost btn-sm" onClick={openDOModal}>📦 Delivery Order</button>
+          <button className="btn btn-ghost btn-sm" onClick={openSubCertModal}>🛃 Sub Cert</button>
           <button className="btn btn-outline btn-sm" onClick={exportAccountsPDF}>📄 Accounts PDF</button>
           <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving || job.status === 'Voided'}>
             {saving ? <><span className="spinner"></span> Saving...</> : '✓ Save Changes'}
@@ -1360,6 +1478,62 @@ function DocDropZone({ onUpload, disabled }) {
         onDragOver={e => { e.preventDefault(); if (!disabled) setDragOver(true) }}
         onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
         {disabled ? 'Uploading...' : 'Drag & drop CI, PL, DO, or any file here'}
+      </div>
+    </div>
+  )
+}
+
+// ── Subsidiary Export Certificate Modal ──────────────────────────────────────
+function SubCertModal({ modal, onClose, onGenerate }) {
+  const [fields, setFields] = useState({ ...modal })
+  const f = (k, v) => setFields(prev => ({ ...prev, [k]: v }))
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Subsidiary Export Certificate</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{ padding: '20px 24px' }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.6 }}>
+            Exporter, consignee, invoice details, and weight are pre-filled from the job. Enter the 3 customs fields below.
+          </p>
+          <div className="form-group mb-3">
+            <label className="form-label">ETD Singapore</label>
+            <input
+              className="form-control"
+              value={fields.etd || ''}
+              onChange={e => f('etd', e.target.value)}
+              placeholder="e.g. 25th April 2026"
+              autoFocus
+            />
+          </div>
+          <div className="form-group mb-3">
+            <label className="form-label">Outward Permit No.</label>
+            <input
+              className="form-control"
+              value={fields.permit_no || ''}
+              onChange={e => f('permit_no', e.target.value)}
+              placeholder="e.g. OT6D3924490O"
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Destination</label>
+            <input
+              className="form-control"
+              value={fields.destination || ''}
+              onChange={e => f('destination', e.target.value)}
+              placeholder="e.g. Bali"
+            />
+          </div>
+        </div>
+        <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-navy" onClick={() => onGenerate(fields)}>
+            🛃 Generate Sub Cert PDF
+          </button>
+        </div>
       </div>
     </div>
   )
