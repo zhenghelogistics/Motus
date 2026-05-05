@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
 import MovementTracker from './pages/MovementTracker'
@@ -7,6 +7,7 @@ import EmailIntake from './pages/EmailIntake'
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
+import { CHANGELOG } from './changelog'
 
 const NAV = [
   { to: '/',       icon: '▦',  label: 'Dashboard',         exact: true },
@@ -18,6 +19,63 @@ const NAV = [
 const DEFAULT_RATES = {
   USD: 0.745, EUR: 0.688, GBP: 0.589, CNY: 5.41,
   MYR: 3.48, JPY: 113.2, AUD: 1.145, HKD: 5.82, INR: 62.1,
+}
+
+const SEEN_KEY = 'changelog_seen_count'
+
+function WhatsNewModal({ onClose }) {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    localStorage.setItem(SEEN_KEY, String(CHANGELOG.length))
+  }, [])
+
+  function go(route) {
+    onClose()
+    navigate(route)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 style={{ fontSize: 16 }}>What's New</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{ padding: '4px 20px 20px', maxHeight: '70vh', overflowY: 'auto' }}>
+          {CHANGELOG.map((entry, i) => (
+            <div key={entry.id} style={{
+              borderLeft: `3px solid ${i === 0 ? '#185FA5' : '#D1DCE8'}`,
+              paddingLeft: 16,
+              paddingTop: 14,
+              paddingBottom: 14,
+              borderBottom: i < CHANGELOG.length - 1 ? '1px solid var(--border)' : 'none',
+              marginLeft: 4,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)', flex: 1 }}>{entry.title}</span>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, color: i === 0 ? '#185FA5' : '#6B7E93',
+                  background: i === 0 ? '#E8F1FA' : 'var(--bg-hover)',
+                  borderRadius: 6, padding: '2px 7px', flexShrink: 0, whiteSpace: 'nowrap',
+                }}>{entry.date}</span>
+              </div>
+              <p style={{ fontSize: 13, color: '#4A5568', lineHeight: 1.6, margin: '0 0 10px' }}>{entry.description}</p>
+              {entry.route && (
+                <button
+                  className="btn btn-sm"
+                  style={{ fontSize: 12, padding: '4px 12px', border: '1.5px solid var(--navy)', color: 'var(--navy)', background: 'transparent', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font)' }}
+                  onClick={() => go(entry.route)}
+                >
+                  {entry.routeLabel} →
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function CurrencyConverter({ onClose }) {
@@ -124,7 +182,7 @@ function CurrencyConverter({ onClose }) {
   )
 }
 
-function Sidebar({ onCurrencyClick }) {
+function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount }) {
   const { user, signOut } = useAuth()
 
   return (
@@ -154,6 +212,22 @@ function Sidebar({ onCurrencyClick }) {
       </nav>
 
       <div className="sidebar-bottom">
+        <button
+          className="sidebar-link"
+          onClick={onWhatsNewClick}
+          style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', marginBottom: 4, position: 'relative' }}
+        >
+          <span className="sidebar-icon">★</span>
+          What's New
+          {unreadCount > 0 && (
+            <span style={{
+              position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+              background: '#EF4444', color: 'white', borderRadius: 10,
+              fontSize: 10, fontWeight: 800, padding: '1px 6px', minWidth: 18, textAlign: 'center',
+            }}>{unreadCount}</span>
+          )}
+        </button>
+
         <button
           className="sidebar-link"
           onClick={onCurrencyClick}
@@ -228,6 +302,9 @@ function HashErrorBanner() {
 function AppShell() {
   const { user, loading } = useAuth()
   const [showCurrency, setShowCurrency] = useState(false)
+  const [showWhatsNew, setShowWhatsNew] = useState(false)
+  const seen = parseInt(localStorage.getItem(SEEN_KEY) || '0', 10)
+  const unreadCount = Math.max(0, CHANGELOG.length - seen)
 
   // Supabase redirects auth errors to root with #error=... hash fragments
   if (window.location.hash.includes('error=')) return <HashErrorBanner />
@@ -248,7 +325,11 @@ function AppShell() {
   // Logged in → show the app
   return (
     <div className="app-layout">
-      <Sidebar onCurrencyClick={() => setShowCurrency(true)} />
+      <Sidebar
+        onCurrencyClick={() => setShowCurrency(true)}
+        onWhatsNewClick={() => setShowWhatsNew(true)}
+        unreadCount={unreadCount}
+      />
       <main className="main-content">
         <Routes>
           <Route path="/"         element={<Dashboard />} />
@@ -259,6 +340,7 @@ function AppShell() {
         </Routes>
       </main>
       {showCurrency && <CurrencyConverter onClose={() => setShowCurrency(false)} />}
+      {showWhatsNew && <WhatsNewModal onClose={() => setShowWhatsNew(false)} />}
     </div>
   )
 }
