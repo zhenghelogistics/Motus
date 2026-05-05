@@ -4,7 +4,6 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
-const jwt = require('jsonwebtoken');
 const app = express();
 
 const pool = new Pool({
@@ -23,15 +22,22 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 // ─── AUTH MIDDLEWARE ─────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://wwaupgxlzardsrxikuvj.supabase.co'
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Unauthorized — no token' })
   try {
-    req.user = jwt.verify(token, Buffer.from(process.env.SUPABASE_JWT_SECRET, 'base64'))
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'apikey': process.env.SUPABASE_SERVICE_KEY
+      }
+    })
+    if (!r.ok) return res.status(401).json({ error: 'Unauthorized — invalid or expired session' })
+    req.user = await r.json()
     next()
   } catch (e) {
-    console.error('[ZHL] requireAuth failed:', e.constructor.name, e.message)
-    res.status(401).json({ error: 'Unauthorized — invalid or expired token', _debug: e.constructor.name })
+    console.error('[ZHL] requireAuth error:', e.message)
+    res.status(401).json({ error: 'Unauthorized' })
   }
 }
 
@@ -206,14 +212,7 @@ app.use('/api', (req, res, next) => {
 
 // ─── HEALTH ─────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
-  const s = process.env.SUPABASE_JWT_SECRET
-  res.json({
-    status: 'ok',
-    db_url_set: !!process.env.DATABASE_URL,
-    jwt_secret_set: !!s,
-    jwt_secret_length: s?.length || 0,
-    jwt_secret_prefix: s ? s.substring(0, 4) : null,
-  });
+  res.json({ status: 'ok', db_url_set: !!process.env.DATABASE_URL });
 });
 
 app.get('/api/dbtest', async (req, res) => {
