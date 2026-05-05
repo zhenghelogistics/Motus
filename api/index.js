@@ -440,25 +440,17 @@ app.get('/api/customers', async (req, res) => {
       ? `AND (COALESCE(NULLIF(j.customer_name,''), j.shipper) ILIKE $1)`
       : ''
     const r = await pool.query(`
-      SELECT j.customer_name, j.customer_email, j.customer_contact_name, j.customer_contact_number,
-             COALESCE(NULLIF(j.customer_name,''), j.shipper) AS display_name
+      SELECT DISTINCT ON (COALESCE(NULLIF(j.customer_name,''), j.shipper))
+        j.customer_name, j.customer_email, j.customer_contact_name, j.customer_contact_number,
+        COALESCE(NULLIF(j.customer_name,''), j.shipper) AS display_name
       FROM jobs j
       WHERE COALESCE(NULLIF(j.customer_name,''), j.shipper) IS NOT NULL
         AND COALESCE(NULLIF(j.customer_name,''), j.shipper) != ''
         ${whereExtra}
-      ORDER BY j.id DESC
-      LIMIT 100
+      ORDER BY COALESCE(NULLIF(j.customer_name,''), j.shipper), j.id DESC
+      LIMIT 15
     `, p)
-    const seen = new Set()
-    const unique = []
-    for (const row of r.rows) {
-      if (!seen.has(row.display_name)) {
-        seen.add(row.display_name)
-        unique.push(row)
-        if (unique.length >= 15) break
-      }
-    }
-    res.json(unique)
+    res.json(r.rows)
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 

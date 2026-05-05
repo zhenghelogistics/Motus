@@ -555,71 +555,98 @@ app.get('/api/dashboard', async (req, res) => {
   try {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
     const today = now.toISOString().split('T')[0];
     const in7days = new Date(now.getTime() + 7*24*60*60*1000).toISOString().split('T')[0];
 
-    const monthJobsResult = await pool.query('SELECT id FROM jobs WHERE created_at >= $1', [monthStart]);
-    const monthIds = monthJobsResult.rows.map(j => j.id);
+    // All queries run in parallel — no loops, no N+1
+    const [monthRes, byModeRes, trendRes, upcomingRes, flaggedRes, statusRes, missingCountRes] = await Promise.all([
+      pool.query(`
+        SELECT COUNT(DISTINCT j.id) AS jobs,
+          COALESCE(SUM(b.total),0) AS revenue,
+          COALESCE(SUM(c.total),0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        WHERE j.created_at >= $1
+      `, [monthStart]),
 
-    let monthRevenue = 0, monthCost = 0;
-    for (const id of monthIds) {
-      const c = await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM cost_lines WHERE job_id=$1', [id]);
-      const b = await pool.query('SELECT COALESCE(SUM(rate*qty),0) as t FROM billing_lines WHERE job_id=$1', [id]);
-      monthCost += parseFloat(c.rows[0].t);
-      monthRevenue += parseFloat(b.rows[0].t);
+      pool.query(`
+        SELECT j.mode,
+          COUNT(j.id) AS count,
+          COALESCE(SUM(b.total),0) AS revenue
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        GROUP BY j.mode
+        ORDER BY count DESC
+      `),
+
+      pool.query(`
+        SELECT DATE_TRUNC('month', j.created_at) AS month,
+          COALESCE(SUM(b.total),0) AS revenue,
+          COALESCE(SUM(c.total),0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        WHERE j.created_at >= $1
+        GROUP BY DATE_TRUNC('month', j.created_at)
+        ORDER BY month
+      `, [sixMonthsAgo]),
+
+      pool.query(
+        "SELECT id,job_number,shipper,consignee,deadline_date,status FROM jobs WHERE deadline_date >= $1 AND deadline_date <= $2 AND status != 'Completed' ORDER BY deadline_date",
+        [today, in7days]
+      ),
+
+      pool.query(
+        'SELECT j.id,j.job_number,j.shipper,j.status FROM jobs j WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id) ORDER BY j.id DESC LIMIT 10'
+      ),
+
+      pool.query(`
+        SELECT status, COUNT(id) AS count FROM jobs WHERE status != 'Voided' GROUP BY status
+      `),
+
+      pool.query(`
+        SELECT COUNT(j.id) AS count FROM jobs j
+        WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id) AND j.status != 'Voided'
+      `),
+    ]);
+
+    const m = monthRes.rows[0];
+    const monthRevenue = parseFloat(m.revenue);
+    const monthCost    = parseFloat(m.cost);
+    const monthProfit  = monthRevenue - monthCost;
+    const monthGP      = monthRevenue > 0 ? (monthProfit / monthRevenue) * 100 : 0;
+
+    const trendMap = {};
+    for (const r of trendRes.rows) {
+      const key = new Date(r.month).toISOString().slice(0, 7);
+      trendMap[key] = { revenue: parseFloat(r.revenue), cost: parseFloat(r.cost) };
     }
-    const monthProfit = monthRevenue - monthCost;
-    const monthGP = monthRevenue > 0 ? (monthProfit/monthRevenue)*100 : 0;
-
-    // By mode
-    const allJobs = (await pool.query('SELECT id, mode FROM jobs')).rows;
-    const modeMap = {};
-    for (const j of allJobs) {
-      if (!modeMap[j.mode]) modeMap[j.mode] = { count: 0, revenue: 0 };
-      modeMap[j.mode].count++;
-      const b = await pool.query('SELECT COALESCE(SUM(rate*qty),0) as t FROM billing_lines WHERE job_id=$1', [j.id]);
-      modeMap[j.mode].revenue += parseFloat(b.rows[0].t);
-    }
-    const by_mode = Object.entries(modeMap).map(([mode, data]) => ({ mode, ...data }));
-
-    // GP% trend (6 months)
     const trend = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const start = new Date(d.getFullYear(), d.getMonth(), 1);
-      const end = new Date(d.getFullYear(), d.getMonth()+1, 1);
-      const ids = (await pool.query('SELECT id FROM jobs WHERE created_at >= $1 AND created_at < $2', [start, end])).rows.map(j=>j.id);
-      let rev = 0, cost = 0;
-      for (const id of ids) {
-        const c = await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM cost_lines WHERE job_id=$1', [id]);
-        const b = await pool.query('SELECT COALESCE(SUM(rate*qty),0) as t FROM billing_lines WHERE job_id=$1', [id]);
-        cost += parseFloat(c.rows[0].t); rev += parseFloat(b.rows[0].t);
-      }
+      const key = d.toISOString().slice(0, 7);
+      const { revenue: rev = 0, cost = 0 } = trendMap[key] || {};
       const profit = rev - cost;
-      const gp = rev > 0 ? parseFloat(((profit/rev)*100).toFixed(1)) : 0;
-      trend.push({ month: d.toLocaleString('default',{month:'short',year:'2-digit'}), gp_percent: gp, revenue: parseFloat(rev.toFixed(2)) });
+      const gp = rev > 0 ? parseFloat(((profit / rev) * 100).toFixed(1)) : 0;
+      trend.push({ month: d.toLocaleString('default', { month: 'short', year: '2-digit' }), gp_percent: gp, revenue: parseFloat(rev.toFixed(2)) });
     }
-
-    const upcoming = (await pool.query(
-      "SELECT id,job_number,shipper,consignee,deadline_date,status FROM jobs WHERE deadline_date >= $1 AND deadline_date <= $2 AND status != 'Completed' ORDER BY deadline_date",
-      [today, in7days]
-    )).rows;
-
-    const flagged = (await pool.query(
-      'SELECT j.id,j.job_number,j.shipper,j.status FROM jobs j WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id) ORDER BY j.id DESC LIMIT 10'
-    )).rows;
 
     res.json({
       this_month: {
-        jobs: monthIds.length,
+        jobs: parseInt(m.jobs),
         revenue: parseFloat(monthRevenue.toFixed(2)),
         cost: parseFloat(monthCost.toFixed(2)),
         profit: parseFloat(monthProfit.toFixed(2)),
         gp_percent: parseFloat(monthGP.toFixed(1))
       },
-      by_mode, trend,
-      upcoming_deadlines: upcoming,
-      flagged_jobs: flagged
+      by_mode: byModeRes.rows.map(r => ({ mode: r.mode, count: parseInt(r.count), revenue: parseFloat(r.revenue) })),
+      trend,
+      upcoming_deadlines: upcomingRes.rows,
+      flagged_jobs: flaggedRes.rows,
+      status_counts: Object.fromEntries(statusRes.rows.map(r => [r.status, parseInt(r.count)])),
+      missing_costing_count: parseInt(missingCountRes.rows[0].count)
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
