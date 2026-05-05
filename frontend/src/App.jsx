@@ -17,8 +17,8 @@ const NAV = [
 
 // Default SGD-based rates (approximate)
 const DEFAULT_RATES = {
-  USD: 0.745, EUR: 0.688, GBP: 0.589, CNY: 5.41,
-  MYR: 3.48, JPY: 113.2, AUD: 1.145, HKD: 5.82, INR: 62.1,
+  USD: 0.745, EUR: 0.688, GBP: 0.589, IDR: 11900, MYR: 3.48,
+  CNY: 5.41, JPY: 113.2, AUD: 1.145, HKD: 5.82, INR: 62.1,
 }
 
 const SEEN_KEY = 'changelog_seen_count'

@@ -12,6 +12,7 @@ import {
 import DimensionBoxes from '../components/DimensionBoxes'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
+const CURRENCIES = ['SGD', 'USD', 'EUR', 'GBP', 'IDR', 'MYR', 'CNY', 'JPY', 'AUD', 'HKD']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 const DOC_TYPES = ['CI', 'PL', 'DO', 'Invoice', 'Other']
 const navy = [4, 44, 83]
@@ -53,6 +54,7 @@ export default function JobDetail() {
   const [docUploading, setDocUploading] = useState(false)
   const [doModal, setDoModal] = useState(null)
   const [subCertModal, setSubCertModal] = useState(null)
+  const [fxRates, setFxRates] = useState({})
   const invoiceRef = useRef()
   const logoRef = useRef(null)
   const logoBlueRef = useRef(null)
@@ -71,6 +73,10 @@ export default function JobDetail() {
     }
     loadLogo('/logo.png', logoRef)
     loadLogo('/logo-blue.png', logoBlueRef)
+    fetch('https://open.er-api.com/v6/latest/SGD')
+      .then(r => r.json())
+      .then(d => { if (d.rates) setFxRates(d.rates) })
+      .catch(() => {})
   }, [])
 
   function loadJob() {
@@ -1108,7 +1114,7 @@ export default function JobDetail() {
             <button className="btn btn-outline btn-sm" onClick={addCost}>+ Add Row</button>
           </div>
         </div>
-        <CostTable lines={job.cost_lines||[]} onSave={saveCost} onDelete={removeCost} />
+        <CostTable lines={job.cost_lines||[]} onSave={saveCost} onDelete={removeCost} fxRates={fxRates} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.cost_lines?.length||0} line(s)</span>
           <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Total Cost: {fmt(totalCost)}</span>
@@ -1121,7 +1127,7 @@ export default function JobDetail() {
           Billing Lines
           <button className="btn btn-outline btn-sm" onClick={addBilling}>+ Add Row</button>
         </div>
-        <BillingTable lines={job.billing_lines||[]} onSave={saveBilling} onDelete={removeBilling} />
+        <BillingTable lines={job.billing_lines||[]} onSave={saveBilling} onDelete={removeBilling} fxRates={fxRates} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.billing_lines?.length||0} line(s)</span>
           <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Total Sale: {fmt(totalSale)}</span>
@@ -1366,16 +1372,27 @@ function InfoEdit({ form, setField }) {
   )
 }
 
-function CostTable({ lines, onSave, onDelete }) {
+function CostTable({ lines, onSave, onDelete, fxRates }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
 
-  function startEdit(l) { setDrafts(d => ({ ...d, [l.id]: { ...l } })); setEditing(e => ({ ...e, [l.id]: true })) }
+  function startEdit(l) { setDrafts(d => ({ ...d, [l.id]: { ...l, currency: l.currency||'SGD', amount_local: l.amount_local ?? l.amount } })); setEditing(e => ({ ...e, [l.id]: true })) }
   function setDraft(id, key, val) { setDrafts(d => ({ ...d, [id]: { ...d[id], [key]: val } })) }
+
+  function toSGD(localAmt, currency) {
+    if (!currency || currency === 'SGD') return localAmt
+    const rate = fxRates[currency]
+    return rate ? parseFloat((localAmt / rate).toFixed(2)) : localAmt
+  }
+
   async function save(id) {
     setSaving(s => ({ ...s, [id]: true }))
-    await onSave(id, drafts[id])
+    const d = drafts[id]
+    const currency = d.currency || 'SGD'
+    const amount_local = parseFloat(d.amount_local) || 0
+    const amount = toSGD(amount_local, currency)
+    await onSave(id, { ...d, amount, amount_local, currency })
     setEditing(e => ({ ...e, [id]: false }))
     setSaving(s => ({ ...s, [id]: false }))
   }
@@ -1385,18 +1402,42 @@ function CostTable({ lines, onSave, onDelete }) {
   return (
     <table className="inline-table">
       <thead>
-        <tr><th>Vendor</th><th>Service</th><th>Invoice No.</th><th>Invoice Date</th><th style={{width:110}}>Amount (SGD)</th><th>Remarks</th><th style={{width:80}}></th></tr>
+        <tr><th>Vendor</th><th>Service</th><th>Invoice No.</th><th>Invoice Date</th><th style={{width:140}}>Amount</th><th>Remarks</th><th style={{width:80}}></th></tr>
       </thead>
       <tbody>
         {lines.map(l => {
           const isEdit = editing[l.id]; const d = drafts[l.id]||l
+          const currency = d.currency || 'SGD'
+          const localAmt = parseFloat(d.amount_local) || 0
+          const sgdAmt = toSGD(localAmt, currency)
           return (
             <tr key={l.id} onDoubleClick={() => startEdit(l)}>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.vendor||''} onChange={e => setDraft(l.id,'vendor',e.target.value)} /> : (l.vendor||'—')}</td>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.service||''} onChange={e => setDraft(l.id,'service',e.target.value)} /> : (l.service||'—')}</td>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.invoice_no||''} onChange={e => setDraft(l.id,'invoice_no',e.target.value)} /> : (l.invoice_no||'—')}</td>
               <td>{isEdit ? <input type="date" className="form-control form-control-sm" value={d.invoice_date||''} onChange={e => setDraft(l.id,'invoice_date',e.target.value)} /> : (l.invoice_date||'—')}</td>
-              <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.amount||''} onChange={e => setDraft(l.id,'amount',parseFloat(e.target.value)||0)} /> : <strong>{fmt(l.amount)}</strong>}</td>
+              <td>
+                {isEdit ? (
+                  <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                    <div style={{ display:'flex', gap:4 }}>
+                      <input type="number" className="form-control form-control-sm" style={{ flex:1, minWidth:70 }}
+                        value={d.amount_local ?? d.amount ?? ''}
+                        onChange={e => setDraft(l.id,'amount_local',e.target.value)} />
+                      <select className="form-control form-control-sm" style={{ width:66 }} value={currency}
+                        onChange={e => setDraft(l.id,'currency',e.target.value)}>
+                        {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    {currency !== 'SGD' && <span style={{ fontSize:10, color:'var(--text-muted)' }}>≈ {fmt(sgdAmt)} SGD</span>}
+                  </div>
+                ) : (
+                  <strong>
+                    {(l.currency && l.currency !== 'SGD')
+                      ? <>{l.currency} {Number(l.amount_local||l.amount).toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2})} <span style={{fontWeight:400,fontSize:11,color:'var(--text-muted)'}}>({fmt(l.amount)})</span></>
+                      : fmt(l.amount)}
+                  </strong>
+                )}
+              </td>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               <td>
                 <div className="flex gap-2">
@@ -1413,16 +1454,27 @@ function CostTable({ lines, onSave, onDelete }) {
   )
 }
 
-function BillingTable({ lines, onSave, onDelete }) {
+function BillingTable({ lines, onSave, onDelete, fxRates }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
 
-  function startEdit(l) { setDrafts(d => ({ ...d, [l.id]: { ...l } })); setEditing(e => ({ ...e, [l.id]: true })) }
+  function startEdit(l) { setDrafts(d => ({ ...d, [l.id]: { ...l, currency: l.currency||'SGD', rate_local: l.rate_local ?? l.rate } })); setEditing(e => ({ ...e, [l.id]: true })) }
   function setDraft(id, key, val) { setDrafts(d => ({ ...d, [id]: { ...d[id], [key]: val } })) }
+
+  function toSGD(localRate, currency) {
+    if (!currency || currency === 'SGD') return localRate
+    const fx = fxRates[currency]
+    return fx ? parseFloat((localRate / fx).toFixed(4)) : localRate
+  }
+
   async function save(id) {
     setSaving(s => ({ ...s, [id]: true }))
-    await onSave(id, drafts[id])
+    const d = drafts[id]
+    const currency = d.currency || 'SGD'
+    const rate_local = parseFloat(d.rate_local) || 0
+    const rate = toSGD(rate_local, currency)
+    await onSave(id, { ...d, rate, rate_local, currency })
     setEditing(e => ({ ...e, [id]: false }))
     setSaving(s => ({ ...s, [id]: false }))
   }
@@ -1432,17 +1484,39 @@ function BillingTable({ lines, onSave, onDelete }) {
   return (
     <table className="inline-table">
       <thead>
-        <tr><th>Service</th><th>Unit</th><th style={{width:100}}>Rate (SGD)</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th><th style={{width:80}}></th></tr>
+        <tr><th>Service</th><th>Unit</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th><th style={{width:80}}></th></tr>
       </thead>
       <tbody>
         {lines.map(l => {
           const isEdit = editing[l.id]; const d = drafts[l.id]||l
-          const total = (parseFloat(d.rate)||0)*(parseFloat(d.qty)||1)
+          const currency = d.currency || 'SGD'
+          const rate_local = parseFloat(d.rate_local) || 0
+          const rate_sgd = toSGD(rate_local, currency)
+          const total = rate_sgd * (parseFloat(d.qty)||1)
           return (
             <tr key={l.id} onDoubleClick={() => startEdit(l)}>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.service||''} onChange={e => setDraft(l.id,'service',e.target.value)} /> : (l.service||'—')}</td>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.unit||''} onChange={e => setDraft(l.id,'unit',e.target.value)} /> : (l.unit||'—')}</td>
-              <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.rate||''} onChange={e => setDraft(l.id,'rate',parseFloat(e.target.value)||0)} /> : fmt(l.rate)}</td>
+              <td>
+                {isEdit ? (
+                  <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                    <div style={{ display:'flex', gap:4 }}>
+                      <input type="number" className="form-control form-control-sm" style={{ flex:1, minWidth:70 }}
+                        value={d.rate_local ?? d.rate ?? ''}
+                        onChange={e => setDraft(l.id,'rate_local',e.target.value)} />
+                      <select className="form-control form-control-sm" style={{ width:66 }} value={currency}
+                        onChange={e => setDraft(l.id,'currency',e.target.value)}>
+                        {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    {currency !== 'SGD' && <span style={{ fontSize:10, color:'var(--text-muted)' }}>≈ {fmt(rate_sgd)} SGD each</span>}
+                  </div>
+                ) : (
+                  (l.currency && l.currency !== 'SGD')
+                    ? <>{l.currency} {Number(l.rate_local||l.rate).toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2})} <span style={{fontSize:11,color:'var(--text-muted)'}}>({fmt(l.rate)})</span></>
+                    : fmt(l.rate)
+                )}
+              </td>
               <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.qty||''} onChange={e => setDraft(l.id,'qty',parseFloat(e.target.value)||1)} /> : l.qty}</td>
               <td><strong>{fmt(isEdit ? total : l.total)}</strong></td>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>

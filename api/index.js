@@ -82,6 +82,10 @@ async function initDB() {
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_contact_number TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_email TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS void_reason TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS rate_local REAL`);
+  await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
+  await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS amount_local REAL`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cost_lines (
       id SERIAL PRIMARY KEY,
@@ -366,10 +370,10 @@ app.delete('/api/jobs/:id', async (req, res) => {
 // ─── COST LINES ─────────────────────────────────────────────────────────────
 app.post('/api/jobs/:id/costs', async (req, res) => {
   try {
-    const { vendor='', amount=0, invoice_no='', invoice_date=null, service='', remarks='' } = req.body;
+    const { vendor='', amount=0, invoice_no='', invoice_date=null, service='', remarks='', currency='SGD', amount_local=null } = req.body;
     const r = await pool.query(
-      'INSERT INTO cost_lines (job_id,vendor,amount,invoice_no,invoice_date,service,remarks) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [req.params.id, vendor, amount, invoice_no, invoice_date, service, remarks]
+      'INSERT INTO cost_lines (job_id,vendor,amount,invoice_no,invoice_date,service,remarks,currency,amount_local) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.params.id, vendor, amount, invoice_no, invoice_date, service, remarks, currency, amount_local]
     );
     res.status(201).json(r.rows[0]);
   } catch (err) {
@@ -380,10 +384,10 @@ app.post('/api/jobs/:id/costs', async (req, res) => {
 
 app.put('/api/jobs/:id/costs/:lid', async (req, res) => {
   try {
-    const { vendor='', amount=0, invoice_no='', invoice_date=null, service='', remarks='' } = req.body;
+    const { vendor='', amount=0, invoice_no='', invoice_date=null, service='', remarks='', currency='SGD', amount_local=null } = req.body;
     const r = await pool.query(
-      'UPDATE cost_lines SET vendor=$1,amount=$2,invoice_no=$3,invoice_date=$4,service=$5,remarks=$6 WHERE id=$7 AND job_id=$8 RETURNING *',
-      [vendor, amount, invoice_no, invoice_date, service, remarks, req.params.lid, req.params.id]
+      'UPDATE cost_lines SET vendor=$1,amount=$2,invoice_no=$3,invoice_date=$4,service=$5,remarks=$6,currency=$7,amount_local=$8 WHERE id=$9 AND job_id=$10 RETURNING *',
+      [vendor, amount, invoice_no, invoice_date, service, remarks, currency, amount_local, req.params.lid, req.params.id]
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -405,10 +409,10 @@ app.delete('/api/jobs/:id/costs/:lid', async (req, res) => {
 // ─── BILLING LINES ──────────────────────────────────────────────────────────
 app.post('/api/jobs/:id/billing', async (req, res) => {
   try {
-    const { service='', unit='', rate=0, qty=1, remarks='' } = req.body;
+    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null } = req.body;
     const r = await pool.query(
-      'INSERT INTO billing_lines (job_id,service,unit,rate,qty,remarks) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [req.params.id, service, unit, rate, qty, remarks]
+      'INSERT INTO billing_lines (job_id,service,unit,rate,qty,remarks,currency,rate_local) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [req.params.id, service, unit, rate, qty, remarks, currency, rate_local]
     );
     const line = r.rows[0];
     res.status(201).json({ ...line, total: parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2)) });
@@ -420,10 +424,10 @@ app.post('/api/jobs/:id/billing', async (req, res) => {
 
 app.put('/api/jobs/:id/billing/:lid', async (req, res) => {
   try {
-    const { service='', unit='', rate=0, qty=1, remarks='' } = req.body;
+    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null } = req.body;
     const r = await pool.query(
-      'UPDATE billing_lines SET service=$1,unit=$2,rate=$3,qty=$4,remarks=$5 WHERE id=$6 AND job_id=$7 RETURNING *',
-      [service, unit, rate, qty, remarks, req.params.lid, req.params.id]
+      'UPDATE billing_lines SET service=$1,unit=$2,rate=$3,qty=$4,remarks=$5,currency=$6,rate_local=$7 WHERE id=$8 AND job_id=$9 RETURNING *',
+      [service, unit, rate, qty, remarks, currency, rate_local, req.params.lid, req.params.id]
     );
     const line = r.rows[0];
     res.json({ ...line, total: parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2)) });
