@@ -55,17 +55,22 @@ export default function JobDetail() {
   const [subCertModal, setSubCertModal] = useState(null)
   const invoiceRef = useRef()
   const logoRef = useRef(null)
+  const logoBlueRef = useRef(null)
 
   useEffect(() => {
-    fetch('/logo.png')
-      .then(r => r.blob())
-      .then(blob => new Promise(resolve => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result)
-        reader.readAsDataURL(blob)
-      }))
-      .then(dataUrl => { logoRef.current = dataUrl })
-      .catch(() => {})
+    function loadLogo(path, ref) {
+      fetch(path)
+        .then(r => r.blob())
+        .then(blob => new Promise(resolve => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result)
+          reader.readAsDataURL(blob)
+        }))
+        .then(dataUrl => { ref.current = dataUrl })
+        .catch(() => {})
+    }
+    loadLogo('/logo.png', logoRef)
+    loadLogo('/logo-blue.png', logoBlueRef)
   }, [])
 
   function loadJob() {
@@ -651,10 +656,13 @@ export default function JobDetail() {
 
     let y = 10
 
-    // Logo + company header (centered)
-    if (logoRef.current) {
-      doc.addImage(logoRef.current, 'PNG', (pw - 40) / 2, y, 40, 22)
-      y += 26
+    // Logo + company header (centered) — blue logo on white background
+    const logoSrc = logoBlueRef.current || logoRef.current
+    if (logoSrc) {
+      // logo-blue.png is 2217x676px — display at full usable width for clarity
+      const logoW = 90, logoH = logoW * (676 / 2217)
+      doc.addImage(logoSrc, 'PNG', (pw - logoW) / 2, y, logoW, logoH)
+      y += logoH + 4
     } else { y += 4 }
 
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0, 0, 0)

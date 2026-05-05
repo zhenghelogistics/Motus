@@ -188,10 +188,13 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="sidebar-logo">ZHL</div>
-        <div>
-          <div className="sidebar-title">Zhenghe Logistics</div>
-          <div className="sidebar-sub">Operations Tool</div>
+        <div style={{ width: '100%' }}>
+          <img
+            src="/logo-cropped.png"
+            alt="Zhenghe Logistics"
+            style={{ width: '100%', height: 'auto', display: 'block', marginBottom: 4 }}
+          />
+          <div className="sidebar-sub" style={{ paddingLeft: 2 }}>Operations Tool</div>
         </div>
       </div>
 
