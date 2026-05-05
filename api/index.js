@@ -193,7 +193,7 @@ app.use(async (req, res, next) => {
   try { await ensureDB(); next(); }
   catch (err) {
     console.error('[ZHL] DB init error:', err.message);
-    res.status(500).json({ error: 'Database init failed: ' + err.message });
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -262,7 +262,10 @@ app.get('/api/jobs', async (req, res) => {
       profit_sgd: parseFloat(r.profit_sgd) || 0,
       gp_percent: parseFloat(r.gp_percent) || 0,
     })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.post('/api/jobs', async (req, res) => {
@@ -296,7 +299,10 @@ app.post('/api/jobs', async (req, res) => {
       }
     }
     res.status(201).json(await enrichJob(job));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.get('/api/jobs/:id', async (req, res) => {
@@ -309,7 +315,10 @@ app.get('/api/jobs/:id', async (req, res) => {
     const billing_lines = billing_raw.map(b => ({ ...b, total: parseFloat(((b.rate||0)*(b.qty||1)).toFixed(2)) }));
     const documents = (await pool.query('SELECT * FROM documents WHERE job_id=$1 ORDER BY upload_date DESC', [job.id])).rows;
     res.json({ ...await enrichJob(job), cost_lines, billing_lines, documents });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.put('/api/jobs/:id', async (req, res) => {
@@ -331,14 +340,20 @@ app.put('/api/jobs/:id', async (req, res) => {
     await pool.query(`UPDATE jobs SET ${cols} WHERE id=$${vals.length}`, vals);
     const updated = (await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.id])).rows[0];
     res.json(await enrichJob(updated));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.delete('/api/jobs/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM jobs WHERE id=$1', [req.params.id]);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 // ─── COST LINES ─────────────────────────────────────────────────────────────
@@ -350,7 +365,10 @@ app.post('/api/jobs/:id/costs', async (req, res) => {
       [req.params.id, vendor, amount, invoice_no, invoice_date, service, remarks]
     );
     res.status(201).json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.put('/api/jobs/:id/costs/:lid', async (req, res) => {
@@ -361,14 +379,20 @@ app.put('/api/jobs/:id/costs/:lid', async (req, res) => {
       [vendor, amount, invoice_no, invoice_date, service, remarks, req.params.lid, req.params.id]
     );
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.delete('/api/jobs/:id/costs/:lid', async (req, res) => {
   try {
     await pool.query('DELETE FROM cost_lines WHERE id=$1 AND job_id=$2', [req.params.lid, req.params.id]);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 // ─── BILLING LINES ──────────────────────────────────────────────────────────
@@ -381,7 +405,10 @@ app.post('/api/jobs/:id/billing', async (req, res) => {
     );
     const line = r.rows[0];
     res.status(201).json({ ...line, total: parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2)) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.put('/api/jobs/:id/billing/:lid', async (req, res) => {
@@ -393,14 +420,20 @@ app.put('/api/jobs/:id/billing/:lid', async (req, res) => {
     );
     const line = r.rows[0];
     res.json({ ...line, total: parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2)) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.delete('/api/jobs/:id/billing/:lid', async (req, res) => {
   try {
     await pool.query('DELETE FROM billing_lines WHERE id=$1 AND job_id=$2', [req.params.lid, req.params.id]);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 // ─── DOCUMENTS ──────────────────────────────────────────────────────────────
@@ -415,14 +448,20 @@ app.post('/api/jobs/:id/documents', upload.single('file'), async (req, res) => {
       [req.params.id, req.file.originalname, doc_type, file_url]
     );
     res.status(201).json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.delete('/api/jobs/:id/documents/:did', async (req, res) => {
   try {
     await pool.query('DELETE FROM documents WHERE id=$1 AND job_id=$2', [req.params.did, req.params.id]);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 // ─── CUSTOMERS ──────────────────────────────────────────────────────────────
@@ -445,7 +484,10 @@ app.get('/api/customers', async (req, res) => {
       LIMIT 15
     `, p)
     res.json(r.rows)
-  } catch (err) { res.status(500).json({ error: err.message }) }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 })
 
 // ─── PARSE EMAIL ────────────────────────────────────────────────────────────
@@ -486,7 +528,8 @@ Email/Job Order:\n${text}` }]
     if (!match) return res.status(422).json({ error: 'Could not parse AI response' });
     res.json(JSON.parse(match[0]));
   } catch (err) {
-    res.status(500).json({ error: 'AI parsing failed: ' + err.message });
+    console.error('[ZHL] POST /api/parse-email', err.message);
+    res.status(500).json({ error: 'AI parsing failed. Please try again.' });
   }
 });
 
@@ -538,7 +581,8 @@ Email/Job Order:\n${text.substring(0, 8000)}` }]
     if (!match) return res.status(422).json({ error: 'Could not parse AI response' });
     res.json(JSON.parse(match[0]));
   } catch (err) {
-    res.status(500).json({ error: 'File parsing failed: ' + err.message });
+    console.error('[ZHL] POST /api/parse-email-file', err.message);
+    res.status(500).json({ error: 'File parsing failed. Please try again.' });
   }
 });
 
@@ -569,7 +613,8 @@ Invoice text:\n${data.text.substring(0, 4000)}` }]
     if (!match) return res.status(422).json({ error: 'Could not parse invoice' });
     res.json(JSON.parse(match[0]));
   } catch (err) {
-    res.status(500).json({ error: 'Invoice parsing failed: ' + err.message });
+    console.error('[ZHL] POST /api/parse-invoice', err.message);
+    res.status(500).json({ error: 'Invoice parsing failed. Please try again.' });
   }
 });
 
@@ -684,7 +729,10 @@ app.get('/api/dashboard', async (req, res) => {
       status_counts: Object.fromEntries(statusRes.rows.map(r => [r.status, parseInt(r.count)])),
       missing_costing_count: parseInt(missingCountRes.rows[0].count)
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 module.exports = app;
