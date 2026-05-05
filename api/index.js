@@ -30,6 +30,7 @@ function requireAuth(req, res, next) {
     req.user = jwt.verify(token, process.env.SUPABASE_JWT_SECRET)
     next()
   } catch (e) {
+    console.error('[ZHL] requireAuth failed:', e.constructor.name, e.message)
     res.status(401).json({ error: 'Unauthorized — invalid or expired token' })
   }
 }
