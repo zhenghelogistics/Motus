@@ -27,7 +27,7 @@ function requireAuth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Unauthorized — no token' })
   try {
-    req.user = jwt.verify(token, process.env.SUPABASE_JWT_SECRET)
+    req.user = jwt.verify(token, Buffer.from(process.env.SUPABASE_JWT_SECRET, 'base64'))
     next()
   } catch (e) {
     console.error('[ZHL] requireAuth failed:', e.constructor.name, e.message)
