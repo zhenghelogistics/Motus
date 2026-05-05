@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useAuth } from '../lib/AuthContext'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import {
@@ -28,9 +29,16 @@ function deadlineClass(date) {
   return 'deadline-ok'
 }
 
+function nameFromEmail(email) {
+  if (!email) return ''
+  const prefix = email.split('@')[0]
+  return prefix.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ')
+}
+
 export default function JobDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [job, setJob] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -614,7 +622,17 @@ export default function JobDetail() {
   }
 
   function openSubCertModal() {
-    setSubCertModal({ etd: '', permit_no: '', destination: '' })
+    const billingTotal = (job.billing_lines||[]).reduce((s,l) => s + (l.rate||0)*(l.qty||1), 0)
+    const defaultInvoiceValue = billingTotal > 0
+      ? `SGD ${billingTotal.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : ''
+    setSubCertModal({
+      etd: '',
+      permit_no: '',
+      destination: '',
+      invoice_value: defaultInvoiceValue,
+      signatory_name: nameFromEmail(user?.email),
+    })
   }
 
   function exportSubCert(fields) {
@@ -629,10 +647,7 @@ export default function JobDetail() {
     const MONTHS = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER']
     const dateStr = `${now.getDate()}${ordSuffix(now.getDate())} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`
 
-    const totalSaleVal = (job.billing_lines||[]).reduce((s,l) => s + (l.rate||0)*(l.qty||1), 0)
-    const invoiceVal = totalSaleVal > 0
-      ? `SGD ${totalSaleVal.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      : '—'
+    const invoiceVal = fields.invoice_value?.trim() || '—'
 
     let y = 10
 
@@ -707,8 +722,9 @@ export default function JobDetail() {
     y += 14
 
     // Signatory
+    const sigName = (fields.signatory_name || 'SALES MANAGEMENT').toUpperCase()
     doc.setFont('courier', 'normal'); doc.setFontSize(10); doc.setTextColor(0, 0, 0)
-    doc.text('BRANDON RODRIGUES', lx, y); y += 5
+    doc.text(sigName, lx, y); y += 5
     doc.text('SALES MANAGEMENT', lx, y); y += 5
     doc.text('ZHENGHE LOGISTICS PTE LTD', lx, y)
 
@@ -1497,7 +1513,7 @@ function SubCertModal({ modal, onClose, onGenerate }) {
         </div>
         <div className="modal-body" style={{ padding: '20px 24px' }}>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.6 }}>
-            Exporter, consignee, invoice details, and weight are pre-filled from the job. Enter the 3 customs fields below.
+            Exporter, consignee, and cargo details are pre-filled from the job.
           </p>
           <div className="form-group mb-3">
             <label className="form-label">ETD Singapore</label>
@@ -1518,7 +1534,7 @@ function SubCertModal({ modal, onClose, onGenerate }) {
               placeholder="e.g. OT6D3924490O"
             />
           </div>
-          <div className="form-group">
+          <div className="form-group mb-3">
             <label className="form-label">Destination</label>
             <input
               className="form-control"
@@ -1526,6 +1542,27 @@ function SubCertModal({ modal, onClose, onGenerate }) {
               onChange={e => f('destination', e.target.value)}
               placeholder="e.g. Bali"
             />
+          </div>
+          <div className="form-group mb-3">
+            <label className="form-label">Invoice Value</label>
+            <input
+              className="form-control"
+              value={fields.invoice_value || ''}
+              onChange={e => f('invoice_value', e.target.value)}
+              placeholder="e.g. USD 11,905.63"
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Signatory Name</label>
+            <input
+              className="form-control"
+              value={fields.signatory_name || ''}
+              onChange={e => f('signatory_name', e.target.value)}
+              placeholder="e.g. Brandon Rodrigues"
+            />
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              "Sales Management / Zhenghe Logistics Pte Ltd" is added automatically below.
+            </div>
           </div>
         </div>
         <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
