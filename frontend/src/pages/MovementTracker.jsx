@@ -1,6 +1,8 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { getJobs } from '../api'
 
 const MODES = ['', 'Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
@@ -59,6 +61,9 @@ function shortName(email) {
   return prefix.charAt(0).toUpperCase() + prefix.slice(1)
 }
 
+const navy = [4, 44, 83]
+const blue = [24, 95, 165]
+
 export default function MovementTracker() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -70,6 +75,19 @@ export default function MovementTracker() {
   const [sortKey, setSortKey] = useState('id')
   const [sortDir, setSortDir] = useState('desc')
   const navigate = useNavigate()
+  const logoRef = useRef(null)
+
+  useEffect(() => {
+    fetch('/logo.png')
+      .then(r => r.blob())
+      .then(blob => new Promise(resolve => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.readAsDataURL(blob)
+      }))
+      .then(dataUrl => { logoRef.current = dataUrl })
+      .catch(() => {})
+  }, [])
 
   function load() {
     setLoading(true)
@@ -143,6 +161,120 @@ export default function MovementTracker() {
     XLSX.writeFile(wb, `ZHL_Movement_Tracker_${new Date().toISOString().split('T')[0]}.xlsx`)
   }
 
+  function exportPDFReport() {
+    const doc = new jsPDF('l', 'mm', 'a4')  // landscape for wide table
+    const pw = 297, ph = 210, ml = 12, mr = 12, tw = pw - ml - mr
+
+    // Header bar
+    doc.setFillColor(...navy)
+    doc.rect(0, 0, pw, 32, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 5, 1, 24, 30)
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 33, 12)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.2)
+    doc.line(33, 16, pw - mr, 16)
+    doc.setDrawColor(0)
+    doc.text('rfq@zhenghe.com.sg', 33, 23)
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+    doc.text('MOVEMENT REPORT', pw - mr, 12, { align: 'right' })
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal')
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 23, { align: 'right' })
+
+    // Filter summary line
+    const filterParts = []
+    if (filterCreatedBy) filterParts.push(`Salesperson: ${shortName(filterCreatedBy)} (${filterCreatedBy})`)
+    if (filterStatus)    filterParts.push(`Status: ${filterStatus}`)
+    if (filterMode)      filterParts.push(`Mode: ${filterMode}`)
+    if (search)          filterParts.push(`Search: "${search}"`)
+    if (!showVoided)     filterParts.push('Voided jobs excluded')
+
+    let y = 38
+    if (filterParts.length) {
+      doc.setFontSize(8); doc.setFont('helvetica', 'italic'); doc.setTextColor(80, 80, 80)
+      doc.text(`Filters: ${filterParts.join('  |  ')}`, ml, y)
+      y += 6
+    }
+
+    // Metrics summary box
+    const mStr = [
+      `Jobs: ${sorted.length}`,
+      `Revenue: $${Number(mRevenue).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      `Cost: $${Number(mCost).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      `Profit: $${Number(mProfit).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      `GP: ${mRevenue > 0 ? ((mProfit/mRevenue)*100).toFixed(1) : '0.0'}%`,
+    ]
+    autoTable(doc, {
+      startY: y,
+      body: [mStr.map(s => ({ content: s, styles: { fontStyle: 'bold', fontSize: 8.5, halign: 'center' } }))],
+      styles: { fillColor: [237, 242, 248], textColor: navy, cellPadding: 4 },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Jobs table
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 4,
+      head: [['Job No.', 'Ref', 'Shipper', 'Consignee', 'Mode', 'Salesperson', 'Status', 'Deadline', 'Date Out', 'Delivered', 'Cost (SGD)', 'Sale (SGD)', 'Profit (SGD)', 'GP%']],
+      body: sorted.map(j => [
+        j.job_number,
+        j.customer_ref || '—',
+        j.shipper || '—',
+        j.consignee || '—',
+        j.mode || '—',
+        shortName(j.created_by),
+        j.status || '—',
+        j.deadline_date || '—',
+        j.date_out || '—',
+        j.date_delivered || '—',
+        j.cost_sgd != null ? `$${Number(j.cost_sgd).toFixed(2)}` : '—',
+        j.sale_sgd != null ? `$${Number(j.sale_sgd).toFixed(2)}` : '—',
+        j.profit_sgd != null ? `$${Number(j.profit_sgd).toFixed(2)}` : '—',
+        j.gp_percent != null ? `${Number(j.gp_percent).toFixed(1)}%` : '—',
+      ]),
+      foot: [[
+        { content: `${sorted.length} jobs`, colSpan: 10, styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: `$${Number(mCost).toFixed(2)}`,   styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: `$${Number(mRevenue).toFixed(2)}`, styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: `$${Number(mProfit).toFixed(2)}`,  styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: `${mRevenue > 0 ? ((mProfit/mRevenue)*100).toFixed(1) : '0.0'}%`, styles: { fontStyle: 'bold', halign: 'right' } },
+      ]],
+      headStyles: { fillColor: navy, fontSize: 7.5, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [237,242,248], textColor: navy, fontSize: 8, fontStyle: 'bold' },
+      styles: { fontSize: 7.5, cellPadding: 2.5, overflow: 'linebreak' },
+      columnStyles: {
+        0:  { cellWidth: 20, fontStyle: 'bold' },
+        1:  { cellWidth: 18 },
+        2:  { cellWidth: 26 },
+        3:  { cellWidth: 26 },
+        4:  { cellWidth: 20 },
+        5:  { cellWidth: 18 },
+        6:  { cellWidth: 16 },
+        7:  { cellWidth: 16 },
+        8:  { cellWidth: 16 },
+        9:  { cellWidth: 16 },
+        10: { cellWidth: 20, halign: 'right' },
+        11: { cellWidth: 20, halign: 'right' },
+        12: { cellWidth: 20, halign: 'right', fontStyle: 'bold' },
+        13: { cellWidth: 12, halign: 'right' },
+      },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Page numbers
+    const totalPages = doc.internal.getNumberOfPages()
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+      const label = filterCreatedBy ? `Salesperson: ${shortName(filterCreatedBy)}` : 'All Salespersons'
+      doc.text(`Zhenghe Logistics Pte Ltd — Movement Report — ${label}`, ml, ph - 5)
+      doc.text(`Page ${p} of ${totalPages}`, pw - mr, ph - 5, { align: 'right' })
+    }
+
+    const filePart = filterCreatedBy ? `_${filterCreatedBy.split('@')[0]}` : ''
+    doc.save(`ZHL_MovementReport${filePart}_${new Date().toISOString().split('T')[0]}.pdf`)
+  }
+
   const sortIcon = (key) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
 
   return (
@@ -154,6 +286,7 @@ export default function MovementTracker() {
         </div>
         <div className="flex gap-2">
           <button className="btn btn-ghost btn-sm" onClick={exportExcel}>↓ Export Excel</button>
+          <button className="btn btn-ghost btn-sm" onClick={exportPDFReport}>📋 PDF Report</button>
           <button className="btn btn-primary" onClick={() => navigate('/intake')}>+ New Job</button>
         </div>
       </div>
