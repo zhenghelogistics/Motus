@@ -1346,6 +1346,21 @@ function InfoEdit({ form, setField, staffList = [] }) {
         </div>
         {inp('deadline_date','Deadline Date','date')}
         {inp('commodity','Commodity')}
+        <div className="form-group">
+          <label className="form-label">Salesperson</label>
+          <input
+            className="form-control"
+            list="salesperson-datalist"
+            value={form.created_by||''}
+            onChange={e => setField('created_by', e.target.value)}
+            placeholder="e.g. brandon.rodrigues@zhenghe.com.sg"
+          />
+          <datalist id="salesperson-datalist">
+            {staffList.map(email => (
+              <option key={email} value={email}>{nameFromEmail(email)}</option>
+            ))}
+          </datalist>
+        </div>
       </div>
 
       {/* Customer (billing party) */}
