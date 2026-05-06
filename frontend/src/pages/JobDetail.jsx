@@ -1251,9 +1251,8 @@ function InfoView({ job, dlCls }) {
         {row('Agent', job.agent)}
         {row('Customer Ref', job.customer_ref)}
         {row('Status', job.status)}
-        {row('Salesperson', job.salesperson || '—')}
         <div>
-          <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:4 }}>Submitted By</div>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:4 }}>Salesperson</div>
           {createdByEdit ? (
             <div style={{ display:'flex', gap:6, alignItems:'center' }}>
               <input
@@ -1347,21 +1346,6 @@ function InfoEdit({ form, setField, staffList = [] }) {
         </div>
         {inp('deadline_date','Deadline Date','date')}
         {inp('commodity','Commodity')}
-        <div className="form-group">
-          <label className="form-label">Salesperson</label>
-          <input
-            className="form-control"
-            list="salesperson-datalist"
-            value={form.salesperson||''}
-            onChange={e => setField('salesperson', e.target.value)}
-            placeholder="e.g. Brandon"
-          />
-          <datalist id="salesperson-datalist">
-            {staffList.map(email => (
-              <option key={email} value={nameFromEmail(email)}>{nameFromEmail(email)}</option>
-            ))}
-          </datalist>
-        </div>
       </div>
 
       {/* Customer (billing party) */}

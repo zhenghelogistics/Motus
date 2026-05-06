@@ -247,8 +247,6 @@ app.get('/api/jobs', async (req, res) => {
     if (mode)       { where += ` AND j.mode=$${i}`;            p.push(mode);              i++; }
     if (agent)      { where += ` AND j.agent ILIKE $${i}`;     p.push(`%${agent}%`);      i++; }
     if (created_by)   { where += ` AND j.created_by=$${i}`;      p.push(created_by);        i++; }
-    const { salesperson } = req.query;
-    if (salesperson)  { where += ` AND j.salesperson=$${i}`;    p.push(salesperson);       i++; }
 
     const limitVal = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 500) : null
     const limitClause = limitVal ? `LIMIT ${limitVal}` : ''
@@ -345,7 +343,7 @@ app.put('/api/jobs/:id', async (req, res) => {
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','agent','mode','status','customer_ref',
       'deadline_date','commodity','notes','gp_override',
-      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','created_by','salesperson'];
+      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','created_by'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) {
