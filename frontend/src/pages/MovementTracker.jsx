@@ -38,6 +38,7 @@ const COLS = [
   { key: 'consignee', label: 'Consignee' },
   { key: 'mode', label: 'Mode' },
   { key: 'agent', label: 'Agent' },
+  { key: 'salesperson', label: 'Sales' },
   { key: 'created_by', label: 'By' },
   { key: 'status', label: 'Status' },
   { key: 'deadline_date', label: 'Deadline' },
@@ -66,6 +67,7 @@ export default function MovementTracker() {
   const [filterStatus, setFilterStatus] = useState('')
   const [filterMode, setFilterMode] = useState('')
   const [filterCreatedBy, setFilterCreatedBy] = useState('')
+  const [filterSalesperson, setFilterSalesperson] = useState('')
   const [showVoided, setShowVoided] = useState(false)
   const [sortKey, setSortKey] = useState('id')
   const [sortDir, setSortDir] = useState('desc')
@@ -78,12 +80,13 @@ export default function MovementTracker() {
       status: filterStatus || undefined,
       mode: filterMode || undefined,
       created_by: filterCreatedBy || undefined,
+      salesperson: filterSalesperson || undefined,
     })
       .then(r => { setJobs(r.data); setLoading(false) })
       .catch(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [search, filterStatus, filterMode, filterCreatedBy])
+  useEffect(() => { load() }, [search, filterStatus, filterMode, filterCreatedBy, filterSalesperson])
 
   function handleSort(key) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -116,6 +119,10 @@ export default function MovementTracker() {
     return emails
   }, [jobs])
 
+  const salespersonOptions = useMemo(() => {
+    return [...new Set(jobs.map(j => j.salesperson).filter(Boolean))].sort()
+  }, [jobs])
+
   function exportExcel() {
     const rows = sorted.map(j => ({
       'Job No.': j.job_number,
@@ -124,6 +131,7 @@ export default function MovementTracker() {
       'Consignee': j.consignee,
       'Mode': j.mode,
       'Agent': j.agent,
+      'Salesperson': j.salesperson || '',
       'Submitted By': shortName(j.created_by),
       'Status': j.status,
       'Deadline': j.deadline_date,
@@ -195,12 +203,16 @@ export default function MovementTracker() {
         <select className="form-control" value={filterMode} onChange={e => setFilterMode(e.target.value)}>
           {MODES.map(m => <option key={m} value={m}>{m || 'All Modes'}</option>)}
         </select>
+        <select className="form-control" value={filterSalesperson} onChange={e => setFilterSalesperson(e.target.value)}>
+          <option value=''>All Salespersons</option>
+          {salespersonOptions.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
         <select className="form-control" value={filterCreatedBy} onChange={e => setFilterCreatedBy(e.target.value)}>
           <option value=''>All Staff</option>
           {staffOptions.map(email => <option key={email} value={email}>{shortName(email)}</option>)}
         </select>
-        {(search || filterStatus || filterMode || filterCreatedBy) &&
-          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatus(''); setFilterMode(''); setFilterCreatedBy('') }}>Clear</button>
+        {(search || filterStatus || filterMode || filterCreatedBy || filterSalesperson) &&
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatus(''); setFilterMode(''); setFilterCreatedBy(''); setFilterSalesperson('') }}>Clear</button>
         }
         {voidedCount > 0 && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none' }}>
@@ -239,6 +251,7 @@ export default function MovementTracker() {
                         <td>{job.consignee || '—'}</td>
                         <td style={{ whiteSpace: 'nowrap' }}><ModeTag mode={job.mode} /></td>
                         <td>{job.agent || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{job.salesperson || '—'}</td>
                         <td style={{ whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-muted)' }}>{shortName(job.created_by)}</td>
                         <td><StatusPill status={job.status} /></td>
                         <td><span className={dl.cls} style={{ whiteSpace: 'nowrap', fontSize: 13 }}>{dl.label}</span></td>
