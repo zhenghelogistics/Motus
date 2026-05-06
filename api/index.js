@@ -342,7 +342,7 @@ app.put('/api/jobs/:id', async (req, res) => {
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','agent','mode','status','customer_ref',
       'deadline_date','commodity','notes','gp_override',
-      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason'];
+      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','created_by'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) {
@@ -479,6 +479,16 @@ app.delete('/api/jobs/:id/documents/:did', async (req, res) => {
 });
 
 // ─── CUSTOMERS ──────────────────────────────────────────────────────────────
+app.get('/api/staff', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT DISTINCT created_by FROM jobs WHERE created_by != '' ORDER BY created_by`)
+    res.json(r.rows.map(r => r.created_by))
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+});
+
 app.get('/api/customers', async (req, res) => {
   try {
     const { search } = req.query

@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { parseEmail, parseEmailFile, createJob, getJobs, getCustomers } from '../api'
+import { useAuth } from '../lib/AuthContext'
 import DimensionBoxes from '../components/DimensionBoxes'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
@@ -17,7 +18,14 @@ const emptyJob = {
   billing_lines: []
 }
 
+function nameFromEmail(email) {
+  if (!email) return ''
+  const prefix = email.split('@')[0]
+  return prefix.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ')
+}
+
 export default function EmailIntake() {
+  const { user } = useAuth()
   const [emailText, setEmailText] = useState('')
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState('')
@@ -317,9 +325,16 @@ export default function EmailIntake() {
         <div className="card">
           <div className="section-title">
             Review & Edit Job Details
-            <button className="btn btn-primary" onClick={handleCreate} disabled={saving}>
-              {saving ? <><span className="spinner"></span> Saving...</> : '✓ Create Job'}
-            </button>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              {user?.email && (
+                <span style={{ fontSize:12, color:'var(--text-muted)', fontWeight:400 }}>
+                  Submitting as <strong>{nameFromEmail(user.email)}</strong>
+                </span>
+              )}
+              <button className="btn btn-primary" onClick={handleCreate} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Saving...</> : '✓ Create Job'}
+              </button>
+            </div>
           </div>
 
           {/* Core info */}
@@ -527,9 +542,16 @@ export default function EmailIntake() {
 
           <div className="flex-between mt-4" style={{ paddingTop: 16, borderTop: '1px solid var(--border)' }}>
             <button className="btn btn-ghost" onClick={() => setForm(null)}>Cancel</button>
-            <button className="btn btn-navy" onClick={handleCreate} disabled={saving}>
-              {saving ? <><span className="spinner"></span> Creating...</> : '✓ Create Job'}
-            </button>
+            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              {user?.email && (
+                <span style={{ fontSize:12, color:'var(--text-muted)' }}>
+                  Submitting as <strong>{nameFromEmail(user.email)}</strong>
+                </span>
+              )}
+              <button className="btn btn-navy" onClick={handleCreate} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Creating...</> : '✓ Create Job'}
+              </button>
+            </div>
           </div>
         </div>
       )}

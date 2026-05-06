@@ -7,7 +7,7 @@ import {
   getJob, updateJob, deleteJob,
   addCostLine, updateCostLine, deleteCostLine,
   addBillingLine, updateBillingLine, deleteBillingLine,
-  uploadDocument, deleteDocument, parseInvoice
+  uploadDocument, deleteDocument, parseInvoice, getStaff
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
 
@@ -55,6 +55,9 @@ export default function JobDetail() {
   const [doModal, setDoModal] = useState(null)
   const [subCertModal, setSubCertModal] = useState(null)
   const [fxRates, setFxRates] = useState({})
+  const [staffList, setStaffList] = useState([])
+  const [createdByEdit, setCreatedByEdit] = useState(false)
+  const [createdByVal, setCreatedByVal] = useState('')
   const invoiceRef = useRef()
   const logoRef = useRef(null)
   const logoBlueRef = useRef(null)
@@ -77,6 +80,7 @@ export default function JobDetail() {
       .then(r => r.json())
       .then(d => { if (d.rates) setFxRates(d.rates) })
       .catch(() => {})
+    getStaff().then(r => setStaffList(r.data)).catch(() => {})
   }, [])
 
   function loadJob() {
@@ -1247,7 +1251,34 @@ function InfoView({ job, dlCls }) {
         {row('Agent', job.agent)}
         {row('Customer Ref', job.customer_ref)}
         {row('Status', job.status)}
-        {job.created_by && row('Submitted By', nameFromEmail(job.created_by))}
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:4 }}>Submitted By</div>
+          {createdByEdit ? (
+            <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+              <select className="form-control form-control-sm" style={{ flex:1 }}
+                value={createdByVal}
+                onChange={e => setCreatedByVal(e.target.value)}>
+                <option value=''>— Unassigned —</option>
+                {staffList.map(email => (
+                  <option key={email} value={email}>{nameFromEmail(email)} ({email})</option>
+                ))}
+              </select>
+              <button className="btn btn-primary btn-xs" onClick={async () => {
+                await updateJob(id, { created_by: createdByVal })
+                setJob(j => ({ ...j, created_by: createdByVal }))
+                setCreatedByEdit(false)
+              }}>✓</button>
+              <button className="btn btn-ghost btn-xs" onClick={() => setCreatedByEdit(false)}>✕</button>
+            </div>
+          ) : (
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ fontSize:13 }}>{job.created_by ? nameFromEmail(job.created_by) : <span style={{color:'var(--text-muted)'}}>Unassigned</span>}</span>
+              {job.status !== 'Voided' && (
+                <button className="btn btn-ghost btn-xs" onClick={() => { setCreatedByVal(job.created_by||''); setCreatedByEdit(true) }}>✎</button>
+              )}
+            </div>
+          )}
+        </div>
         <div>
           <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.4px' }}>Deadline</div>
           <div className={dlCls} style={{ fontSize:13, marginTop:2, fontWeight: dlCls ? 700 : 500 }}>{job.deadline_date||'—'}</div>
