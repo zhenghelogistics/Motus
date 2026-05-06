@@ -64,15 +64,18 @@ export default function JobDetail() {
 
   useEffect(() => {
     function loadLogo(path, ref) {
-      fetch(path)
-        .then(r => r.blob())
-        .then(blob => new Promise(resolve => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result)
-          reader.readAsDataURL(blob)
-        }))
-        .then(dataUrl => { ref.current = dataUrl })
-        .catch(() => {})
+      const img = new Image()
+      img.onload = () => {
+        const MAX = 400
+        const scale = Math.min(1, MAX / img.naturalWidth)
+        const canvas = document.createElement('canvas')
+        canvas.width  = Math.round(img.naturalWidth  * scale)
+        canvas.height = Math.round(img.naturalHeight * scale)
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+        ref.current = canvas.toDataURL('image/png')
+      }
+      img.onerror = () => {}
+      img.src = path
     }
     loadLogo('/logo.png', logoRef)
     loadLogo('/logo-blue.png', logoBlueRef)
