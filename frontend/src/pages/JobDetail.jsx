@@ -1255,14 +1255,20 @@ function InfoView({ job, dlCls }) {
           <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:4 }}>Submitted By</div>
           {createdByEdit ? (
             <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-              <select className="form-control form-control-sm" style={{ flex:1 }}
+              <input
+                className="form-control form-control-sm"
+                style={{ flex:1 }}
+                list="staff-datalist"
                 value={createdByVal}
-                onChange={e => setCreatedByVal(e.target.value)}>
-                <option value=''>— Unassigned —</option>
+                onChange={e => setCreatedByVal(e.target.value)}
+                placeholder="email@zhenghe.com.sg"
+                autoFocus
+              />
+              <datalist id="staff-datalist">
                 {staffList.map(email => (
-                  <option key={email} value={email}>{nameFromEmail(email)} ({email})</option>
+                  <option key={email} value={email}>{nameFromEmail(email)}</option>
                 ))}
-              </select>
+              </datalist>
               <button className="btn btn-primary btn-xs" onClick={async () => {
                 await updateJob(id, { created_by: createdByVal })
                 setJob(j => ({ ...j, created_by: createdByVal }))
