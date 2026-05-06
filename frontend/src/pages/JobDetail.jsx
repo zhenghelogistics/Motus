@@ -499,6 +499,161 @@ export default function JobDetail() {
     doc.save(`ZHL_${job.job_number.replace('/', '-')}_Accounts.pdf`)
   }
 
+  // ── Internal Job Report PDF ───────────────────────────────────────────────
+  function exportJobReport() {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const lw = 34, vw = 57
+
+    // Header
+    doc.setFillColor(...navy)
+    doc.rect(0, 0, pw, 38, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 6, 1, 28, 36)
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 38, 15)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.25)
+    doc.line(38, 20, pw - mr, 20)
+    doc.setDrawColor(0); doc.setLineWidth(0.1)
+    doc.text('rfq@zhenghe.com.sg', 38, 28)
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+    doc.text('JOB REPORT', pw - mr, 15, { align: 'right' })
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text(job.job_number, pw - mr, 28, { align: 'right' })
+
+    // Job info table
+    const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
+    const valCol   = { cellWidth: vw }
+    autoTable(doc, {
+      startY: 43,
+      body: [
+        ['Job No.',      job.job_number,                                      'Mode',        job.mode || '—'],
+        ['Customer Ref', job.customer_ref || '—',                             'Status',      job.status || '—'],
+        ['Salesperson',  nameFromEmail(job.created_by) || '—',                'Deadline',    job.deadline_date || '—'],
+        ['Shipper',      job.shipper || '—',                                  'Date Out',    job.date_out || '—'],
+        ['Consignee',    job.consignee || '—',                                'Delivered',   job.date_delivered || '—'],
+        ['Agent',        job.agent || '—',                                    'Commodity',   job.commodity || '—'],
+        ['Customer',     job.customer_name || '—',                            'Customer Ref',job.customer_ref || '—'],
+        ['Packages',     job.packages != null ? String(job.packages) : '—',  'Weight',      job.weight ? `${job.weight} kg` : '—'],
+        ['Dimensions',   job.dimensions || '—',                               'CBM',         job.cbm != null ? String(job.cbm) : '—'],
+      ],
+      columnStyles: { 0: labelCol, 1: valCol, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Pickup / Delivery side-by-side
+    const pu = `${job.pickup_address || '—'}${job.pickup_contact_name ? '\nPIC: ' + job.pickup_contact_name + (job.pickup_contact_number ? '   ' + job.pickup_contact_number : '') : ''}`
+    const dl = `${job.delivery_address || '—'}${job.delivery_contact_name ? '\nPIC: ' + job.delivery_contact_name + (job.delivery_contact_number ? '   ' + job.delivery_contact_number : '') : ''}`
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 3,
+      head: [[
+        { content: 'PICKUP',   styles: { fillColor: navy, textColor: [255,255,255], fontStyle: 'bold', fontSize: 8 } },
+        { content: 'DELIVERY', styles: { fillColor: navy, textColor: [255,255,255], fontStyle: 'bold', fontSize: 8 } },
+      ]],
+      body: [[pu, dl]],
+      columnStyles: { 0: { cellWidth: 'auto', fillColor: [245,247,250] }, 1: { cellWidth: 'auto', fillColor: [245,247,250] } },
+      styles: { fontSize: 8.5, cellPadding: 5, overflow: 'linebreak', valign: 'top' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Cost Lines
+    let y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('COST LINES', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Vendor', 'Service', 'Invoice No.', 'Invoice Date', 'Amount (SGD)', 'Remarks']],
+      body: job.cost_lines.length
+        ? job.cost_lines.map((l, i) => [i+1, l.vendor || '—', l.service || '—', l.invoice_no || '—', l.invoice_date || '—', fmt(l.amount), l.remarks || ''])
+        : [['', 'No cost lines', '', '', '', '', '']],
+      foot: [['', '', '', '', 'Total Cost', fmt(job.cost_sgd), '']],
+      headStyles: { fillColor: [55, 88, 120], fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 0:{cellWidth:8}, 4:{cellWidth:22}, 5:{halign:'right', fontStyle:'bold', cellWidth:28} },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Billing Lines
+    y = doc.lastAutoTable.finalY + 5
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text('BILLING LINES', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Service', 'Unit', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
+      body: job.billing_lines.length
+        ? job.billing_lines.map((l, i) => [i+1, l.service || '—', l.unit || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt(l.total), l.remarks || ''])
+        : [['', 'No billing lines', '', '', '', '', '']],
+      foot: [['', '', '', '', 'Total Sale', fmt(job.sale_sgd), '']],
+      headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 0:{cellWidth:8}, 3:{halign:'right', cellWidth:26}, 4:{cellWidth:14}, 5:{halign:'right', fontStyle:'bold', cellWidth:28} },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // P&L Summary
+    y = doc.lastAutoTable.finalY + 5
+    const profit = (job.sale_sgd||0) - (job.cost_sgd||0)
+    const gpDisplay = job.gp_override != null ? job.gp_override : (job.gp_percent||0)
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Total Cost',  fmt(job.cost_sgd)],
+        ['Total Sale',  fmt(job.sale_sgd)],
+        ['Profit',      fmt(profit)],
+        ['GP Margin',   `${Number(gpDisplay).toFixed(1)}%${job.gp_override != null ? '  (manual)' : ''}`],
+      ],
+      styles: { fontSize: 9, cellPadding: 4 },
+      columnStyles: {
+        0: { fontStyle: 'bold', fillColor: [237,242,248], textColor: navy, cellWidth: 140 },
+        1: { halign: 'right', fontStyle: 'bold', cellWidth: 42 },
+      },
+      margin: { left: pw - mr - 182, right: mr },
+      tableWidth: 182,
+    })
+
+    // Notes
+    if (job.notes) {
+      y = doc.lastAutoTable.finalY + 6
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('NOTES', ml, y); y += 2
+      autoTable(doc, {
+        startY: y,
+        body: [[{ content: job.notes, styles: { fontSize: 8.5 } }]],
+        styles: { overflow: 'linebreak', cellPadding: 5, fillColor: [255, 252, 230] },
+        margin: { left: ml, right: mr },
+        tableWidth: tw,
+      })
+    }
+
+    // Prepared by footer (on last page)
+    const preparedBy = nameFromEmail(job.created_by) || '—'
+    const totalPages = doc.internal.getNumberOfPages()
+    doc.setPage(totalPages)
+    y = doc.lastAutoTable.finalY + 14
+    if (y > 270) y = 270
+    doc.setDrawColor(180, 180, 180); doc.setLineWidth(0.3)
+    doc.line(ml, y, ml + 60, y)
+    y += 5
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text(`Prepared by: ${preparedBy}`, ml, y)
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(120, 120, 120)
+    doc.text(`Date: ${new Date().toLocaleDateString('en-SG')}`, ml, y + 5)
+
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+      doc.text(`Zhenghe Logistics Pte Ltd — Internal Job Report — ${job.job_number}`, ml, 290)
+      doc.text(`Page ${p} of ${totalPages}`, pw - mr, 290, { align: 'right' })
+    }
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_JobReport.pdf`)
+  }
+
   // ── Pickup Request Order PDF ──────────────────────────────────────────────
   function exportPickupOrder() {
     const doc = new jsPDF('p', 'mm', 'a4')
@@ -1084,6 +1239,7 @@ export default function JobDetail() {
           <StatusDropdown status={job.status} onChange={changeStatus} />
         </div>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+          <button className="btn btn-ghost btn-sm" onClick={exportJobReport}>📋 Job Report</button>
           <button className="btn btn-ghost btn-sm" onClick={exportPDF}>↓ Costing PDF</button>
           <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}>🚛 Pickup Order</button>
           <button className="btn btn-ghost btn-sm" onClick={openDOModal}>📦 Delivery Order</button>
