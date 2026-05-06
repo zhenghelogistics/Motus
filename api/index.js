@@ -82,6 +82,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_contact_number TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_email TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS void_reason TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS rate_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
@@ -231,19 +232,20 @@ app.get('/api/dbtest', async (req, res) => {
 // ─── JOBS ───────────────────────────────────────────────────────────────────
 app.get('/api/jobs', async (req, res) => {
   try {
-    const { search, status, mode, agent } = req.query;
+    const { search, status, mode, agent, created_by } = req.query;
     // Single query with aggregated cost/billing via subquery joins — no N+1
     let where = 'WHERE 1=1';
     const p = [];
     let i = 1;
     if (search) {
       const s = `%${search}%`;
-      where += ` AND (j.job_number ILIKE $${i} OR j.shipper ILIKE $${i+1} OR j.consignee ILIKE $${i+2} OR j.customer_ref ILIKE $${i+3} OR j.agent ILIKE $${i+4})`;
-      p.push(s, s, s, s, s); i += 5;
+      where += ` AND (j.job_number ILIKE $${i} OR j.shipper ILIKE $${i+1} OR j.consignee ILIKE $${i+2} OR j.customer_ref ILIKE $${i+3} OR j.agent ILIKE $${i+4} OR j.created_by ILIKE $${i+5})`;
+      p.push(s, s, s, s, s, s); i += 6;
     }
-    if (status) { where += ` AND j.status=$${i}`;       p.push(status); i++; }
-    if (mode)   { where += ` AND j.mode=$${i}`;         p.push(mode);   i++; }
-    if (agent)  { where += ` AND j.agent ILIKE $${i}`;  p.push(`%${agent}%`); i++; }
+    if (status)     { where += ` AND j.status=$${i}`;          p.push(status);            i++; }
+    if (mode)       { where += ` AND j.mode=$${i}`;            p.push(mode);              i++; }
+    if (agent)      { where += ` AND j.agent ILIKE $${i}`;     p.push(`%${agent}%`);      i++; }
+    if (created_by) { where += ` AND j.created_by=$${i}`;      p.push(created_by);        i++; }
 
     const limitVal = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 500) : null
     const limitClause = limitVal ? `LIMIT ${limitVal}` : ''
@@ -287,8 +289,8 @@ app.post('/api/jobs', async (req, res) => {
       INSERT INTO jobs (job_number, year, sequence, shipper, consignee, weight, packages,
         dimensions, cbm, pickup_address, pickup_contact_name, pickup_contact_number,
         delivery_address, delivery_contact_name, delivery_contact_number,
-        date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+        date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
       RETURNING *
     `, [
       job_number, year, sequence,
@@ -298,7 +300,8 @@ app.post('/api/jobs', async (req, res) => {
       f.delivery_address||'', f.delivery_contact_name||'', f.delivery_contact_number||'',
       f.date_out||null, f.date_delivered||null,
       f.agent||'', f.mode||'Local Delivery', f.status||'New',
-      f.customer_ref||'', f.deadline_date||null, f.commodity||'', f.notes||''
+      f.customer_ref||'', f.deadline_date||null, f.commodity||'', f.notes||'',
+      req.user?.email || ''
     ]);
     const job = result.rows[0];
     if (f.billing_lines && Array.isArray(f.billing_lines)) {

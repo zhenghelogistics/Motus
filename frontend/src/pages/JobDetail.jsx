@@ -1247,6 +1247,7 @@ function InfoView({ job, dlCls }) {
         {row('Agent', job.agent)}
         {row('Customer Ref', job.customer_ref)}
         {row('Status', job.status)}
+        {job.created_by && row('Submitted By', nameFromEmail(job.created_by))}
         <div>
           <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.4px' }}>Deadline</div>
           <div className={dlCls} style={{ fontSize:13, marginTop:2, fontWeight: dlCls ? 700 : 500 }}>{job.deadline_date||'—'}</div>

@@ -38,6 +38,7 @@ const COLS = [
   { key: 'consignee', label: 'Consignee' },
   { key: 'mode', label: 'Mode' },
   { key: 'agent', label: 'Agent' },
+  { key: 'created_by', label: 'By' },
   { key: 'status', label: 'Status' },
   { key: 'deadline_date', label: 'Deadline' },
   { key: 'date_out', label: 'Date Out' },
@@ -50,12 +51,21 @@ const COLS = [
   { key: 'gp_percent', label: 'GP%' },
 ]
 
+function shortName(email) {
+  if (!email) return '—'
+  const prefix = email.split('@')[0]
+  const parts = prefix.split('.')
+  if (parts.length >= 2) return parts[0].charAt(0).toUpperCase() + parts[0].slice(1) + ' ' + parts[1].charAt(0).toUpperCase() + '.'
+  return prefix.charAt(0).toUpperCase() + prefix.slice(1)
+}
+
 export default function MovementTracker() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterMode, setFilterMode] = useState('')
+  const [filterCreatedBy, setFilterCreatedBy] = useState('')
   const [showVoided, setShowVoided] = useState(false)
   const [sortKey, setSortKey] = useState('id')
   const [sortDir, setSortDir] = useState('desc')
@@ -63,12 +73,17 @@ export default function MovementTracker() {
 
   function load() {
     setLoading(true)
-    getJobs({ search: search || undefined, status: filterStatus || undefined, mode: filterMode || undefined })
+    getJobs({
+      search: search || undefined,
+      status: filterStatus || undefined,
+      mode: filterMode || undefined,
+      created_by: filterCreatedBy || undefined,
+    })
       .then(r => { setJobs(r.data); setLoading(false) })
       .catch(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [search, filterStatus, filterMode])
+  useEffect(() => { load() }, [search, filterStatus, filterMode, filterCreatedBy])
 
   function handleSort(key) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -96,6 +111,11 @@ export default function MovementTracker() {
   const mProfit = mRevenue - mCost
   const mGP = mRevenue > 0 ? (mProfit/mRevenue)*100 : 0
 
+  const staffOptions = useMemo(() => {
+    const emails = [...new Set(jobs.map(j => j.created_by).filter(Boolean))].sort()
+    return emails
+  }, [jobs])
+
   function exportExcel() {
     const rows = sorted.map(j => ({
       'Job No.': j.job_number,
@@ -104,6 +124,7 @@ export default function MovementTracker() {
       'Consignee': j.consignee,
       'Mode': j.mode,
       'Agent': j.agent,
+      'Submitted By': shortName(j.created_by),
       'Status': j.status,
       'Deadline': j.deadline_date,
       'Date Out': j.date_out,
@@ -174,8 +195,12 @@ export default function MovementTracker() {
         <select className="form-control" value={filterMode} onChange={e => setFilterMode(e.target.value)}>
           {MODES.map(m => <option key={m} value={m}>{m || 'All Modes'}</option>)}
         </select>
-        {(search || filterStatus || filterMode) &&
-          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatus(''); setFilterMode('') }}>Clear</button>
+        <select className="form-control" value={filterCreatedBy} onChange={e => setFilterCreatedBy(e.target.value)}>
+          <option value=''>All Staff</option>
+          {staffOptions.map(email => <option key={email} value={email}>{shortName(email)}</option>)}
+        </select>
+        {(search || filterStatus || filterMode || filterCreatedBy) &&
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatus(''); setFilterMode(''); setFilterCreatedBy('') }}>Clear</button>
         }
         {voidedCount > 0 && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none' }}>
@@ -214,6 +239,7 @@ export default function MovementTracker() {
                         <td>{job.consignee || '—'}</td>
                         <td style={{ whiteSpace: 'nowrap' }}><ModeTag mode={job.mode} /></td>
                         <td>{job.agent || '—'}</td>
+                        <td style={{ whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-muted)' }}>{shortName(job.created_by)}</td>
                         <td><StatusPill status={job.status} /></td>
                         <td><span className={dl.cls} style={{ whiteSpace: 'nowrap', fontSize: 13 }}>{dl.label}</span></td>
                         <td style={{ whiteSpace: 'nowrap' }}>{job.date_out || '—'}</td>
@@ -248,7 +274,7 @@ export default function MovementTracker() {
               <div className="job-card-names">
                 <strong>{job.shipper || '—'}</strong> → {job.consignee || '—'}
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.mode}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.mode}{job.created_by ? ` · ${shortName(job.created_by)}` : ''}</div>
               <div className="job-card-footer">
                 <span className={dl.cls} style={{ fontSize: 12 }}>{dl.label !== '—' ? `Due: ${dl.label}` : ''}</span>
                 <span className={gpClass(job.gp_percent)} style={{ fontSize: 13 }}>{fmtGP(job.gp_percent)}</span>
