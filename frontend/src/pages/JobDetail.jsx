@@ -146,7 +146,7 @@ export default function JobDetail() {
 
   // ── Billing lines ─────────────────────────────────────────────────────────
   async function addBilling() {
-    const r = await addBillingLine(id, { service:'', unit:'', rate:0, qty:1, remarks:'' })
+    const r = await addBillingLine(id, { service:'', rate:0, qty:1, remarks:'' })
     setJob(j => ({ ...j, billing_lines: [...j.billing_lines, r.data] }))
     refreshTotals()
   }
@@ -301,11 +301,11 @@ export default function JobDetail() {
     doc.text('BILLING LINES', ml, y); y += 2
     autoTable(doc, {
       startY: y,
-      head: [['Service', 'Unit', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
+      head: [['Service', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
       body: job.billing_lines.length
-        ? job.billing_lines.map(l => [l.service || '—', l.unit || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt(l.total), l.remarks || ''])
-        : [['—', '', '', '', '', '']],
-      foot: [['', '', '', 'Total Sale', fmt(job.sale_sgd), '']],
+        ? job.billing_lines.map(l => [l.service || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt(l.total), l.remarks || ''])
+        : [['—', '', '', '', '']],
+      foot: [['', '', 'Total Sale', fmt(job.sale_sgd), '']],
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
@@ -424,11 +424,11 @@ export default function JobDetail() {
     const totalSale = job.billing_lines.reduce((s, l) => s + (l.rate||0)*(l.qty||1), 0)
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Service', 'Unit', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
+      head: [['#', 'Service', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
       body: job.billing_lines.length
-        ? job.billing_lines.map((l, i) => [i+1, l.service || '—', l.unit || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt((l.rate||0)*(l.qty||1)), l.remarks || ''])
-        : [['', 'No billing lines', '', '', '', '', '']],
-      foot: [['', '', '', '', 'Total Sale', fmt(totalSale), '']],
+        ? job.billing_lines.map((l, i) => [i+1, l.service || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt((l.rate||0)*(l.qty||1)), l.remarks || ''])
+        : [['', 'No billing lines', '', '', '', '']],
+      foot: [['', '', '', 'Total Sale', fmt(totalSale), '']],
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
@@ -588,11 +588,11 @@ export default function JobDetail() {
     doc.text('BILLING LINES', ml, y); y += 2
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Service', 'Unit', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
+      head: [['#', 'Service', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
       body: job.billing_lines.length
-        ? job.billing_lines.map((l, i) => [i+1, l.service || '—', l.unit || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt(l.total), l.remarks || ''])
-        : [['', 'No billing lines', '', '', '', '', '']],
-      foot: [['', '', '', '', 'Total Sale', fmt(job.sale_sgd), '']],
+        ? job.billing_lines.map((l, i) => [i+1, l.service || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt(l.total), l.remarks || ''])
+        : [['', 'No billing lines', '', '', '', '']],
+      foot: [['', '', '', 'Total Sale', fmt(job.sale_sgd), '']],
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
@@ -1707,7 +1707,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
   return (
     <table className="inline-table">
       <thead>
-        <tr><th>Service</th><th>Unit</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th><th style={{width:80}}></th></tr>
+        <tr><th>Service</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th><th style={{width:80}}></th></tr>
       </thead>
       <tbody>
         {lines.map(l => {
@@ -1719,7 +1719,6 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
           return (
             <tr key={l.id} onDoubleClick={() => startEdit(l)}>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.service||''} onChange={e => setDraft(l.id,'service',e.target.value)} /> : (l.service||'—')}</td>
-              <td>{isEdit ? <input className="form-control form-control-sm" value={d.unit||''} onChange={e => setDraft(l.id,'unit',e.target.value)} /> : (l.unit||'—')}</td>
               <td>
                 {isEdit ? (
                   <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
