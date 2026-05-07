@@ -30,6 +30,13 @@ function deadlineClass(date) {
   return 'deadline-ok'
 }
 
+function computePayable(total, adj_type, adj_value) {
+  const adj = parseFloat(adj_value) || 0
+  if (adj === 0) return total
+  if (adj_type === 'percent') return parseFloat((total * (1 + adj / 100)).toFixed(2))
+  return parseFloat((total + adj).toFixed(2))
+}
+
 function nameFromEmail(email) {
   if (!email) return ''
   const prefix = email.split('@')[0]
@@ -422,17 +429,25 @@ export default function JobDetail() {
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
     doc.text('BILLING TO CUSTOMER', ml, y); y += 2
     const totalSale = job.billing_lines.reduce((s, l) => s + (l.rate||0)*(l.qty||1), 0)
+    const totalPayable = job.billing_lines.reduce((s, l) => s + computePayable((l.rate||0)*(l.qty||1), l.adj_type, l.adj_value), 0)
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Service', 'Unit', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
+      head: [['#', 'Service', 'Unit', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Total Payable', 'Remarks']],
       body: job.billing_lines.length
-        ? job.billing_lines.map((l, i) => [i+1, l.service || '—', l.unit || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt((l.rate||0)*(l.qty||1)), l.remarks || ''])
-        : [['', 'No billing lines', '', '', '', '', '']],
-      foot: [['', '', '', '', 'Total Sale', fmt(totalSale), '']],
+        ? job.billing_lines.map((l, i) => {
+            const total = (l.rate||0)*(l.qty||1)
+            const payable = computePayable(total, l.adj_type, l.adj_value)
+            const adjLabel = (parseFloat(l.adj_value)||0) !== 0
+              ? (l.adj_type === 'percent' ? ` (+${l.adj_value}%)` : ` (+${fmt(l.adj_value)})`)
+              : ''
+            return [i+1, l.service || '—', l.unit || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt(total), fmt(payable) + adjLabel, l.remarks || '']
+          })
+        : [['', 'No billing lines', '', '', '', '', '', '']],
+      foot: [['', '', '', '', 'Total Sale', fmt(totalSale), fmt(totalPayable), '']],
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
-      columnStyles: { 0:{cellWidth:8}, 3:{halign:'right', cellWidth:26}, 4:{cellWidth:14}, 5:{halign:'right', fontStyle:'bold', cellWidth:28} },
+      columnStyles: { 0:{cellWidth:8}, 3:{halign:'right', cellWidth:24}, 4:{cellWidth:12}, 5:{halign:'right', cellWidth:26}, 6:{halign:'right', fontStyle:'bold', cellWidth:28} },
       margin: { left: ml, right: mr },
       tableWidth: tw,
     })
@@ -1671,7 +1686,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
 
-  function startEdit(l) { setDrafts(d => ({ ...d, [l.id]: { ...l, currency: l.currency||'SGD', rate_local: l.rate_local ?? l.rate } })); setEditing(e => ({ ...e, [l.id]: true })) }
+  function startEdit(l) { setDrafts(d => ({ ...d, [l.id]: { ...l, currency: l.currency||'SGD', rate_local: l.rate_local ?? l.rate, adj_type: l.adj_type||'amount', adj_value: l.adj_value||0 } })); setEditing(e => ({ ...e, [l.id]: true })) }
   function setDraft(id, key, val) { setDrafts(d => ({ ...d, [id]: { ...d[id], [key]: val } })) }
 
   function toSGD(localRate, currency) {
@@ -1686,7 +1701,9 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
     const currency = d.currency || 'SGD'
     const rate_local = parseFloat(d.rate_local) || 0
     const rate = toSGD(rate_local, currency)
-    await onSave(id, { ...d, rate, rate_local, currency })
+    const adj_type = d.adj_type || 'amount'
+    const adj_value = parseFloat(d.adj_value) || 0
+    await onSave(id, { ...d, rate, rate_local, currency, adj_type, adj_value })
     setEditing(e => ({ ...e, [id]: false }))
     setSaving(s => ({ ...s, [id]: false }))
   }
@@ -1696,7 +1713,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
   return (
     <table className="inline-table">
       <thead>
-        <tr><th>Service</th><th>Unit</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th><th style={{width:80}}></th></tr>
+        <tr><th>Service</th><th>Unit</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th style={{width:130}}>Adjustment</th><th style={{width:110}}>Total Payable</th><th>Remarks</th><th style={{width:80}}></th></tr>
       </thead>
       <tbody>
         {lines.map(l => {
@@ -1731,6 +1748,31 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
               </td>
               <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.qty||''} onChange={e => setDraft(l.id,'qty',parseFloat(e.target.value)||1)} /> : l.qty}</td>
               <td><strong>{fmt(isEdit ? total : l.total)}</strong></td>
+              <td>
+                {isEdit ? (
+                  <div style={{ display:'flex', gap:3 }}>
+                    <input type="number" className="form-control form-control-sm" style={{ width:68 }} min="0"
+                      value={d.adj_value||''} placeholder="0"
+                      onChange={e => setDraft(l.id,'adj_value',e.target.value)} />
+                    <select className="form-control form-control-sm" style={{ width:54 }}
+                      value={d.adj_type||'amount'} onChange={e => setDraft(l.id,'adj_type',e.target.value)}>
+                      <option value="amount">+ $</option>
+                      <option value="percent">+ %</option>
+                    </select>
+                  </div>
+                ) : (
+                  (parseFloat(l.adj_value)||0) !== 0
+                    ? <span style={{ fontSize:12, color:'var(--text-muted)' }}>
+                        {l.adj_type === 'percent' ? `+${l.adj_value}%` : `+${fmt(l.adj_value)}`}
+                      </span>
+                    : <span style={{ color:'var(--text-muted)', fontSize:12 }}>—</span>
+                )}
+              </td>
+              <td>
+                <strong style={{ color:'var(--navy)' }}>
+                  {fmt(computePayable(isEdit ? total : (l.total||0), d.adj_type||'amount', d.adj_value||0))}
+                </strong>
+              </td>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               <td>
                 <div className="flex gap-2">

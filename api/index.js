@@ -86,6 +86,8 @@ async function initDB() {
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS salesperson TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS rate_local REAL`);
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS adj_type TEXT DEFAULT 'amount'`);
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS adj_value REAL DEFAULT 0`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS amount_local REAL`);
   await pool.query(`
@@ -413,13 +415,18 @@ app.delete('/api/jobs/:id/costs/:lid', async (req, res) => {
 // ─── BILLING LINES ──────────────────────────────────────────────────────────
 app.post('/api/jobs/:id/billing', async (req, res) => {
   try {
-    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null } = req.body;
+    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null, adj_type='amount', adj_value=0 } = req.body;
     const r = await pool.query(
-      'INSERT INTO billing_lines (job_id,service,unit,rate,qty,remarks,currency,rate_local) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-      [req.params.id, service, unit, rate, qty, remarks, currency, rate_local]
+      'INSERT INTO billing_lines (job_id,service,unit,rate,qty,remarks,currency,rate_local,adj_type,adj_value) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+      [req.params.id, service, unit, rate, qty, remarks, currency, rate_local, adj_type, adj_value]
     );
     const line = r.rows[0];
-    res.status(201).json({ ...line, total: parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2)) });
+    const total = parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2));
+    const adjV = parseFloat(line.adj_value)||0;
+    const total_payable = line.adj_type === 'percent'
+      ? parseFloat((total * (1 + adjV/100)).toFixed(2))
+      : parseFloat((total + adjV).toFixed(2));
+    res.status(201).json({ ...line, total, total_payable });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -428,13 +435,18 @@ app.post('/api/jobs/:id/billing', async (req, res) => {
 
 app.put('/api/jobs/:id/billing/:lid', async (req, res) => {
   try {
-    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null } = req.body;
+    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null, adj_type='amount', adj_value=0 } = req.body;
     const r = await pool.query(
-      'UPDATE billing_lines SET service=$1,unit=$2,rate=$3,qty=$4,remarks=$5,currency=$6,rate_local=$7 WHERE id=$8 AND job_id=$9 RETURNING *',
-      [service, unit, rate, qty, remarks, currency, rate_local, req.params.lid, req.params.id]
+      'UPDATE billing_lines SET service=$1,unit=$2,rate=$3,qty=$4,remarks=$5,currency=$6,rate_local=$7,adj_type=$8,adj_value=$9 WHERE id=$10 AND job_id=$11 RETURNING *',
+      [service, unit, rate, qty, remarks, currency, rate_local, adj_type, adj_value, req.params.lid, req.params.id]
     );
     const line = r.rows[0];
-    res.json({ ...line, total: parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2)) });
+    const total = parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2));
+    const adjV = parseFloat(line.adj_value)||0;
+    const total_payable = line.adj_type === 'percent'
+      ? parseFloat((total * (1 + adjV/100)).toFixed(2))
+      : parseFloat((total + adjV).toFixed(2));
+    res.json({ ...line, total, total_payable });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
