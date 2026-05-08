@@ -39,7 +39,7 @@ const COLS = [
   { key: 'shipper', label: 'Shipper' },
   { key: 'consignee', label: 'Consignee' },
   { key: 'mode', label: 'Mode' },
-  { key: 'agent', label: 'Agent' },
+  { key: 'zhl_invoice_no', label: 'ZHL Inv No.' },
   { key: 'created_by', label: 'Salesperson' },
   { key: 'status', label: 'Status' },
   { key: 'deadline_date', label: 'Deadline' },
@@ -144,7 +144,7 @@ export default function MovementTracker() {
       'Shipper': j.shipper,
       'Consignee': j.consignee,
       'Mode': j.mode,
-      'Agent': j.agent,
+      'ZHL Inv No.': j.zhl_invoice_no,
       'Salesperson': shortName(j.created_by),
       'Status': j.status,
       'Deadline': j.deadline_date,
@@ -374,7 +374,7 @@ export default function MovementTracker() {
                         <td>{job.shipper || '—'}</td>
                         <td>{job.consignee || '—'}</td>
                         <td style={{ whiteSpace: 'nowrap' }}><ModeTag mode={job.mode} /></td>
-                        <td>{job.agent || '—'}</td>
+                        <td>{job.zhl_invoice_no || '—'}</td>
                         <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{shortName(job.created_by)}</td>
                         <td><StatusPill status={job.status} /></td>
                         <td><span className={dl.cls} style={{ whiteSpace: 'nowrap', fontSize: 13 }}>{dl.label}</span></td>
