@@ -1450,6 +1450,7 @@ function InfoView({ job, dlCls }) {
           <div className={dlCls} style={{ fontSize:13, marginTop:2, fontWeight: dlCls ? 700 : 500 }}>{job.deadline_date||'—'}</div>
         </div>
         {row('Commodity', job.commodity)}
+        {row('ZHL Invoice No.', job.zhl_invoice_no)}
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:14 }}>
         {row('Packages', job.packages)}
@@ -1506,6 +1507,7 @@ function InfoEdit({ form, setField, staffList = [] }) {
         </div>
         {inp('deadline_date','Deadline Date','date')}
         {inp('commodity','Commodity')}
+        {inp('zhl_invoice_no','ZHL Invoice No.')}
         <div className="form-group">
           <label className="form-label">Salesperson</label>
           <input
