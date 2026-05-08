@@ -82,6 +82,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_contact_number TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS customer_email TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS void_reason TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS zhl_invoice_no TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS salesperson TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
@@ -344,7 +345,7 @@ app.put('/api/jobs/:id', async (req, res) => {
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','agent','mode','status','customer_ref',
       'deadline_date','commodity','notes','gp_override',
-      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','created_by'];
+      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','zhl_invoice_no','created_by'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) {
