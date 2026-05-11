@@ -100,9 +100,7 @@ async function initDB() {
   `);
   await pool.query(`
     INSERT INTO fx_rates (currency, rate) VALUES
-      ('USD', 0.745), ('EUR', 0.688), ('GBP', 0.589), ('IDR', 11900),
-      ('MYR', 3.48), ('CNY', 5.41), ('JPY', 113.2), ('AUD', 1.145),
-      ('HKD', 5.82), ('INR', 62.1)
+      ('USD', 0.745), ('IDR', 11900), ('EUR', 0.688)
     ON CONFLICT (currency) DO NOTHING
   `);
   await pool.query(`

@@ -17,11 +17,8 @@ const NAV = [
 ]
 
 // Default SGD-based rates (approximate)
-const DEFAULT_RATES = {
-  USD: 0.745, IDR: 11900, EUR: 0.688, GBP: 0.589, MYR: 3.48,
-  AUD: 1.145, CNY: 5.41, JPY: 113.2, HKD: 5.82, INR: 62.1,
-}
-const FX_ORDER = ['USD', 'IDR', 'EUR', 'GBP', 'MYR', 'AUD', 'CNY', 'JPY', 'HKD', 'INR']
+const DEFAULT_RATES = { USD: 0.745, IDR: 11900, EUR: 0.688 }
+const FX_ORDER = ['USD', 'IDR', 'EUR']
 const sortedRateEntries = (rates) => FX_ORDER.filter(c => c in rates).map(c => [c, rates[c]])
 
 const SEEN_KEY = 'changelog_seen_count'

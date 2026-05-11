@@ -12,7 +12,7 @@ import {
 import DimensionBoxes from '../components/DimensionBoxes'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
-const CURRENCIES = ['SGD', 'USD', 'EUR', 'GBP', 'IDR', 'MYR', 'CNY', 'JPY', 'AUD', 'HKD']
+const CURRENCIES = ['SGD', 'USD', 'IDR', 'EUR']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 const DOC_TYPES = ['CI', 'PL', 'DO', 'Invoice', 'Other']
 const navy = [4, 44, 83]
