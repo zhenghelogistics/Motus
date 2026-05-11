@@ -91,6 +91,21 @@ async function initDB() {
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS amount_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS total_payable REAL`);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS fx_rates (
+      currency TEXT PRIMARY KEY,
+      rate REAL NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW(),
+      updated_by TEXT DEFAULT ''
+    )
+  `);
+  await pool.query(`
+    INSERT INTO fx_rates (currency, rate) VALUES
+      ('USD', 0.745), ('EUR', 0.688), ('GBP', 0.589), ('IDR', 11900),
+      ('MYR', 3.48), ('CNY', 5.41), ('JPY', 113.2), ('AUD', 1.145),
+      ('HKD', 5.82), ('INR', 62.1)
+    ON CONFLICT (currency) DO NOTHING
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS cost_lines (
       id SERIAL PRIMARY KEY,
       job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -756,6 +771,48 @@ app.get('/api/dashboard', async (req, res) => {
       status_counts: Object.fromEntries(statusRes.rows.map(r => [r.status, parseInt(r.count)])),
       missing_costing_count: parseInt(missingCountRes.rows[0].count)
     });
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ─── FX RATES ────────────────────────────────────────────────────────────────
+app.get('/api/fx-rates', async (req, res) => {
+  try {
+    await ensureDB();
+    const r = await pool.query('SELECT * FROM fx_rates ORDER BY currency');
+    const rates = {};
+    let updated_at = null, updated_by = '';
+    r.rows.forEach(row => {
+      rates[row.currency] = row.rate;
+      if (!updated_at || new Date(row.updated_at) > new Date(updated_at)) {
+        updated_at = row.updated_at;
+        updated_by = row.updated_by;
+      }
+    });
+    res.json({ rates, updated_at, updated_by });
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+app.put('/api/fx-rates', requireAuth, async (req, res) => {
+  try {
+    await ensureDB();
+    const { rates } = req.body;
+    const updatedBy = req.user?.email || '';
+    const now = new Date();
+    await Promise.all(Object.entries(rates).map(([currency, rate]) =>
+      pool.query(
+        `INSERT INTO fx_rates (currency, rate, updated_at, updated_by)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (currency) DO UPDATE SET rate=$2, updated_at=$3, updated_by=$4`,
+        [currency, parseFloat(rate), now, updatedBy]
+      )
+    ));
+    res.json({ success: true, updated_at: now, updated_by: updatedBy });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });

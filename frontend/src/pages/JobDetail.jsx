@@ -7,7 +7,7 @@ import {
   getJob, updateJob, deleteJob,
   addCostLine, updateCostLine, deleteCostLine,
   addBillingLine, updateBillingLine, deleteBillingLine,
-  uploadDocument, deleteDocument, parseInvoice, getStaff
+  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
 
@@ -79,10 +79,7 @@ export default function JobDetail() {
     }
     loadLogo('/logo.png', logoRef)
     loadLogo('/logo-blue.png', logoBlueRef)
-    fetch('https://open.er-api.com/v6/latest/SGD')
-      .then(r => r.json())
-      .then(d => { if (d.rates) setFxRates(d.rates) })
-      .catch(() => {})
+    getFxRates().then(r => setFxRates(r.data.rates)).catch(() => {})
     getStaff().then(r => setStaffList(r.data)).catch(() => {})
   }, [])
 

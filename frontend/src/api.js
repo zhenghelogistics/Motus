@@ -50,6 +50,9 @@ export const parseInvoice = (file) => {
 
 export const getDashboard = () => api.get('/dashboard')
 
+export const getFxRates = () => api.get('/fx-rates')
+export const updateFxRates = (rates) => api.put('/fx-rates', { rates })
+
 export const getCustomers = (search) => api.get('/customers', { params: search ? { search } : {} })
 export const getStaff = () => api.get('/staff')
 
