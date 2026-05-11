@@ -776,6 +776,37 @@ app.get('/api/dashboard', async (req, res) => {
 });
 
 // ─── FX RATES ────────────────────────────────────────────────────────────────
+app.get('/api/fx-rates/sync', async (req, res) => {
+  const auth = req.headers.authorization
+  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  try {
+    await ensureDB()
+    const today = new Date()
+    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
+    const isLastDay = tomorrow.getMonth() !== today.getMonth()
+    if (!isLastDay) {
+      return res.json({ skipped: true, reason: 'Not last day of month', date: today.toISOString().split('T')[0] })
+    }
+    const yahooFinance = require('yahoo-finance2').default
+    const quote = await yahooFinance.quote('SGDUSD=X')
+    const rate = parseFloat(quote.regularMarketPrice)
+    if (!rate || isNaN(rate)) throw new Error('Invalid rate from Yahoo Finance')
+    const now = new Date()
+    await pool.query(
+      `INSERT INTO fx_rates (currency, rate, updated_at, updated_by)
+       VALUES ($1,$2,$3,$4) ON CONFLICT (currency) DO UPDATE SET rate=$2, updated_at=$3, updated_by=$4`,
+      ['USD', rate, now, 'auto-sync (Yahoo Finance close)']
+    )
+    console.log(`[ZHL] FX auto-sync: 1 SGD = ${rate} USD on ${today.toISOString().split('T')[0]}`)
+    res.json({ success: true, currency: 'USD', rate, updated_at: now })
+  } catch (err) {
+    console.error('[ZHL] FX auto-sync error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/fx-rates', async (req, res) => {
   try {
     await ensureDB();
