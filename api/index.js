@@ -227,7 +227,7 @@ app.use(async (req, res, next) => {
 
 // ─── AUTH GUARD (all /api/* except health checks) ───────────────────────────
 app.use('/api', (req, res, next) => {
-  if (req.url === '/health' || req.url === '/dbtest') return next()
+  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync') return next()
   requireAuth(req, res, next)
 })
 
