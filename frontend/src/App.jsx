@@ -18,9 +18,11 @@ const NAV = [
 
 // Default SGD-based rates (approximate)
 const DEFAULT_RATES = {
-  USD: 0.745, EUR: 0.688, GBP: 0.589, IDR: 11900, MYR: 3.48,
-  CNY: 5.41, JPY: 113.2, AUD: 1.145, HKD: 5.82, INR: 62.1,
+  USD: 0.745, IDR: 11900, EUR: 0.688, GBP: 0.589, MYR: 3.48,
+  AUD: 1.145, CNY: 5.41, JPY: 113.2, HKD: 5.82, INR: 62.1,
 }
+const FX_ORDER = ['USD', 'IDR', 'EUR', 'GBP', 'MYR', 'AUD', 'CNY', 'JPY', 'HKD', 'INR']
+const sortedRateEntries = (rates) => FX_ORDER.filter(c => c in rates).map(c => [c, rates[c]])
 
 const SEEN_KEY = 'changelog_seen_count'
 
@@ -159,7 +161,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
                 </select>
               </div>
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-solid)' }}>
-                {currencies.filter(c => c !== base).map(c => {
+                {['SGD', ...FX_ORDER].filter(c => c !== base && (c === 'SGD' || c in rates)).map(c => {
                   const val = c === 'SGD' ? sgdAmount : sgdAmount * (rates[c] || 1)
                   return (
                     <div key={c} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
@@ -180,7 +182,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
                 Set your monthly rates below (1 SGD = X). Click Save when done.
               </p>
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-solid)', marginBottom: 14 }}>
-                {Object.entries(rates).map(([c, r]) => (
+                {sortedRateEntries(rates).map(([c, r]) => (
                   <div key={c} style={{ display: 'flex', alignItems: 'center', padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)', gap: 10 }}>
                     <span style={{ fontWeight: 700, fontSize: 13, width: 48, color: 'var(--navy)' }}>{c}</span>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>1 SGD =</span>
