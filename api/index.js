@@ -848,4 +848,115 @@ app.put('/api/fx-rates', requireAuth, async (req, res) => {
   }
 });
 
+// ─── COMPANY STATS ───────────────────────────────────────────────────────────
+app.get('/api/stats/company', async (req, res) => {
+  try {
+    const { company, year, month } = req.query
+    if (!company) return res.status(400).json({ error: 'company is required' })
+    const y = parseInt(year) || new Date().getFullYear()
+    const m = month ? parseInt(month) : null
+    const start = m ? new Date(y, m - 1, 1) : new Date(y, 0, 1)
+    const end   = m ? new Date(y, m, 1)     : new Date(y + 1, 0, 1)
+
+    const baseWhere = `WHERE (COALESCE(NULLIF(j.customer_name,''), j.shipper) ILIKE $1) AND j.created_at >= $2 AND j.created_at < $3`
+    const params = [`%${company}%`, start, end]
+
+    const [summaryRes, byModeRes, trendRes] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(j.id) AS jobs,
+          COALESCE(SUM(j.packages), 0) AS packages,
+          COALESCE(SUM(j.weight),   0) AS weight,
+          COALESCE(SUM(j.cbm),      0) AS cbm,
+          COALESCE(SUM(b.total),    0) AS revenue,
+          COALESCE(SUM(c.total),    0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        ${baseWhere}
+      `, params),
+
+      pool.query(`
+        SELECT
+          j.mode,
+          COUNT(j.id) AS jobs,
+          COALESCE(SUM(j.packages), 0) AS packages,
+          COALESCE(SUM(j.weight),   0) AS weight,
+          COALESCE(SUM(j.cbm),      0) AS cbm,
+          COALESCE(SUM(b.total),    0) AS revenue,
+          COALESCE(SUM(c.total),    0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        ${baseWhere}
+        GROUP BY j.mode
+        ORDER BY revenue DESC
+      `, params),
+
+      m ? Promise.resolve({ rows: [] }) : pool.query(`
+        SELECT
+          DATE_TRUNC('month', j.created_at) AS month,
+          COUNT(j.id) AS jobs,
+          COALESCE(SUM(b.total), 0) AS revenue,
+          COALESCE(SUM(c.total), 0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        ${baseWhere}
+        GROUP BY DATE_TRUNC('month', j.created_at)
+        ORDER BY month
+      `, params),
+    ])
+
+    const s = summaryRes.rows[0]
+    const rev = parseFloat(s.revenue), cst = parseFloat(s.cost), pft = parseFloat(s.revenue) - parseFloat(s.cost)
+    const gp  = rev > 0 ? parseFloat(((pft / rev) * 100).toFixed(1)) : 0
+
+    const by_mode = byModeRes.rows.map(r => {
+      const rv = parseFloat(r.revenue), ct = parseFloat(r.cost), pt = parseFloat(r.revenue) - parseFloat(r.cost)
+      return {
+        mode: r.mode, jobs: parseInt(r.jobs),
+        packages: parseFloat(r.packages) || 0,
+        weight:   parseFloat(r.weight)   || 0,
+        cbm:      parseFloat(r.cbm)      || 0,
+        revenue:  parseFloat(rv.toFixed(2)),
+        cost:     parseFloat(ct.toFixed(2)),
+        profit:   parseFloat(pt.toFixed(2)),
+        gp_percent: rv > 0 ? parseFloat(((pt / rv) * 100).toFixed(1)) : 0
+      }
+    })
+
+    const monthly_trend = trendRes.rows.map(r => {
+      const rv = parseFloat(r.revenue), ct = parseFloat(r.cost), pt = parseFloat(r.revenue) - parseFloat(r.cost)
+      return {
+        month: new Date(r.month).toISOString().slice(0, 7),
+        jobs: parseInt(r.jobs),
+        revenue: parseFloat(rv.toFixed(2)),
+        cost:    parseFloat(ct.toFixed(2)),
+        profit:  parseFloat(pt.toFixed(2)),
+        gp_percent: rv > 0 ? parseFloat(((pt / rv) * 100).toFixed(1)) : 0
+      }
+    })
+
+    res.json({
+      company, year: y, month: m,
+      summary: {
+        jobs: parseInt(s.jobs),
+        packages: parseFloat(s.packages) || 0,
+        weight:   parseFloat(s.weight)   || 0,
+        cbm:      parseFloat(s.cbm)      || 0,
+        revenue:  parseFloat(rev.toFixed(2)),
+        cost:     parseFloat(cst.toFixed(2)),
+        profit:   parseFloat(pft.toFixed(2)),
+        gp_percent: gp
+      },
+      by_mode,
+      monthly_trend
+    })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
 module.exports = app;

@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import MovementTracker from './pages/MovementTracker'
 import JobDetail from './pages/JobDetail'
 import EmailIntake from './pages/EmailIntake'
+import CompanyStats from './pages/CompanyStats'
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
@@ -14,6 +15,7 @@ const NAV = [
   { to: '/',       icon: '▦',  label: 'Dashboard',         exact: true },
   { to: '/jobs',   icon: '≡',  label: 'Movement Tracker',  exact: false },
   { to: '/intake', icon: '+',  label: 'New Job',           exact: false },
+  { to: '/stats',  icon: '◈',  label: 'Company Stats',     exact: false },
 ]
 
 // Default SGD-based rates (approximate)
@@ -407,6 +409,7 @@ function AppShell() {
           <Route path="/jobs"     element={<MovementTracker />} />
           <Route path="/jobs/:id" element={<JobDetail />} />
           <Route path="/intake"   element={<EmailIntake />} />
+          <Route path="/stats"    element={<CompanyStats />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
         </Routes>
       </main>

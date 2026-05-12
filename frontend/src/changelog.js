@@ -3,6 +3,15 @@
 
 export const CHANGELOG = [
   {
+    id: 'company-stats-noa-mirror',
+    date: '2026-05-12',
+    title: 'Company Stats Dashboard + NOA/GST Auto-Mirror',
+    description:
+      'New "Company Stats" page: search any company and view monthly or yearly breakdowns by mode of transport (packages, weight, CBM, revenue, cost, profit, GP%). Also: saving a cost line with "NOA", "Notice of Arrival", "GST", or "Goods and Services Tax" in the service field now automatically creates a matching billing line if one doesn\'t already exist.',
+    route: '/stats',
+    routeLabel: 'Open Company Stats',
+  },
+  {
     id: 'subcert-export',
     date: '2026-05-05',
     title: 'Subsidiary Export Certificate PDF',

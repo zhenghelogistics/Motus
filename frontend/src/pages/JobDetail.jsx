@@ -125,6 +125,22 @@ export default function JobDetail() {
   }
 
   // ── Cost lines ───────────────────────────────────────────────────────────
+  function matchesNOA(s) { const v = (s||'').toLowerCase(); return v.includes('noa') || v.includes('notice of arrival') }
+  function matchesGST(s) { const v = (s||'').toLowerCase(); return v.includes('gst') || v.includes('goods and services tax') }
+
+  async function autoMirrorToBilling(service, amount, currentBillingLines) {
+    if (!service) return
+    const isNOA = matchesNOA(service)
+    const isGST = matchesGST(service)
+    if (!isNOA && !isGST) return
+    const billing = currentBillingLines || job.billing_lines || []
+    const alreadyExists = billing.some(b => (isNOA && matchesNOA(b.service)) || (isGST && matchesGST(b.service)))
+    if (alreadyExists) return
+    const r = await addBillingLine(id, { service, rate: amount || 0, qty: 1, remarks: '' })
+    setJob(j => ({ ...j, billing_lines: [...(j.billing_lines || []), r.data] }))
+    refreshTotals()
+  }
+
   async function addCost() {
     const r = await addCostLine(id, { vendor:'', amount:0, invoice_no:'', invoice_date:'', service:'', remarks:'' })
     setJob(j => ({ ...j, cost_lines: [...j.cost_lines, r.data] }))
@@ -134,6 +150,7 @@ export default function JobDetail() {
     const r = await updateCostLine(id, lid, data)
     setJob(j => ({ ...j, cost_lines: j.cost_lines.map(l => l.id === lid ? r.data : l) }))
     refreshTotals()
+    await autoMirrorToBilling(data.service, data.amount)
   }
   async function removeCost(lid) {
     await deleteCostLine(id, lid)
