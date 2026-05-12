@@ -66,4 +66,6 @@ export const getLeadStats = () => api.get('/leads/stats')
 export const claimLead = (id) => api.put(`/leads/${id}/claim`)
 export const generateEmail = (id, data) => api.post(`/leads/${id}/generate-email`, data)
 
+export const unlockFxRate = (currency) => api.put(`/fx-rates/${currency}/unlock`)
+
 export default api

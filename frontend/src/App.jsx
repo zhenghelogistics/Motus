@@ -11,7 +11,7 @@ import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
 import { CHANGELOG } from './changelog'
-import { getFxRates, updateFxRates } from './api'
+import { getFxRates, updateFxRates, unlockFxRate } from './api'
 
 const NAV = [
   { to: '/',       icon: '▦',  label: 'Dashboard',         exact: true },
@@ -94,17 +94,25 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
   const [amount, setAmount] = useState('1000')
   const [base, setBase] = useState('SGD')
   const [rates, setRates] = useState(DEFAULT_RATES)
+  const [draftRates, setDraftRates] = useState(
+    Object.fromEntries(Object.entries(DEFAULT_RATES).map(([c, v]) => [c, String(v)]))
+  )
+  const [isManual, setIsManual] = useState({})
   const [updatedAt, setUpdatedAt] = useState(null)
   const [updatedBy, setUpdatedBy] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [unlocking, setUnlocking] = useState({})
   const [tab, setTab] = useState('converter')
 
   useEffect(() => {
     getFxRates()
       .then(r => {
-        setRates(r.data.rates || DEFAULT_RATES)
+        const loaded = r.data.rates || DEFAULT_RATES
+        setRates(loaded)
+        setDraftRates(Object.fromEntries(Object.entries(loaded).map(([c, v]) => [c, String(v)])))
+        setIsManual(r.data.is_manual || {})
         setUpdatedAt(r.data.updated_at)
         setUpdatedBy(r.data.updated_by)
       })
@@ -115,16 +123,37 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
     setSaving(true)
     setSaveError('')
     try {
-      const r = await updateFxRates(rates)
+      const parsed = Object.fromEntries(
+        FX_ORDER.map(c => [c, parseFloat(draftRates[c]) || rates[c] || DEFAULT_RATES[c]])
+      )
+      const r = await updateFxRates(parsed)
+      setRates(parsed)
+      setDraftRates(Object.fromEntries(Object.entries(parsed).map(([c, v]) => [c, String(v)])))
+      setIsManual(Object.fromEntries(FX_ORDER.map(c => [c, true])))
       setUpdatedAt(r.data.updated_at)
       setUpdatedBy(r.data.updated_by)
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
-      if (onRatesSaved) onRatesSaved(rates)
-      window.dispatchEvent(new CustomEvent('fxRatesUpdated', { detail: rates }))
+      if (onRatesSaved) onRatesSaved(parsed)
+      window.dispatchEvent(new CustomEvent('fxRatesUpdated', { detail: parsed }))
     } catch (err) {
       setSaveError(err?.response?.data?.error || 'Failed to save. Please try again.')
     } finally { setSaving(false) }
+  }
+
+  async function handleUnlock(currency) {
+    setUnlocking(prev => ({ ...prev, [currency]: true }))
+    try {
+      const r = await unlockFxRate(currency)
+      const newRate = r.data.rate
+      setRates(prev => ({ ...prev, [currency]: newRate }))
+      setDraftRates(prev => ({ ...prev, [currency]: String(newRate) }))
+      setIsManual(prev => ({ ...prev, [currency]: false }))
+    } catch {
+      // silent fail — user can try again
+    } finally {
+      setUnlocking(prev => ({ ...prev, [currency]: false }))
+    }
   }
 
   const currencies = ['SGD', ...Object.keys(rates)]
@@ -187,21 +216,45 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
           ) : (
             <>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-                Set your monthly rates below (1 SGD = X). Click Save when done.
+                Set rates manually (1 SGD = X). Manually set rates are locked — the daily sync won't overwrite them.
               </p>
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-solid)', marginBottom: 14 }}>
-                {sortedRateEntries(rates).map(([c, r]) => (
-                  <div key={c} style={{ display: 'flex', alignItems: 'center', padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)', gap: 10 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, width: 48, color: 'var(--navy)' }}>{c}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>1 SGD =</span>
-                    <input type="number" step="any" min="0"
-                      style={{ width: 110, padding: '4px 8px', fontSize: 13, fontWeight: 600, borderRadius: 4, border: '1px solid var(--border-solid)', textAlign: 'right' }}
-                      value={r}
-                      onChange={e => setRates(prev => ({ ...prev, [c]: parseFloat(e.target.value) || prev[c] }))} />
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 32 }}>{c}</span>
+                {FX_ORDER.filter(c => c in rates).map(c => (
+                  <div key={c} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)', gap: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, width: 40, color: 'var(--navy)' }}>{c}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>1 SGD =</span>
+                    <input type="text" inputMode="decimal"
+                      style={{ width: 110, padding: '4px 8px', fontSize: 13, fontWeight: 600, borderRadius: 4, border: '1.5px solid var(--border-solid)', textAlign: 'right', fontFamily: 'var(--font)' }}
+                      value={draftRates[c] ?? ''}
+                      onChange={e => setDraftRates(prev => ({ ...prev, [c]: e.target.value }))} />
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 28 }}>{c}</span>
+                    <div style={{ marginLeft: 'auto' }}>
+                      {isManual[c] ? (
+                        <button
+                          onClick={() => handleUnlock(c)}
+                          disabled={unlocking[c]}
+                          title="Remove manual lock — let daily sync update this rate"
+                          style={{
+                            fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 5, cursor: 'pointer',
+                            background: '#FEF3C7', color: '#92400E', border: '1.5px solid #F59E0B',
+                            opacity: unlocking[c] ? 0.6 : 1,
+                          }}
+                        >
+                          {unlocking[c] ? 'Fetching...' : 'Locked — Use live'}
+                        </button>
+                      ) : (
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 5,
+                          background: '#F0FDF4', color: '#166534', border: '1.5px solid #86EFAC',
+                        }}>
+                          Auto
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
+              {saveError && <p style={{ color: '#DC2626', fontSize: 12, marginBottom: 8 }}>{saveError}</p>}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{lastUpdatedLabel}</span>
                 <button className="btn btn-primary btn-sm" onClick={saveRates} disabled={saving}>
