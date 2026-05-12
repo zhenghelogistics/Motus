@@ -55,9 +55,9 @@ function FilterLabel({ children }) {
 
 function SummaryCard({ label, value, color, sub }) {
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 10, padding: '14px 18px', flex: 1, minWidth: 120 }}>
-      <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 6, textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 900, color: color || 'var(--heading)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 10, padding: '12px 14px', flex: 1, minWidth: 110 }}>
+      <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 5, textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 900, color: color || 'var(--heading)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{value}</div>
       {sub != null && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
     </div>
   )
