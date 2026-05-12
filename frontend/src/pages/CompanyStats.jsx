@@ -190,11 +190,11 @@ export default function CompanyStats() {
               />
             <div style={{
               position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, marginTop: 2,
-              background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 8,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.14)', maxHeight: 300, overflowY: 'auto',
+              backgroundColor: '#ffffff', border: '1px solid var(--border-solid)', borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.18)', maxHeight: 300, overflowY: 'auto',
             }}
             >
-              <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-solid)' }}>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-solid)', backgroundColor: '#ffffff' }}>
                 <input
                   className="form-control"
                   placeholder="Search company..."
@@ -211,13 +211,13 @@ export default function CompanyStats() {
                   onClick={() => { setCompany(c.name); setShowDropdown(false); setCompanySearch('') }}
                   style={{
                     padding: '8px 12px', cursor: 'pointer', fontSize: 13,
-                    background: company === c.name ? 'rgba(24,95,165,0.08)' : '',
+                    backgroundColor: company === c.name ? 'rgba(24,95,165,0.08)' : '#ffffff',
                     fontWeight: company === c.name ? 700 : 400,
                     color: 'var(--text)',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--sub-box-bg)'}
-                  onMouseLeave={e => e.currentTarget.style.background = company === c.name ? 'rgba(24,95,165,0.08)' : ''}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = '#F0F4FB'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = company === c.name ? 'rgba(24,95,165,0.08)' : '#ffffff'}
                 >
                   <span>{c.name === '__all__' ? 'All Companies' : c.name}</span>
                   <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>{c.jobs} jobs</span>
