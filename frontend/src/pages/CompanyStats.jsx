@@ -1,57 +1,115 @@
-import { useState, useEffect, useRef } from 'react'
-import { getCustomers, getCompanyStats } from '../api'
+import { useState, useEffect, useMemo } from 'react'
+import {
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from 'recharts'
+import { getCompanyStats, getCompanyList } from '../api'
 
-const fmt = (n) => `$${Number(n || 0).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const fmtN = (n, dp = 2) => Number(n || 0).toLocaleString('en-SG', { minimumFractionDigits: dp, maximumFractionDigits: dp })
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+const fmt   = (n) => `S$${Number(n || 0).toLocaleString('en-SG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+const fmtFull = (n) => `S$${Number(n || 0).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtN  = (n, dp = 2) => Number(n || 0).toLocaleString('en-SG', { minimumFractionDigits: dp, maximumFractionDigits: dp })
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const CURRENT_YEAR = new Date().getFullYear()
 const YEARS = [CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2, CURRENT_YEAR - 3]
 
+const MODE_COLORS = ['#185FA5','#0F766E','#B45309','#7C3AED','#DC2626','#0369A1','#15803D']
+
 function gpColor(gp) {
-  return gp >= 20 ? '#0A7C3E' : gp >= 0 ? '#B05A00' : '#C0392B'
+  return gp >= 20 ? '#15803D' : gp >= 0 ? '#B45309' : '#DC2626'
 }
 
+// ── Tooltip ───────────────────────────────────────────────────────────────────
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{
+      background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+      padding: '10px 14px', fontSize: 12,
+    }}>
+      <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--heading)' }}>{label}</div>
+      {payload.map(p => (
+        <div key={p.name} style={{ color: p.color, display: 'flex', gap: 8, justifyContent: 'space-between' }}>
+          <span>{p.name}</span>
+          <span style={{ fontWeight: 600 }}>{typeof p.value === 'number' && p.value > 100 ? fmt(p.value) : p.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Filter Label ──────────────────────────────────────────────────────────────
+
+function FilterLabel({ children }) {
+  return (
+    <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+      {children}
+    </label>
+  )
+}
+
+// ── Summary Card ──────────────────────────────────────────────────────────────
+
+function SummaryCard({ label, value, color, sub }) {
+  return (
+    <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', flex: 1, minWidth: 120 }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 6, textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 900, color: color || 'var(--heading)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {sub != null && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
 export default function CompanyStats() {
-  const [companyInput, setCompanyInput] = useState('')
-  const [suggestions, setSuggestions] = useState([])
-  const [selectedCompany, setSelectedCompany] = useState('')
-  const [year, setYear] = useState(CURRENT_YEAR)
+  // filter state
+  const [company, setCompany]   = useState('__all__')
+  const [companySearch, setCompanySearch] = useState('')
+  const [mode, setMode]         = useState('__all__')
+  const [year, setYear]         = useState(CURRENT_YEAR)
   const [viewMode, setViewMode] = useState('yearly')
-  const [month, setMonth] = useState(new Date().getMonth() + 1)
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const debounceRef = useRef(null)
+  const [month, setMonth]       = useState(new Date().getMonth() + 1)
+  const [showDropdown, setShowDropdown] = useState(false)
 
-  useEffect(() => {
-    if (!companyInput || companyInput === selectedCompany) {
-      setSuggestions([])
-      return
-    }
-    clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const { data } = await getCustomers(companyInput)
-        setSuggestions(data)
-      } catch { setSuggestions([]) }
-    }, 250)
-  }, [companyInput, selectedCompany])
+  // data state
+  const [companies, setCompanies] = useState([])
+  const [modes, setModes]         = useState([])
+  const [stats, setStats]         = useState(null)
+  const [loading, setLoading]     = useState(false)
+  const [listLoading, setListLoading] = useState(true)
+  const [error, setError]         = useState('')
 
+  // Load company + mode lists on mount
   useEffect(() => {
-    if (!selectedCompany) return
+    setListLoading(true)
+    getCompanyList()
+      .then(({ data }) => {
+        setCompanies(data.companies || [])
+        setModes(data.modes || [])
+      })
+      .catch(() => {})
+      .finally(() => setListLoading(false))
+  }, [])
+
+  // Fetch stats whenever filters change
+  useEffect(() => {
     fetchStats()
-  }, [selectedCompany, year, viewMode, month])
+  }, [company, mode, year, viewMode, month])
 
   async function fetchStats() {
-    setLoading(true)
-    setError('')
+    setLoading(true); setError('')
     try {
-      const { data } = await getCompanyStats({
-        company: selectedCompany,
+      const params = {
         year,
-        month: viewMode === 'monthly' ? month : undefined
-      })
+        month: viewMode === 'monthly' ? month : undefined,
+        mode: mode !== '__all__' ? mode : undefined,
+      }
+      if (company !== '__all__') params.company = company
+      const { data } = await getCompanyStats(params)
       setStats(data)
     } catch (err) {
       setError(err?.response?.data?.error || 'Failed to load stats')
@@ -60,76 +118,131 @@ export default function CompanyStats() {
     }
   }
 
-  function selectCompany(name) {
-    setSelectedCompany(name)
-    setCompanyInput(name)
-    setSuggestions([])
-  }
-
-  function clearCompany() {
-    setSelectedCompany('')
-    setCompanyInput('')
-    setSuggestions([])
-    setStats(null)
-  }
+  const filteredCompanies = useMemo(() => {
+    const q = companySearch.toLowerCase()
+    return q ? companies.filter(c => c.name.toLowerCase().includes(q)) : companies
+  }, [companies, companySearch])
 
   const periodLabel = viewMode === 'yearly'
     ? String(year)
     : `${MONTHS[month - 1]} ${year}`
 
+  const selectedLabel = company === '__all__' ? 'All Companies' : company
+
+  // prep chart data
+  const trendChartData = (stats?.monthly_trend || []).map(r => ({
+    name: MONTHS[parseInt(r.month.slice(5, 7)) - 1],
+    Revenue: r.revenue,
+    Cost: r.cost,
+    Profit: r.profit,
+    'GP%': r.gp_percent,
+  }))
+
+  const modeChartData = (stats?.by_mode || []).map(r => ({
+    name: r.mode,
+    Revenue: r.revenue,
+    Cost: r.cost,
+    Profit: r.profit,
+    Jobs: r.jobs,
+  }))
+
+  const modePieData = (stats?.by_mode || []).map(r => ({
+    name: r.mode,
+    value: r.revenue,
+  }))
+
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 1140 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--navy)', marginBottom: 20 }}>Company Statistics</h1>
+    <div style={{ padding: '24px 32px', maxWidth: 1280 }}>
 
-      {/* Filter bar */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 28 }}>
+      {/* Header */}
+      <div className="page-header" style={{ marginBottom: 22 }}>
+        <h1>Company Statistics</h1>
+        <p>Revenue, cost, and volume breakdown — filter by company, mode, and period</p>
+      </div>
 
-        {/* Company search */}
-        <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4, letterSpacing: '0.06em' }}>COMPANY</label>
-          <div style={{ position: 'relative' }}>
-            <input
-              className="form-control"
-              placeholder="Search company..."
-              value={companyInput}
-              onChange={e => {
-                setCompanyInput(e.target.value)
-                if (!e.target.value) clearCompany()
-              }}
-              style={{ paddingRight: companyInput ? 28 : undefined }}
-            />
-            {companyInput && (
-              <button onClick={clearCompany} style={{
-                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, padding: 0
-              }}>✕</button>
-            )}
+      {/* ── Filter Bar ── */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 24 }}>
+
+        {/* Company dropdown */}
+        <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 200 }}>
+          <FilterLabel>Company</FilterLabel>
+          <div
+            onClick={() => setShowDropdown(v => !v)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)',
+              background: 'var(--card-bg)', cursor: 'pointer', fontSize: 13,
+              color: 'var(--heading)', fontWeight: company !== '__all__' ? 600 : 400,
+              minHeight: 36,
+            }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              {selectedLabel}
+            </span>
+            <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 11 }}>▼</span>
           </div>
-          {suggestions.length > 0 && (
+
+          {showDropdown && (
             <div style={{
-              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
-              background: '#fff', border: '1px solid var(--border)', borderRadius: 6,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', marginTop: 2
-            }}>
-              {suggestions.map(s => (
+              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, marginTop: 2,
+              background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.14)', maxHeight: 300, overflowY: 'auto',
+            }}
+            onMouseLeave={() => setShowDropdown(false)}
+            >
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+                <input
+                  className="form-control"
+                  placeholder="Search company..."
+                  value={companySearch}
+                  onChange={e => setCompanySearch(e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                  style={{ width: '100%', fontSize: 12 }}
+                  autoFocus
+                />
+              </div>
+              {[{ name: '__all__', jobs: companies.reduce((s, c) => s + c.jobs, 0) }, ...filteredCompanies].map(c => (
                 <div
-                  key={s.display_name}
-                  onClick={() => selectCompany(s.display_name)}
-                  style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13 }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-                  onMouseLeave={e => e.currentTarget.style.background = ''}
+                  key={c.name}
+                  onClick={() => { setCompany(c.name); setShowDropdown(false); setCompanySearch('') }}
+                  style={{
+                    padding: '8px 12px', cursor: 'pointer', fontSize: 13,
+                    background: company === c.name ? 'rgba(24,95,165,0.08)' : '',
+                    fontWeight: company === c.name ? 700 : 400,
+                    color: 'var(--text)',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--sub-box-bg)'}
+                  onMouseLeave={e => e.currentTarget.style.background = company === c.name ? 'rgba(24,95,165,0.08)' : ''}
                 >
-                  <div style={{ fontWeight: 500 }}>{s.display_name}</div>
-                  {s.customer_email && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.customer_email}</div>}
+                  <span>{c.name === '__all__' ? 'All Companies' : c.name}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>{c.jobs} jobs</span>
                 </div>
               ))}
+              {filteredCompanies.length === 0 && companySearch && (
+                <div style={{ padding: '12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>No match</div>
+              )}
             </div>
           )}
         </div>
 
+        {/* Mode filter */}
+        <div>
+          <FilterLabel>Mode</FilterLabel>
+          <select
+            className="form-control"
+            value={mode}
+            onChange={e => setMode(e.target.value)}
+            style={{ minWidth: 110 }}
+          >
+            <option value="__all__">All Modes</option>
+            {modes.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+
         {/* Year */}
         <div>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4, letterSpacing: '0.06em' }}>YEAR</label>
+          <FilterLabel>Year</FilterLabel>
           <select className="form-control" value={year} onChange={e => setYear(parseInt(e.target.value))} style={{ minWidth: 90 }}>
             {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
@@ -137,100 +250,157 @@ export default function CompanyStats() {
 
         {/* View toggle */}
         <div>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4, letterSpacing: '0.06em' }}>VIEW</label>
-          <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+          <FilterLabel>View</FilterLabel>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--sub-box-bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
             {['yearly', 'monthly'].map(v => (
-              <button key={v} onClick={() => setViewMode(v)} style={{
-                padding: '6px 16px', border: 'none', cursor: 'pointer', fontSize: 13,
-                background: viewMode === v ? 'var(--navy)' : '#fff',
-                color: viewMode === v ? '#fff' : 'var(--text)',
-                fontFamily: 'var(--font)', fontWeight: viewMode === v ? 600 : 400,
-                transition: 'background 0.15s'
-              }}>
-                {v === 'yearly' ? 'Yearly' : 'Monthly'}
-              </button>
+              <button key={v} onClick={() => setViewMode(v)}
+                className={viewMode === v ? 'btn btn-primary btn-xs' : 'btn btn-ghost btn-xs'}
+                style={{ textTransform: 'capitalize' }}
+              >{v}</button>
             ))}
           </div>
         </div>
 
-        {/* Month (only in monthly view) */}
+        {/* Month (monthly view only) */}
         {viewMode === 'monthly' && (
           <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4, letterSpacing: '0.06em' }}>MONTH</label>
+            <FilterLabel>Month</FilterLabel>
             <select className="form-control" value={month} onChange={e => setMonth(parseInt(e.target.value))} style={{ minWidth: 100 }}>
               {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
             </select>
           </div>
         )}
+
+        <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-end' }} onClick={fetchStats}>
+          Refresh
+        </button>
       </div>
 
-      {/* Empty state */}
-      {!selectedCompany && (
-        <div style={{ textAlign: 'center', padding: '80px 0', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: 40, marginBottom: 14, opacity: 0.4 }}>◈</div>
-          <p style={{ fontSize: 15, margin: 0 }}>Search for a company to view their statistics</p>
-        </div>
-      )}
+      {/* State messages */}
+      {loading && <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>Loading…</div>}
+      {error && <div className="alert alert-error">{error}</div>}
 
-      {/* Loading */}
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)', fontSize: 14 }}>
-          Loading...
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div style={{ padding: '10px 14px', background: '#FEF2F2', color: '#C0392B', borderRadius: 6, marginBottom: 16, fontSize: 13 }}>
-          {error}
-        </div>
-      )}
-
-      {/* Stats content */}
       {stats && !loading && (
         <>
-          {/* Period header */}
-          <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--navy)' }}>{selectedCompany}</span>
+          {/* Period label */}
+          <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 18, fontWeight: 900, color: 'var(--heading)' }}>{selectedLabel}</span>
             <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>— {periodLabel}</span>
+            {mode !== '__all__' && (
+              <span style={{
+                fontSize: 10, fontWeight: 800, color: '#185FA5', background: 'rgba(24,95,165,0.1)',
+                borderRadius: 20, padding: '2px 10px', textTransform: 'uppercase',
+              }}>{mode}</span>
+            )}
           </div>
 
           {/* Summary cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 28 }}>
-            {[
-              { label: 'Jobs',       value: stats.summary.jobs,             isNum: true },
-              { label: 'Revenue',    value: fmt(stats.summary.revenue) },
-              { label: 'Cost',       value: fmt(stats.summary.cost) },
-              { label: 'Profit',     value: fmt(stats.summary.profit),       color: stats.summary.profit >= 0 ? '#0A7C3E' : '#C0392B' },
-              { label: 'GP Margin',  value: `${stats.summary.gp_percent}%`,  color: gpColor(stats.summary.gp_percent) },
-              { label: 'Packages',   value: fmtN(stats.summary.packages, 0), isNum: true },
-              { label: 'Weight (kg)',value: fmtN(stats.summary.weight),      isNum: true },
-              { label: 'CBM',        value: fmtN(stats.summary.cbm),        isNum: true },
-            ].map(c => (
-              <div key={c.label} style={{
-                background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 16px'
-              }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, letterSpacing: '0.07em' }}>
-                  {c.label.toUpperCase()}
-                </div>
-                <div style={{ fontSize: 19, fontWeight: 700, color: c.color || 'var(--navy)', fontVariantNumeric: 'tabular-nums' }}>
-                  {c.value}
-                </div>
-              </div>
-            ))}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 28 }}>
+            <SummaryCard label="Jobs"       value={stats.summary.jobs} />
+            <SummaryCard label="Revenue"    value={fmtFull(stats.summary.revenue)} />
+            <SummaryCard label="Cost"       value={fmtFull(stats.summary.cost)} />
+            <SummaryCard label="Profit"     value={fmtFull(stats.summary.profit)}
+              color={stats.summary.profit >= 0 ? '#15803D' : '#DC2626'} />
+            <SummaryCard label="GP Margin"  value={`${stats.summary.gp_percent}%`}
+              color={gpColor(stats.summary.gp_percent)} />
+            <SummaryCard label="Packages"   value={fmtN(stats.summary.packages, 0)} />
+            <SummaryCard label="Weight (kg)"value={fmtN(stats.summary.weight)} />
+            <SummaryCard label="CBM"        value={fmtN(stats.summary.cbm)} />
           </div>
 
-          {/* Mode breakdown table */}
+          {/* ── Charts row ── */}
+          {stats.summary.jobs > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16, marginBottom: 28 }}>
+
+              {/* Monthly trend — revenue vs profit (yearly view) */}
+              {viewMode === 'yearly' && trendChartData.length > 0 && (
+                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+                    Monthly Revenue & Profit — {year}
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={trendChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="Revenue" fill="#185FA5" radius={[3,3,0,0]} />
+                      <Bar dataKey="Profit"  fill="#15803D" radius={[3,3,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Monthly GP% trend line */}
+              {viewMode === 'yearly' && trendChartData.length > 0 && (
+                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+                    GP% Trend — {year}
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={trendChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 10 }} unit="%" />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Line dataKey="GP%" stroke="#B45309" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Revenue by mode bar chart */}
+              {modeChartData.length > 1 && (
+                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+                    Revenue by Mode
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={modeChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="Revenue" fill="#185FA5" radius={[3,3,0,0]} />
+                      <Bar dataKey="Cost"    fill="#DC2626" radius={[3,3,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Mode share pie */}
+              {modePieData.length > 1 && (
+                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+                    Revenue Share by Mode
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie data={modePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`} labelLine={false}>
+                        {modePieData.map((_, i) => <Cell key={i} fill={MODE_COLORS[i % MODE_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => fmt(v)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* ── Mode Breakdown Table ── */}
           {stats.by_mode.length > 0 ? (
             <div style={{ marginBottom: 28 }}>
-              <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--navy)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
                 Breakdown by Mode of Transport
-              </h2>
-              <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid var(--border)' }}>
-                <table className="data-table" style={{ width: '100%', marginBottom: 0 }}>
+              </div>
+              <div className="table-wrap">
+                <table>
                   <thead>
                     <tr>
-                      <th style={{ textAlign: 'left' }}>Mode</th>
+                      <th>Mode</th>
                       <th style={{ textAlign: 'right' }}>Jobs</th>
                       <th style={{ textAlign: 'right' }}>Packages</th>
                       <th style={{ textAlign: 'right' }}>Weight (kg)</th>
@@ -244,15 +414,15 @@ export default function CompanyStats() {
                   <tbody>
                     {stats.by_mode.map(r => (
                       <tr key={r.mode}>
-                        <td style={{ fontWeight: 500 }}>{r.mode}</td>
+                        <td style={{ fontWeight: 600 }}>{r.mode}</td>
                         <td style={{ textAlign: 'right' }}>{r.jobs}</td>
                         <td style={{ textAlign: 'right' }}>{fmtN(r.packages, 0)}</td>
                         <td style={{ textAlign: 'right' }}>{fmtN(r.weight)}</td>
                         <td style={{ textAlign: 'right' }}>{fmtN(r.cbm)}</td>
-                        <td style={{ textAlign: 'right' }}>{fmt(r.revenue)}</td>
-                        <td style={{ textAlign: 'right' }}>{fmt(r.cost)}</td>
-                        <td style={{ textAlign: 'right', color: r.profit >= 0 ? '#0A7C3E' : '#C0392B', fontWeight: 500 }}>{fmt(r.profit)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: gpColor(r.gp_percent) }}>{r.gp_percent}%</td>
+                        <td style={{ textAlign: 'right' }}>{fmtFull(r.revenue)}</td>
+                        <td style={{ textAlign: 'right' }}>{fmtFull(r.cost)}</td>
+                        <td style={{ textAlign: 'right', color: r.profit >= 0 ? '#15803D' : '#DC2626', fontWeight: 600 }}>{fmtFull(r.profit)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 800, color: gpColor(r.gp_percent) }}>{r.gp_percent}%</td>
                       </tr>
                     ))}
                   </tbody>
@@ -260,22 +430,22 @@ export default function CompanyStats() {
               </div>
             </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)', fontSize: 14 }}>
-              No jobs found for {selectedCompany} in {periodLabel}.
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+              No jobs found for {selectedLabel} in {periodLabel}.
             </div>
           )}
 
-          {/* Monthly trend (yearly view only) */}
+          {/* ── Monthly Trend Table (yearly view) ── */}
           {viewMode === 'yearly' && stats.monthly_trend.length > 0 && (
             <div>
-              <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--navy)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
                 Monthly Trend — {year}
-              </h2>
-              <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid var(--border)' }}>
-                <table className="data-table" style={{ width: '100%', marginBottom: 0 }}>
+              </div>
+              <div className="table-wrap">
+                <table>
                   <thead>
                     <tr>
-                      <th style={{ textAlign: 'left' }}>Month</th>
+                      <th>Month</th>
                       <th style={{ textAlign: 'right' }}>Jobs</th>
                       <th style={{ textAlign: 'right' }}>Revenue</th>
                       <th style={{ textAlign: 'right' }}>Cost</th>
@@ -288,10 +458,10 @@ export default function CompanyStats() {
                       <tr key={r.month}>
                         <td>{new Date(r.month + 'T00:00:00').toLocaleString('en-SG', { month: 'long', year: 'numeric' })}</td>
                         <td style={{ textAlign: 'right' }}>{r.jobs}</td>
-                        <td style={{ textAlign: 'right' }}>{fmt(r.revenue)}</td>
-                        <td style={{ textAlign: 'right' }}>{fmt(r.cost)}</td>
-                        <td style={{ textAlign: 'right', color: r.profit >= 0 ? '#0A7C3E' : '#C0392B', fontWeight: 500 }}>{fmt(r.profit)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: gpColor(r.gp_percent) }}>{r.gp_percent}%</td>
+                        <td style={{ textAlign: 'right' }}>{fmtFull(r.revenue)}</td>
+                        <td style={{ textAlign: 'right' }}>{fmtFull(r.cost)}</td>
+                        <td style={{ textAlign: 'right', color: r.profit >= 0 ? '#15803D' : '#DC2626', fontWeight: 600 }}>{fmtFull(r.profit)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 800, color: gpColor(r.gp_percent) }}>{r.gp_percent}%</td>
                       </tr>
                     ))}
                   </tbody>

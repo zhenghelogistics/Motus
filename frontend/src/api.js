@@ -57,7 +57,13 @@ export const getCustomers = (search) => api.get('/customers', { params: search ?
 export const getStaff = () => api.get('/staff')
 
 export const getCompanyStats = (params) => api.get('/stats/company', { params })
+export const getCompanyList = () => api.get('/stats/companies')
 
-export const getLeads = () => api.get('/leads')
+export const getLeads = (params) => api.get('/leads', { params })
+export const createLead = (data) => api.post('/leads', data)
+export const updateLead = (id, data) => api.put(`/leads/${id}`, data)
+export const getLeadStats = () => api.get('/leads/stats')
+export const claimLead = (id) => api.put(`/leads/${id}/claim`)
+export const generateEmail = (id, data) => api.post(`/leads/${id}/generate-email`, data)
 
 export default api

@@ -90,6 +90,12 @@ async function initDB() {
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS amount_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS total_payable REAL`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_follow_up TIMESTAMP`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS claimed_by TEXT`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_note TEXT`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lost_reason TEXT`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS leads (
       id            SERIAL PRIMARY KEY,
@@ -866,17 +872,46 @@ app.put('/api/fx-rates', requireAuth, async (req, res) => {
 });
 
 // ─── COMPANY STATS ───────────────────────────────────────────────────────────
+app.get('/api/stats/companies', async (req, res) => {
+  try {
+    const [companiesRes, modesRes] = await Promise.all([
+      pool.query(`
+        SELECT COALESCE(NULLIF(TRIM(customer_name),''), NULLIF(TRIM(shipper),'')) AS name, COUNT(*) AS jobs
+        FROM jobs
+        WHERE COALESCE(NULLIF(TRIM(customer_name),''), NULLIF(TRIM(shipper),'')) IS NOT NULL
+        GROUP BY 1 ORDER BY jobs DESC, name
+      `),
+      pool.query(`SELECT DISTINCT UPPER(TRIM(mode)) AS mode FROM jobs WHERE mode IS NOT NULL AND TRIM(mode) != '' ORDER BY 1`)
+    ])
+    res.json({
+      companies: companiesRes.rows.filter(r => r.name).map(r => ({ name: r.name, jobs: parseInt(r.jobs) })),
+      modes: modesRes.rows.map(r => r.mode)
+    })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
 app.get('/api/stats/company', async (req, res) => {
   try {
-    const { company, year, month } = req.query
-    if (!company) return res.status(400).json({ error: 'company is required' })
+    const { company, year, month, mode } = req.query
     const y = parseInt(year) || new Date().getFullYear()
     const m = month ? parseInt(month) : null
     const start = m ? new Date(y, m - 1, 1) : new Date(y, 0, 1)
     const end   = m ? new Date(y, m, 1)     : new Date(y + 1, 0, 1)
 
-    const baseWhere = `WHERE (COALESCE(NULLIF(j.customer_name,''), j.shipper) ILIKE $1) AND j.created_at >= $2 AND j.created_at < $3`
-    const params = [`%${company}%`, start, end]
+    const params = [start, end]
+    const conditions = [`j.created_at >= $1 AND j.created_at < $2`]
+    if (company && company !== '__all__') {
+      params.push(`%${company}%`)
+      conditions.push(`(COALESCE(NULLIF(j.customer_name,''), j.shipper) ILIKE $${params.length})`)
+    }
+    if (mode && mode !== '__all__') {
+      params.push(mode)
+      conditions.push(`UPPER(TRIM(j.mode)) = UPPER(TRIM($${params.length}))`)
+    }
+    const baseWhere = `WHERE ${conditions.join(' AND ')}`
 
     const [summaryRes, byModeRes, trendRes] = await Promise.all([
       pool.query(`
@@ -977,17 +1012,161 @@ app.get('/api/stats/company', async (req, res) => {
 })
 
 // ─── LEADS ───────────────────────────────────────────────────────────────────
+app.get('/api/leads/stats', async (req, res) => {
+  try {
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0)
+    const [activeRes, wonRes, industryRes, statusRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*) AS total, COALESCE(SUM(quoted_price),0) AS pipeline_value
+                  FROM leads WHERE (is_archived IS NULL OR is_archived=FALSE) AND status NOT IN ('Won','Lost')`),
+      pool.query(`SELECT COUNT(*) AS count, COALESCE(SUM(quoted_price),0) AS value
+                  FROM leads WHERE status='Won' AND created_at>=$1`, [monthStart]),
+      pool.query(`SELECT industry, COUNT(*) AS count FROM leads
+                  WHERE (is_archived IS NULL OR is_archived=FALSE) GROUP BY industry ORDER BY count DESC`),
+      pool.query(`SELECT status, COUNT(*) AS count FROM leads
+                  WHERE (is_archived IS NULL OR is_archived=FALSE) GROUP BY status`),
+    ])
+    res.json({
+      total_active:     parseInt(activeRes.rows[0].total),
+      pipeline_value:   parseFloat(activeRes.rows[0].pipeline_value),
+      won_this_month:   { count: parseInt(wonRes.rows[0].count), value: parseFloat(wonRes.rows[0].value) },
+      by_industry:      industryRes.rows.map(r => ({ industry: r.industry, count: parseInt(r.count) })),
+      by_status:        Object.fromEntries(statusRes.rows.map(r => [r.status, parseInt(r.count)])),
+    })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
 app.get('/api/leads', async (req, res) => {
   try {
+    const archived = req.query.archived === 'true'
+    const where = archived ? `WHERE is_archived=TRUE` : `WHERE (is_archived IS NULL OR is_archived=FALSE)`
     const r = await pool.query(
-      `SELECT id, ref, customer_name, customer_email, industry, lead_score,
-              status, stage, risk_level, source, notes, created_at
-       FROM leads ORDER BY created_at DESC`
+      `SELECT id, ref, customer_name, customer_email, quoted_price, industry, lead_score,
+              status, stage, risk_level, source, notes, created_at, next_follow_up, is_archived,
+              claimed_by, claimed_at, follow_up_note, lost_reason
+       FROM leads ${where} ORDER BY created_at DESC`
     )
     res.json(r.rows)
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.post('/api/leads', async (req, res) => {
+  try {
+    const f = req.body || {}
+    const ref = `ZL-${Date.now()}`
+    const r = await pool.query(
+      `INSERT INTO leads (ref, customer_name, customer_email, quoted_price, industry,
+         lead_score, status, stage, risk_level, source, notes, next_follow_up)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [ ref, f.customer_name||'', f.customer_email||'',
+        parseFloat(f.quoted_price)||0, f.industry||'General',
+        parseInt(f.lead_score)||5, f.status||'New Lead', f.stage||'',
+        f.risk_level||'Medium', f.source||'manual', f.notes||'',
+        f.next_follow_up||null ]
+    )
+    res.status(201).json(r.rows[0])
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.put('/api/leads/:id', async (req, res) => {
+  try {
+    const allowed = ['customer_name','customer_email','quoted_price','industry','lead_score',
+                     'status','stage','risk_level','source','notes','next_follow_up','is_archived',
+                     'follow_up_note','lost_reason','claimed_by']
+    const updates = {}
+    allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
+    if (Object.keys(updates).length) {
+      const cols = Object.keys(updates).map((k,i) => `${k}=$${i+1}`).join(', ')
+      const vals = [...Object.values(updates), req.params.id]
+      await pool.query(`UPDATE leads SET ${cols} WHERE id=$${vals.length}`, vals)
+    }
+    const updated = (await pool.query('SELECT * FROM leads WHERE id=$1', [req.params.id])).rows[0]
+    res.json(updated)
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.put('/api/leads/:id/claim', async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT claimed_by FROM leads WHERE id=$1', [req.params.id])
+    if (!existing.rows.length) return res.status(404).json({ error: 'Lead not found' })
+    if (existing.rows[0].claimed_by) {
+      return res.status(409).json({ error: 'Already claimed', claimed_by: existing.rows[0].claimed_by })
+    }
+    const claimedBy = req.user?.email || req.user?.id || 'Unknown'
+    const r = await pool.query(
+      'UPDATE leads SET claimed_by=$1, claimed_at=NOW() WHERE id=$2 RETURNING *',
+      [claimedBy, req.params.id]
+    )
+    res.json(r.rows[0])
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// ─── AI EMAIL GENERATOR ──────────────────────────────────────────────────────
+app.post('/api/leads/:id/generate-email', async (req, res) => {
+  try {
+    const lead = (await pool.query('SELECT * FROM leads WHERE id=$1', [req.params.id])).rows[0]
+    if (!lead) return res.status(404).json({ error: 'Lead not found' })
+
+    const { email_type, options = {} } = req.body
+    const clientName = lead.customer_name || 'there'
+
+    let userPrompt = ''
+    if (email_type === 'info_request') {
+      const fields = (options.fields || []).join(', ') || 'missing shipment details'
+      const custom = options.custom_questions ? ` Also ask: ${options.custom_questions}` : ''
+      userPrompt = `Write an email to ${clientName} (${lead.customer_email || 'the client'}) requesting the following missing information for their freight enquiry: ${fields}.${custom} Freight context from their enquiry: ${lead.notes || 'No additional notes.'}`
+    } else if (email_type === 'quote_confirmation') {
+      const price = lead.quoted_price > 0 ? `SGD ${Number(lead.quoted_price).toLocaleString()}` : 'as per our discussion'
+      const includes = (options.include || []).join(', ') || 'standard terms'
+      userPrompt = `Write a quote confirmation email to ${clientName} confirming their freight quote of ${price}. Include in the email: ${includes}. Freight context: ${lead.notes || 'Standard shipment.'}`
+    } else if (email_type === 'introduction') {
+      const services = (options.services || []).join(', ') || 'freight forwarding services'
+      const angle = options.angle || 'competitive rates and reliable service across Asia'
+      userPrompt = `Write a concise cold introduction email to ${clientName} at their company. Highlight these freight services: ${services}. Key value proposition: ${angle}. Do not use their email address in the body.`
+    } else {
+      return res.status(400).json({ error: 'Invalid email_type' })
+    }
+
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: 'You are a professional logistics sales representative at Zhenghe Logistics, a freight forwarding company based in Singapore. Write concise, professional emails in English. Be warm but efficient. Use the client\'s name naturally. Never invent rates, prices, or terms not provided to you. Always sign off as "Zhenghe Logistics Team".',
+      tools: [{
+        name: 'compose_email',
+        description: 'Compose a professional logistics email',
+        input_schema: {
+          type: 'object',
+          properties: {
+            subject: { type: 'string', description: 'Concise email subject line' },
+            body:    { type: 'string', description: 'Full email body with greeting and sign-off' }
+          },
+          required: ['subject', 'body']
+        }
+      }],
+      tool_choice: { type: 'tool', name: 'compose_email' },
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+
+    const toolBlock = msg.content.find(c => c.type === 'tool_use' && c.name === 'compose_email')
+    if (!toolBlock) return res.status(422).json({ error: 'AI did not return a structured email' })
+    res.json(toolBlock.input)
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Email generation failed. Please try again.' })
   }
 })
 
@@ -1090,7 +1269,7 @@ app.post('/api/rfq', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING id`,
       [ref, companyName || contactPerson, emailAddress, 0, industry,
-       5, 'RFQ Received', 'Website RFQ', 'High', 'website', notes]
+       5, 'RFQ Received', 'RFQ Received', 'High', 'website', notes]
     )
 
     const leadId = r.rows[0].id

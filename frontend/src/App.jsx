@@ -19,7 +19,7 @@ const NAV = [
   { to: '/intake', icon: '+',  label: 'New Job',           exact: false },
   { to: '/stats',  icon: '◈',  label: 'Company Stats',     exact: false },
   { to: '/quote',  icon: '⊟',  label: 'Quote Calculator',  exact: false },
-  { to: '/leads',  icon: '⇩',  label: 'RFQ Leads',         exact: false },
+  { to: '/leads',  icon: '⇩',  label: 'Leads Pipeline',     exact: false },
 ]
 
 // Default SGD-based rates (approximate)
