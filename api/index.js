@@ -91,6 +91,23 @@ async function initDB() {
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS amount_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS total_payable REAL`);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS leads (
+      id            SERIAL PRIMARY KEY,
+      ref           TEXT UNIQUE NOT NULL,
+      customer_name TEXT DEFAULT '',
+      customer_email TEXT DEFAULT '',
+      quoted_price  REAL DEFAULT 0,
+      industry      TEXT DEFAULT '',
+      lead_score    INTEGER DEFAULT 5,
+      status        TEXT DEFAULT '',
+      stage         TEXT DEFAULT '',
+      risk_level    TEXT DEFAULT '',
+      source        TEXT DEFAULT '',
+      notes         TEXT DEFAULT '',
+      created_at    TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS fx_rates (
       currency TEXT PRIMARY KEY,
       rate REAL NOT NULL,
@@ -227,7 +244,7 @@ app.use(async (req, res, next) => {
 
 // ─── AUTH GUARD (all /api/* except health checks) ───────────────────────────
 app.use('/api', (req, res, next) => {
-  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync') return next()
+  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq') return next()
   requireAuth(req, res, next)
 })
 
@@ -955,6 +972,117 @@ app.get('/api/stats/company', async (req, res) => {
     })
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// ─── RFQ WEBHOOK (public — no auth) ─────────────────────────────────────────
+function rfqCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+}
+
+app.options('/api/rfq', (req, res) => {
+  rfqCors(res)
+  res.status(200).end()
+})
+
+function inferIndustry(commodity) {
+  const c = (commodity || '').toLowerCase()
+  if (/electron|server|computing|software|hardware|semiconductor|component/.test(c)) return 'Tech'
+  if (/pharma|medical|clinical|vaccine|biotech|chemical/.test(c)) return 'Pharmaceuticals'
+  if (/textile|polyester|machinery|parts|industrial|factory|steel|metal/.test(c)) return 'Manufacturing'
+  if (/food|agri|coconut|palm|grain|timber|mineral|commodity/.test(c)) return 'Commodities'
+  if (/retail|garment|apparel|consumer|fashion|footwear/.test(c)) return 'Retail'
+  return 'General'
+}
+
+function buildRfqNotes(b, mode, addons) {
+  const s = (v) => v || '—'
+  const lines = [
+    `MODE: ${mode} | ROUTE: ${s(b.origin)} → ${s(b.destination)}`,
+    `SERVICE: ${s(b.serviceType)} | INCOTERM: ${s(b.incoterm)} | LOAD: ${s(b.loadType)}`,
+  ]
+  if (b.containerSize) lines.push(`CONTAINER: ${b.containerSize}`)
+  lines.push('---', 'CARGO')
+  if (b.commodityName)      lines.push(`  Commodity: ${b.commodityName}`)
+  if (b.hsCode)             lines.push(`  HS Code: ${b.hsCode}`)
+  if (b.quantity)           lines.push(`  Quantity: ${b.quantity}`)
+  if (b.weight)             lines.push(`  Weight: ${b.weight}`)
+  if (b.packagingType)      lines.push(`  Packaging: ${b.packagingType}`)
+  if (b.dimensions)         lines.push(`  Dimensions: ${b.dimensions}`)
+  lines.push('---', 'CONTACT')
+  lines.push(`  Company: ${s(b.companyName)}`)
+  lines.push(`  Person: ${s(b.contactPerson)}`)
+  lines.push(`  Email: ${s(b.emailAddress)}`)
+  lines.push(`  Phone: ${s(b.phoneNumber)}`)
+  if (b.pickupAddress || b.deliveryAddress) {
+    lines.push('---', 'ADDRESSES')
+    if (b.pickupAddress)   lines.push(`  Pickup: ${b.pickupAddress}`)
+    if (b.deliveryAddress) lines.push(`  Delivery: ${b.deliveryAddress}`)
+  }
+  if (addons || b.specialHandlingNotes) {
+    lines.push('---')
+    if (addons)                  lines.push(`ADDONS: ${addons}`)
+    if (b.specialHandlingNotes)  lines.push(`SPECIAL HANDLING: ${b.specialHandlingNotes}`)
+  }
+  lines.push('---', `Submitted: ${new Date().toISOString()}`)
+  return lines.join('\n')
+}
+
+app.post('/api/rfq', async (req, res) => {
+  rfqCors(res)
+  try {
+    const b = req.body || {}
+    const str = (v) => (v == null ? '' : String(v))
+
+    const companyName        = str(b.companyName)
+    const contactPerson      = str(b.contactPerson)
+    const emailAddress       = str(b.emailAddress)
+    const phoneNumber        = str(b.phoneNumber)
+    const mode               = (str(b.mode) || 'SEA').toUpperCase()
+    const origin             = str(b.origin)
+    const destination        = str(b.destination)
+    const serviceType        = str(b.serviceType)
+    const incoterm           = str(b.incoterm)
+    const loadType           = str(b.loadType)
+    const containerSize      = str(b.containerSize)
+    const dimensions         = str(b.dimensions)
+    const commodityName      = str(b.commodityName)
+    const hsCode             = str(b.hsCode)
+    const quantity           = str(b.quantity)
+    const weight             = str(b.weight)
+    const packagingType      = str(b.packagingType)
+    const pickupAddress      = str(b.pickupAddress)
+    const deliveryAddress    = str(b.deliveryAddress)
+    const specialHandlingNotes = str(b.specialHandlingNotes)
+    const addons = Array.isArray(b.addons) ? b.addons.join(', ') : str(b.addons)
+
+    const ref      = `ZL-${Date.now()}`
+    const industry = inferIndustry(commodityName)
+    const notes    = buildRfqNotes(
+      { companyName, contactPerson, emailAddress, phoneNumber, origin, destination,
+        serviceType, incoterm, loadType, containerSize, dimensions, commodityName,
+        hsCode, quantity, weight, packagingType, pickupAddress, deliveryAddress, specialHandlingNotes },
+      mode, addons
+    )
+
+    const r = await pool.query(
+      `INSERT INTO leads
+         (ref, customer_name, customer_email, quoted_price, industry,
+          lead_score, status, stage, risk_level, source, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id`,
+      [ref, companyName || contactPerson, emailAddress, 0, industry,
+       5, 'RFQ Received', 'Website RFQ', 'High', 'website', notes]
+    )
+
+    const leadId = r.rows[0].id
+    console.log(`[ZHL] RFQ saved: ${ref} | ${companyName || contactPerson || '(anonymous)'} | ${industry}`)
+    res.status(201).json({ success: true, leadId, ref })
+  } catch (err) {
+    console.error('[ZHL] POST /api/rfq', err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
 })
