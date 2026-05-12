@@ -56,6 +56,7 @@ export default function JobDetail() {
   const [subCertModal, setSubCertModal] = useState(null)
   const [fxRates, setFxRates] = useState({})
   const [staffList, setStaffList] = useState([])
+  const [showPdfCcyMenu, setShowPdfCcyMenu] = useState(false)
   const [createdByEdit, setCreatedByEdit] = useState(false)
   const [createdByVal, setCreatedByVal] = useState('')
   const invoiceRef = useRef()
@@ -375,7 +376,26 @@ export default function JobDetail() {
   }
 
   // ── Accounts Reference PDF (billing + cost for accounts team) ─────────────
-  function exportAccountsPDF() {
+  function exportAccountsPDF(exportCcy = 'SGD') {
+    // Convert a stored SGD amount to the target export currency.
+    // For lines whose original currency matches the target, use rate_local directly
+    // to avoid drift from rate changes between entry and export.
+    function toExport(sgdAmount, origCurrency, origLocal) {
+      if (exportCcy === 'SGD') return sgdAmount
+      if (origCurrency === exportCcy && origLocal != null) return Number(origLocal)
+      const fx = fxRates[exportCcy]
+      if (!fx) return sgdAmount
+      return sgdAmount * fx
+    }
+    function fmtCcy(n) {
+      const num = Number(n || 0)
+      if (exportCcy === 'SGD') return `S$${num.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      return `${exportCcy} ${num.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    }
+    const rateNote = exportCcy !== 'SGD' && fxRates[exportCcy]
+      ? ` (1 SGD = ${fxRates[exportCcy]} ${exportCcy})`
+      : ''
+
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 30, vw = 61
@@ -438,15 +458,22 @@ export default function JobDetail() {
     // Billing lines
     y = doc.lastAutoTable.finalY + 6
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
-    doc.text('BILLING TO CUSTOMER', ml, y); y += 2
+    doc.text(`BILLING TO CUSTOMER${rateNote}`, ml, y); y += 2
     const totalSale = job.billing_lines.reduce((s, l) => s + (l.rate||0)*(l.qty||1), 0)
+    const totalSaleExport = job.billing_lines.reduce((s, l) => {
+      const lineRate = toExport(l.rate||0, l.currency, l.rate_local)
+      return s + lineRate * (l.qty||1)
+    }, 0)
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Service', 'Rate (SGD)', 'Qty', 'Total (SGD)', 'Remarks']],
+      head: [['#', 'Service', `Rate (${exportCcy})`, 'Qty', `Total (${exportCcy})`, 'Remarks']],
       body: job.billing_lines.length
-        ? job.billing_lines.map((l, i) => [i+1, l.service || '—', `$${Number(l.rate).toFixed(2)}`, l.qty, fmt((l.rate||0)*(l.qty||1)), l.remarks || ''])
+        ? job.billing_lines.map((l, i) => {
+            const lineRate = toExport(l.rate||0, l.currency, l.rate_local)
+            return [i+1, l.service || '—', fmtCcy(lineRate), l.qty, fmtCcy(lineRate*(l.qty||1)), l.remarks || '']
+          })
         : [['', 'No billing lines', '', '', '', '']],
-      foot: [['', '', '', 'Total Sale', fmt(totalSale), '']],
+      foot: [['', '', '', 'Total Sale', fmtCcy(totalSaleExport), '']],
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
@@ -478,16 +505,19 @@ export default function JobDetail() {
 
     // P&L summary (autoTable instead of manual box)
     y = doc.lastAutoTable.finalY + 6
-    const profit = totalSale - totalCost
-    const gp = totalSale > 0 ? (profit/totalSale)*100 : 0
+    const totalCostExport = job.cost_lines.reduce((s, l) => {
+      return s + toExport(l.amount||0, l.currency, l.amount_local)
+    }, 0)
+    const profitExport = totalSaleExport - totalCostExport
+    const gp = totalSale > 0 ? ((totalSale - totalCost)/totalSale)*100 : 0
     const gpDisplay = job.gp_override != null ? job.gp_override : gp
     autoTable(doc, {
       startY: y,
       body: [
-        ['Total Sale',  fmt(totalSale)],
-        ['Total Cost',  fmt(totalCost)],
-        ['Profit',      fmt(profit)],
-        ['GP Margin',   `${gpDisplay.toFixed(1)}%`],
+        [`Total Sale (${exportCcy})`,  fmtCcy(totalSaleExport)],
+        [`Total Cost (${exportCcy})`,  fmtCcy(totalCostExport)],
+        [`Profit (${exportCcy})`,      fmtCcy(profitExport)],
+        ['GP Margin',                  `${gpDisplay.toFixed(1)}%`],
       ],
       styles: { fontSize: 9.5, cellPadding: 5 },
       columnStyles: {
@@ -518,7 +548,7 @@ export default function JobDetail() {
       doc.text(`Zhenghe Logistics Pte Ltd — Accounts Reference — ${job.job_number}`, ml, 290)
       doc.text(`Page ${p} of ${totalPages}`, pw - mr, 290, { align: 'right' })
     }
-    doc.save(`ZHL_${job.job_number.replace('/', '-')}_Accounts.pdf`)
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_Accounts_${exportCcy}.pdf`)
   }
 
   // ── Internal Job Report PDF ───────────────────────────────────────────────
@@ -1266,7 +1296,29 @@ export default function JobDetail() {
           <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}>🚛 Pickup Order</button>
           <button className="btn btn-ghost btn-sm" onClick={openDOModal}>📦 Delivery Order</button>
           <button className="btn btn-ghost btn-sm" onClick={openSubCertModal}>🛃 Sub Cert</button>
-          <button className="btn btn-outline btn-sm" onClick={exportAccountsPDF}>📄 Accounts PDF</button>
+          <div style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', borderRadius: 6, overflow: 'visible', border: '1.5px solid var(--border-solid)' }}>
+              <button className="btn btn-ghost btn-sm" style={{ borderRadius: '4px 0 0 4px', border: 'none' }} onClick={() => exportAccountsPDF('SGD')}>📄 Accounts PDF</button>
+              <button className="btn btn-ghost btn-sm" style={{ borderRadius: '0 4px 4px 0', border: 'none', borderLeft: '1px solid var(--border-solid)', padding: '0 8px' }}
+                onClick={() => setShowPdfCcyMenu(v => !v)}>▾</button>
+            </div>
+            {showPdfCcyMenu && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShowPdfCcyMenu(false)} />
+                <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 200, marginTop: 4, backgroundColor: '#ffffff', border: '1px solid var(--border-solid)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.14)', minWidth: 160 }}>
+                  {['SGD', 'USD', 'EUR', 'IDR'].map(ccy => (
+                    <button key={ccy} onClick={() => { exportAccountsPDF(ccy); setShowPdfCcyMenu(false) }}
+                      style={{ display: 'block', width: '100%', padding: '9px 14px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: 'var(--font)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#F0F4FB'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      📄 Export in {ccy}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving || job.status === 'Voided'}>
             {saving ? <><span className="spinner"></span> Saving...</> : '✓ Save Changes'}
           </button>

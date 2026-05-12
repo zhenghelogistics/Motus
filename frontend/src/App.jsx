@@ -206,7 +206,10 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
                       <span style={{ flex: 1, fontSize: 18, fontWeight: 700 }}>
                         {val.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>1 SGD = {rates[c]} {c}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>1 SGD = {Number(rates[c]).toFixed(4)} {c}</span>
+                      <span style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600 }}>1 {c} = {(1 / (rates[c] || 1)).toFixed(4)} SGD</span>
+                    </div>
                     </div>
                   )
                 })}
@@ -219,15 +222,23 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
                 Set rates manually (1 SGD = X). Manually set rates are locked — the daily sync won't overwrite them.
               </p>
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-solid)', marginBottom: 14 }}>
-                {FX_ORDER.filter(c => c in rates).map(c => (
-                  <div key={c} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)', gap: 10 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, width: 40, color: 'var(--navy)' }}>{c}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>1 SGD =</span>
-                    <input type="text" inputMode="decimal"
-                      style={{ width: 110, padding: '4px 8px', fontSize: 13, fontWeight: 600, borderRadius: 4, border: '1.5px solid var(--border-solid)', textAlign: 'right', fontFamily: 'var(--font)' }}
-                      value={draftRates[c] ?? ''}
-                      onChange={e => setDraftRates(prev => ({ ...prev, [c]: e.target.value }))} />
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 28 }}>{c}</span>
+                {FX_ORDER.filter(c => c in rates).map(c => {
+                  const draftVal = parseFloat(draftRates[c]) || rates[c] || 1
+                  const inverse = (1 / draftVal).toFixed(4)
+                  return (
+                  <div key={c} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border-solid)', background: '#ffffff', gap: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, width: 36, color: 'var(--navy)' }}>{c}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>1 SGD =</span>
+                        <input type="text" inputMode="decimal"
+                          style={{ width: 90, padding: '3px 6px', fontSize: 13, fontWeight: 600, borderRadius: 4, border: '1.5px solid var(--border-solid)', textAlign: 'right', fontFamily: 'var(--font)' }}
+                          value={draftRates[c] ?? ''}
+                          onChange={e => setDraftRates(prev => ({ ...prev, [c]: e.target.value }))} />
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c}</span>
+                      </div>
+                      <span style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600 }}>1 {c} = {inverse} SGD</span>
+                    </div>
                     <div style={{ marginLeft: 'auto' }}>
                       {isManual[c] ? (
                         <button
@@ -252,7 +263,8 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
               {saveError && <p style={{ color: '#DC2626', fontSize: 12, marginBottom: 8 }}>{saveError}</p>}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
