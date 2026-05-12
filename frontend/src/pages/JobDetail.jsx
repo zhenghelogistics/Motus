@@ -81,6 +81,10 @@ export default function JobDetail() {
     loadLogo('/logo-blue.png', logoBlueRef)
     getFxRates().then(r => setFxRates(r.data.rates)).catch(() => {})
     getStaff().then(r => setStaffList(r.data)).catch(() => {})
+
+    function onRatesUpdated(e) { setFxRates(e.detail) }
+    window.addEventListener('fxRatesUpdated', onRatesUpdated)
+    return () => window.removeEventListener('fxRatesUpdated', onRatesUpdated)
   }, [])
 
   function loadJob() {

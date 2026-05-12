@@ -121,6 +121,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
       if (onRatesSaved) onRatesSaved(rates)
+      window.dispatchEvent(new CustomEvent('fxRatesUpdated', { detail: rates }))
     } catch (err) {
       setSaveError(err?.response?.data?.error || 'Failed to save. Please try again.')
     } finally { setSaving(false) }
