@@ -183,12 +183,16 @@ export default function CompanyStats() {
           </div>
 
           {showDropdown && (
+            <>
+              <div
+                style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+                onClick={() => { setShowDropdown(false); setCompanySearch('') }}
+              />
             <div style={{
               position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, marginTop: 2,
               background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
               boxShadow: '0 8px 24px rgba(0,0,0,0.14)', maxHeight: 300, overflowY: 'auto',
             }}
-            onMouseLeave={() => setShowDropdown(false)}
             >
               <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
                 <input
@@ -223,6 +227,7 @@ export default function CompanyStats() {
                 <div style={{ padding: '12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>No match</div>
               )}
             </div>
+            </>
           )}
         </div>
 
