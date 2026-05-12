@@ -58,4 +58,6 @@ export const getStaff = () => api.get('/staff')
 
 export const getCompanyStats = (params) => api.get('/stats/company', { params })
 
+export const getLeads = () => api.get('/leads')
+
 export default api

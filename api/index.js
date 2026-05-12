@@ -976,6 +976,21 @@ app.get('/api/stats/company', async (req, res) => {
   }
 })
 
+// ─── LEADS ───────────────────────────────────────────────────────────────────
+app.get('/api/leads', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, ref, customer_name, customer_email, industry, lead_score,
+              status, stage, risk_level, source, notes, created_at
+       FROM leads ORDER BY created_at DESC`
+    )
+    res.json(r.rows)
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
 // ─── RFQ WEBHOOK (public — no auth) ─────────────────────────────────────────
 function rfqCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')

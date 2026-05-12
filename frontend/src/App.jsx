@@ -6,6 +6,7 @@ import JobDetail from './pages/JobDetail'
 import EmailIntake from './pages/EmailIntake'
 import CompanyStats from './pages/CompanyStats'
 import QuoteCalculator from './pages/QuoteCalculator'
+import Leads from './pages/Leads'
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
@@ -18,6 +19,7 @@ const NAV = [
   { to: '/intake', icon: '+',  label: 'New Job',           exact: false },
   { to: '/stats',  icon: '◈',  label: 'Company Stats',     exact: false },
   { to: '/quote',  icon: '⊟',  label: 'Quote Calculator',  exact: false },
+  { to: '/leads',  icon: '⇩',  label: 'RFQ Leads',         exact: false },
 ]
 
 // Default SGD-based rates (approximate)
@@ -413,6 +415,7 @@ function AppShell() {
           <Route path="/intake"   element={<EmailIntake />} />
           <Route path="/stats"    element={<CompanyStats />} />
           <Route path="/quote"    element={<QuoteCalculator />} />
+          <Route path="/leads"    element={<Leads />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
         </Routes>
       </main>
