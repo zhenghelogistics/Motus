@@ -3,6 +3,15 @@
 
 export const CHANGELOG = [
   {
+    id: 'quote-calculator',
+    date: '2026-05-12',
+    title: 'Quote Calculator',
+    description:
+      'New Quote Calculator page for sales reps. Build line-by-line freight breakdowns with per-line markups, a global markup %, optional GST 9% toggle, and a live final price. Generates a clean monospace client quote you can copy in one click. Supports SGD / USD, route + mode details, and quick-add buttons for common charges.',
+    route: '/quote',
+    routeLabel: 'Open Quote Calculator',
+  },
+  {
     id: 'company-stats-noa-mirror',
     date: '2026-05-12',
     title: 'Company Stats Dashboard + NOA/GST Auto-Mirror',

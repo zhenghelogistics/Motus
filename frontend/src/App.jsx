@@ -5,6 +5,7 @@ import MovementTracker from './pages/MovementTracker'
 import JobDetail from './pages/JobDetail'
 import EmailIntake from './pages/EmailIntake'
 import CompanyStats from './pages/CompanyStats'
+import QuoteCalculator from './pages/QuoteCalculator'
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
@@ -16,6 +17,7 @@ const NAV = [
   { to: '/jobs',   icon: '≡',  label: 'Movement Tracker',  exact: false },
   { to: '/intake', icon: '+',  label: 'New Job',           exact: false },
   { to: '/stats',  icon: '◈',  label: 'Company Stats',     exact: false },
+  { to: '/quote',  icon: '⊟',  label: 'Quote Calculator',  exact: false },
 ]
 
 // Default SGD-based rates (approximate)
@@ -258,7 +260,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount }) {
             alt="Zhenghe Logistics"
             style={{ width: '100%', height: 'auto', display: 'block', marginBottom: 4 }}
           />
-          <div className="sidebar-sub" style={{ paddingLeft: 2 }}>Operations Tool</div>
+          <div className="sidebar-sub" style={{ paddingLeft: 2 }}>Nexus</div>
         </div>
       </div>
 
@@ -319,7 +321,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount }) {
           </button>
         </div>
 
-        <div className="sidebar-version">ZHL Ops v1.0</div>
+        <div className="sidebar-version">Nexus v1.0</div>
       </div>
     </aside>
   )
@@ -410,6 +412,7 @@ function AppShell() {
           <Route path="/jobs/:id" element={<JobDetail />} />
           <Route path="/intake"   element={<EmailIntake />} />
           <Route path="/stats"    element={<CompanyStats />} />
+          <Route path="/quote"    element={<QuoteCalculator />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
         </Routes>
       </main>
