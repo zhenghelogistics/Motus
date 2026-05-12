@@ -105,14 +105,71 @@ function StageDot({ stage }) {
   return <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: s.dot || '#6B7280', marginRight: 5 }} />
 }
 
-function ScoreBar({ score }) {
-  const s = score || 0
+const RFQ_STATUSES = ['New', 'In Progress', 'Quoted']
+
+const STATUS_STAGE_MAP = {
+  'New':         'New Lead',
+  'In Progress': 'Follow-Up',
+  'Quoted':      'Quote Sent',
+}
+
+const STAGE_STATUS_MAP = {
+  'RFQ Received': 'New',
+  'New Lead':     'New',
+  'Follow-Up':    'In Progress',
+  'Responded':    'In Progress',
+  'Quote Sent':   'Quoted',
+}
+
+const STATUS_STYLE = {
+  'New':         { bg: '#EFF6FF', color: '#1D4ED8', border: '#BFDBFE' },
+  'In Progress': { bg: '#FFFBEB', color: '#B45309', border: '#FDE68A' },
+  'Quoted':      { bg: '#F0FDF4', color: '#15803D', border: '#BBF7D0' },
+}
+
+function StatusDropdown({ lead, onChange }) {
+  const [open, setOpen] = useState(false)
+  const current = STAGE_STATUS_MAP[lead.stage] || null
+  const st = STATUS_STYLE[current] || { bg: '#F3F4F6', color: '#6B7280', border: '#D1D5DB' }
+
   return (
-    <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-      {[1,2,3,4,5,6,7,8,9,10].map(n => (
-        <div key={n} style={{ width: 5, height: 5, borderRadius: '50%', background: n <= s ? '#185FA5' : 'rgba(24,95,165,0.15)' }} />
-      ))}
-      <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 3 }}>{s}/10</span>
+    <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          background: st.bg, color: st.color, border: `1.5px solid ${st.border}`,
+          borderRadius: 6, padding: '3px 8px', fontSize: 11, fontWeight: 700,
+          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+          fontFamily: 'var(--font)', whiteSpace: 'nowrap',
+        }}
+      >
+        {current || lead.stage || '—'} ▾
+      </button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, zIndex: 200, marginTop: 4,
+            backgroundColor: '#ffffff', border: '1px solid #D1DCE8',
+            borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.13)', minWidth: 130, overflow: 'hidden',
+          }}>
+            {RFQ_STATUSES.map(s => (
+              <button key={s} onClick={() => { onChange(STATUS_STAGE_MAP[s]); setOpen(false) }}
+                style={{
+                  display: 'block', width: '100%', padding: '8px 14px', background: s === current ? '#F0F4FB' : '#ffffff',
+                  border: 'none', textAlign: 'left', cursor: 'pointer',
+                  fontSize: 12, fontWeight: s === current ? 700 : 500, fontFamily: 'var(--font)',
+                  color: STATUS_STYLE[s]?.color || 'var(--text)',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#F0F4FB'}
+                onMouseLeave={e => e.currentTarget.style.background = s === current ? '#F0F4FB' : '#ffffff'}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -817,7 +874,7 @@ function PipelineColumn({ stage, leads, onCardClick }) {
 
 // ── List View ─────────────────────────────────────────────────────────────────
 
-function ListView({ leads, onRowClick }) {
+function ListView({ leads, onRowClick, onStatusChange }) {
   return (
     <div className="table-wrap">
       <table>
@@ -826,9 +883,9 @@ function ListView({ leads, onRowClick }) {
             <th>Ref</th>
             <th>Company</th>
             <th>Industry</th>
+            <th>Status</th>
             <th>Stage</th>
             <th>Risk</th>
-            <th>Score</th>
             <th>Price</th>
             <th>Follow-Up</th>
             <th>Owner</th>
@@ -843,9 +900,9 @@ function ListView({ leads, onRowClick }) {
                 <td><span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, fontWeight: 700, color: 'var(--link)' }}>{lead.ref}</span></td>
                 <td style={{ fontWeight: 600 }}>{lead.customer_name || <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                 <td><IndustryPill industry={lead.industry || 'General'} /></td>
+                <td><StatusDropdown lead={lead} onChange={stage => onStatusChange(lead.id, stage)} /></td>
                 <td><div style={{ display: 'flex', alignItems: 'center' }}><StageDot stage={lead.stage} /><span style={{ fontSize: 11 }}>{lead.stage}</span></div></td>
                 <td><RiskBadge risk={lead.risk_level} /></td>
-                <td><ScoreBar score={lead.lead_score} /></td>
                 <td style={{ fontWeight: 600, color: 'var(--blue)' }}>{fmtPrice(lead.quoted_price)}</td>
                 <td style={{ fontSize: 11, color: fuOverdue ? '#DC2626' : 'var(--text-muted)', fontWeight: fuOverdue ? 700 : 400 }}>
                   {fuOverdue ? '⚠ ' : ''}{fmtDate(lead.next_follow_up)}
@@ -874,6 +931,13 @@ export default function Leads() {
   const [showArchived, setShowArchived] = useState(false)
   const [search, setSearch]       = useState('')
   const [modalLead, setModalLead] = useState(null)
+
+  async function handleStatusChange(id, stage) {
+    try {
+      await updateLead(id, { stage })
+      setLeads(prev => prev.map(l => l.id === id ? { ...l, stage } : l))
+    } catch { /* silent — the dropdown snaps back on next fetch */ }
+  }
 
   const fetchAll = useCallback(async () => {
     setLoading(true); setError('')
@@ -988,7 +1052,7 @@ export default function Leads() {
       )}
 
       {!loading && !error && filtered.length > 0 && view === 'list' && (
-        <ListView leads={filtered} onRowClick={setModalLead} />
+        <ListView leads={filtered} onRowClick={setModalLead} onStatusChange={handleStatusChange} />
       )}
 
       {modalLead !== null && (
