@@ -92,6 +92,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
   const [updatedBy, setUpdatedBy] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [tab, setTab] = useState('converter')
 
   useEffect(() => {
@@ -106,6 +107,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
 
   async function saveRates() {
     setSaving(true)
+    setSaveError('')
     try {
       const r = await updateFxRates(rates)
       setUpdatedAt(r.data.updated_at)
@@ -113,6 +115,8 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
       if (onRatesSaved) onRatesSaved(rates)
+    } catch (err) {
+      setSaveError(err?.response?.data?.error || 'Failed to save. Please try again.')
     } finally { setSaving(false) }
   }
 
