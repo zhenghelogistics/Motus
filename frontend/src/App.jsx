@@ -90,12 +90,24 @@ function nameFromEmail(email) {
   return prefix.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ')
 }
 
+function toInverse(fwd) {
+  const n = parseFloat(fwd)
+  return n > 0 ? (1 / n).toFixed(6).replace(/\.?0+$/, '') : ''
+}
+function toForward(inv) {
+  const n = parseFloat(inv)
+  return n > 0 ? (1 / n).toFixed(6).replace(/\.?0+$/, '') : ''
+}
+
 function CurrencyConverter({ onClose, onRatesSaved }) {
   const [amount, setAmount] = useState('1000')
   const [base, setBase] = useState('SGD')
   const [rates, setRates] = useState(DEFAULT_RATES)
   const [draftRates, setDraftRates] = useState(
     Object.fromEntries(Object.entries(DEFAULT_RATES).map(([c, v]) => [c, String(v)]))
+  )
+  const [draftInverse, setDraftInverse] = useState(
+    Object.fromEntries(Object.entries(DEFAULT_RATES).map(([c, v]) => [c, toInverse(v)]))
   )
   const [isManual, setIsManual] = useState({})
   const [updatedAt, setUpdatedAt] = useState(null)
@@ -112,12 +124,25 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
         const loaded = r.data.rates || DEFAULT_RATES
         setRates(loaded)
         setDraftRates(Object.fromEntries(Object.entries(loaded).map(([c, v]) => [c, String(v)])))
+        setDraftInverse(Object.fromEntries(Object.entries(loaded).map(([c, v]) => [c, toInverse(v)])))
         setIsManual(r.data.is_manual || {})
         setUpdatedAt(r.data.updated_at)
         setUpdatedBy(r.data.updated_by)
       })
       .catch(() => {})
   }, [])
+
+  function onForwardChange(c, val) {
+    setDraftRates(prev => ({ ...prev, [c]: val }))
+    const inv = toInverse(val)
+    if (inv) setDraftInverse(prev => ({ ...prev, [c]: inv }))
+  }
+
+  function onInverseChange(c, val) {
+    setDraftInverse(prev => ({ ...prev, [c]: val }))
+    const fwd = toForward(val)
+    if (fwd) setDraftRates(prev => ({ ...prev, [c]: fwd }))
+  }
 
   async function saveRates() {
     setSaving(true)
@@ -129,6 +154,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
       const r = await updateFxRates(parsed)
       setRates(parsed)
       setDraftRates(Object.fromEntries(Object.entries(parsed).map(([c, v]) => [c, String(v)])))
+      setDraftInverse(Object.fromEntries(Object.entries(parsed).map(([c, v]) => [c, toInverse(v)])))
       setIsManual(Object.fromEntries(FX_ORDER.map(c => [c, true])))
       setUpdatedAt(r.data.updated_at)
       setUpdatedBy(r.data.updated_by)
@@ -148,6 +174,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
       const newRate = r.data.rate
       setRates(prev => ({ ...prev, [currency]: newRate }))
       setDraftRates(prev => ({ ...prev, [currency]: String(newRate) }))
+      setDraftInverse(prev => ({ ...prev, [currency]: toInverse(newRate) }))
       setIsManual(prev => ({ ...prev, [currency]: false }))
     } catch {
       // silent fail — user can try again
@@ -219,52 +246,54 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
           ) : (
             <>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-                Set rates manually (1 SGD = X). Manually set rates are locked — the daily sync won't overwrite them.
+                Edit either direction — they update each other automatically. Save to lock the rate; the daily sync won't overwrite locked rates.
               </p>
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-solid)', marginBottom: 14 }}>
-                {FX_ORDER.filter(c => c in rates).map(c => {
-                  const draftVal = parseFloat(draftRates[c]) || rates[c] || 1
-                  const inverse = (1 / draftVal).toFixed(4)
-                  return (
-                  <div key={c} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border-solid)', background: '#ffffff', gap: 10 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, width: 36, color: 'var(--navy)' }}>{c}</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>1 SGD =</span>
-                        <input type="text" inputMode="decimal"
-                          style={{ width: 90, padding: '3px 6px', fontSize: 13, fontWeight: 600, borderRadius: 4, border: '1.5px solid var(--border-solid)', textAlign: 'right', fontFamily: 'var(--font)' }}
-                          value={draftRates[c] ?? ''}
-                          onChange={e => setDraftRates(prev => ({ ...prev, [c]: e.target.value }))} />
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c}</span>
+                {FX_ORDER.filter(c => c in rates).map(c => (
+                  <div key={c} style={{ borderBottom: '1px solid var(--border-solid)', background: '#ffffff' }}>
+                    {/* Currency label + lock badge */}
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '8px 14px 4px', gap: 8 }}>
+                      <span style={{ fontWeight: 800, fontSize: 13, color: 'var(--navy)', width: 36 }}>{c}</span>
+                      <div style={{ marginLeft: 'auto' }}>
+                        {isManual[c] ? (
+                          <button onClick={() => handleUnlock(c)} disabled={unlocking[c]}
+                            style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 5, cursor: 'pointer', background: '#FEF3C7', color: '#92400E', border: '1.5px solid #F59E0B', opacity: unlocking[c] ? 0.6 : 1 }}>
+                            {unlocking[c] ? 'Fetching...' : 'Locked — Use live'}
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 5, background: '#F0FDF4', color: '#166534', border: '1.5px solid #86EFAC' }}>Auto</span>
+                        )}
                       </div>
-                      <span style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600 }}>1 {c} = {inverse} SGD</span>
                     </div>
-                    <div style={{ marginLeft: 'auto' }}>
-                      {isManual[c] ? (
-                        <button
-                          onClick={() => handleUnlock(c)}
-                          disabled={unlocking[c]}
-                          title="Remove manual lock — let daily sync update this rate"
-                          style={{
-                            fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 5, cursor: 'pointer',
-                            background: '#FEF3C7', color: '#92400E', border: '1.5px solid #F59E0B',
-                            opacity: unlocking[c] ? 0.6 : 1,
-                          }}
-                        >
-                          {unlocking[c] ? 'Fetching...' : 'Locked — Use live'}
-                        </button>
-                      ) : (
-                        <span style={{
-                          fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 5,
-                          background: '#F0FDF4', color: '#166534', border: '1.5px solid #86EFAC',
-                        }}>
-                          Auto
-                        </span>
-                      )}
+                    {/* Two-way rate inputs */}
+                    <div style={{ display: 'flex', gap: 0, padding: '4px 14px 10px' }}>
+                      {/* SGD → Foreign */}
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>1 SGD =</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <input type="text" inputMode="decimal"
+                            style={{ width: '100%', padding: '5px 8px', fontSize: 13, fontWeight: 600, borderRadius: 5, border: '1.5px solid var(--border-solid)', textAlign: 'right', fontFamily: 'var(--font)' }}
+                            value={draftRates[c] ?? ''}
+                            onChange={e => onForwardChange(c, e.target.value)} />
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 28 }}>{c}</span>
+                        </div>
+                      </div>
+                      {/* Divider */}
+                      <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', color: 'var(--text-muted)', fontSize: 16, paddingTop: 16 }}>⇄</div>
+                      {/* Foreign → SGD */}
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>1 {c} =</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <input type="text" inputMode="decimal"
+                            style={{ width: '100%', padding: '5px 8px', fontSize: 13, fontWeight: 600, borderRadius: 5, border: '1.5px solid #93C5FD', textAlign: 'right', fontFamily: 'var(--font)', background: '#EFF6FF' }}
+                            value={draftInverse[c] ?? ''}
+                            onChange={e => onInverseChange(c, e.target.value)} />
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 28 }}>SGD</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  )
-                })}
+                ))}
               </div>
               {saveError && <p style={{ color: '#DC2626', fontSize: 12, marginBottom: 8 }}>{saveError}</p>}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
