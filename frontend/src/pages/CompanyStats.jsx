@@ -27,7 +27,7 @@ function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return (
     <div style={{
-      background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+      background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 8,
       padding: '10px 14px', fontSize: 12,
     }}>
       <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--heading)' }}>{label}</div>
@@ -55,7 +55,7 @@ function FilterLabel({ children }) {
 
 function SummaryCard({ label, value, color, sub }) {
   return (
-    <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', flex: 1, minWidth: 120 }}>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 10, padding: '14px 18px', flex: 1, minWidth: 120 }}>
       <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 6, textTransform: 'uppercase' }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 900, color: color || 'var(--heading)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
       {sub != null && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
@@ -170,8 +170,8 @@ export default function CompanyStats() {
             onClick={() => setShowDropdown(v => !v)}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)',
-              background: 'var(--card-bg)', cursor: 'pointer', fontSize: 13,
+              padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border-solid)',
+              background: 'var(--surface)', cursor: 'pointer', fontSize: 13,
               color: 'var(--heading)', fontWeight: company !== '__all__' ? 600 : 400,
               minHeight: 36,
             }}
@@ -190,11 +190,11 @@ export default function CompanyStats() {
               />
             <div style={{
               position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, marginTop: 2,
-              background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+              background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 8,
               boxShadow: '0 8px 24px rgba(0,0,0,0.14)', maxHeight: 300, overflowY: 'auto',
             }}
             >
-              <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-solid)' }}>
                 <input
                   className="form-control"
                   placeholder="Search company..."
@@ -256,7 +256,7 @@ export default function CompanyStats() {
         {/* View toggle */}
         <div>
           <FilterLabel>View</FilterLabel>
-          <div style={{ display: 'flex', gap: 2, background: 'var(--sub-box-bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--sub-box-bg)', border: '1px solid var(--border-solid)', borderRadius: 8, padding: 3 }}>
             {['yearly', 'monthly'].map(v => (
               <button key={v} onClick={() => setViewMode(v)}
                 className={viewMode === v ? 'btn btn-primary btn-xs' : 'btn btn-ghost btn-xs'}
@@ -319,13 +319,13 @@ export default function CompanyStats() {
 
               {/* Monthly trend — revenue vs profit (yearly view) */}
               {viewMode === 'yearly' && trendChartData.length > 0 && (
-                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 12, padding: '16px 16px 8px' }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
                     Monthly Revenue & Profit — {year}
                   </div>
                   <ResponsiveContainer width="100%" height={200}>
                     <BarChart data={trendChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-solid)" />
                       <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
                       <Tooltip content={<ChartTooltip />} />
@@ -339,13 +339,13 @@ export default function CompanyStats() {
 
               {/* Monthly GP% trend line */}
               {viewMode === 'yearly' && trendChartData.length > 0 && (
-                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 12, padding: '16px 16px 8px' }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
                     GP% Trend — {year}
                   </div>
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={trendChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-solid)" />
                       <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 10 }} unit="%" />
                       <Tooltip content={<ChartTooltip />} />
@@ -357,13 +357,13 @@ export default function CompanyStats() {
 
               {/* Revenue by mode bar chart */}
               {modeChartData.length > 1 && (
-                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 12, padding: '16px 16px 8px' }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
                     Revenue by Mode
                   </div>
                   <ResponsiveContainer width="100%" height={200}>
                     <BarChart data={modeChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-solid)" />
                       <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
                       <Tooltip content={<ChartTooltip />} />
@@ -377,7 +377,7 @@ export default function CompanyStats() {
 
               {/* Mode share pie */}
               {modePieData.length > 1 && (
-                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 12, padding: '16px 16px 8px' }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
                     Revenue Share by Mode
                   </div>
