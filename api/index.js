@@ -96,6 +96,19 @@ async function initDB() {
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_note TEXT`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lost_reason TEXT`);
+  await pool.query(`ALTER TABLE fx_rates ADD COLUMN IF NOT EXISTS is_manual BOOLEAN DEFAULT FALSE`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marketing_contacts (
+      id            SERIAL PRIMARY KEY,
+      email         TEXT NOT NULL,
+      customer_name TEXT DEFAULT '',
+      industry      TEXT DEFAULT '',
+      source        TEXT DEFAULT '',
+      lead_ref      TEXT DEFAULT '',
+      archived_at   TIMESTAMP DEFAULT NOW(),
+      UNIQUE(email)
+    )
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS leads (
       id            SERIAL PRIMARY KEY,
@@ -250,7 +263,7 @@ app.use(async (req, res, next) => {
 
 // ─── AUTH GUARD (all /api/* except health checks) ───────────────────────────
 app.use('/api', (req, res, next) => {
-  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq') return next()
+  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq' || req.url === '/leads/purge-old') return next()
   requireAuth(req, res, next)
 })
 
@@ -799,6 +812,9 @@ app.get('/api/dashboard', async (req, res) => {
 });
 
 // ─── FX RATES ────────────────────────────────────────────────────────────────
+// Yahoo Finance tickers: 1 SGD = X [currency]
+const FX_YAHOO_PAIRS = { USD: 'SGDUSD=X', EUR: 'SGDEUR=X', IDR: 'SGDIDR=X' }
+
 app.get('/api/fx-rates/sync', async (req, res) => {
   const auth = req.headers.authorization
   if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -806,27 +822,71 @@ app.get('/api/fx-rates/sync', async (req, res) => {
   }
   try {
     await ensureDB()
-    const today = new Date()
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
-    const isLastDay = tomorrow.getMonth() !== today.getMonth()
-    if (!isLastDay) {
-      return res.json({ skipped: true, reason: 'Not last day of month', date: today.toISOString().split('T')[0] })
-    }
     const yahooFinance = require('yahoo-finance2').default
-    const quote = await yahooFinance.quote('SGDUSD=X')
-    const rate = parseFloat(quote.regularMarketPrice)
-    if (!rate || isNaN(rate)) throw new Error('Invalid rate from Yahoo Finance')
-    const now = new Date()
-    await pool.query(
-      `INSERT INTO fx_rates (currency, rate, updated_at, updated_by)
-       VALUES ($1,$2,$3,$4) ON CONFLICT (currency) DO UPDATE SET rate=$2, updated_at=$3, updated_by=$4`,
-      ['USD', rate, now, 'auto-sync (Yahoo Finance close)']
-    )
-    console.log(`[ZHL] FX auto-sync: 1 SGD = ${rate} USD on ${today.toISOString().split('T')[0]}`)
-    res.json({ success: true, currency: 'USD', rate, updated_at: now })
+    const results = []
+
+    for (const [currency, ticker] of Object.entries(FX_YAHOO_PAIRS)) {
+      // Skip currencies the user has manually locked
+      const lockRow = await pool.query('SELECT is_manual FROM fx_rates WHERE currency=$1', [currency])
+      if (lockRow.rows[0]?.is_manual) {
+        results.push({ currency, skipped: true, reason: 'manually locked' })
+        continue
+      }
+      try {
+        const quote = await yahooFinance.quote(ticker)
+        const rate = parseFloat(quote.regularMarketPrice)
+        if (!rate || isNaN(rate)) throw new Error('Invalid rate')
+        await pool.query(
+          `INSERT INTO fx_rates (currency, rate, updated_at, updated_by, is_manual)
+           VALUES ($1,$2,NOW(),'auto-sync (Yahoo Finance)',FALSE)
+           ON CONFLICT (currency) DO UPDATE SET rate=$2, updated_at=NOW(), updated_by='auto-sync (Yahoo Finance)', is_manual=FALSE`,
+          [currency, rate]
+        )
+        console.log(`[ZHL] FX sync: 1 SGD = ${rate} ${currency}`)
+        results.push({ currency, rate, updated: true })
+      } catch (e) {
+        results.push({ currency, error: e.message })
+      }
+    }
+
+    res.json({ success: true, results, synced_at: new Date() })
   } catch (err) {
     console.error('[ZHL] FX auto-sync error:', err.message)
     res.status(500).json({ error: err.message })
+  }
+})
+
+// Release manual lock (and immediately fetch live rate)
+app.put('/api/fx-rates/:currency/unlock', requireAuth, async (req, res) => {
+  try {
+    await ensureDB()
+    const { currency } = req.params
+    const ticker = FX_YAHOO_PAIRS[currency]
+    let rate = null
+
+    if (ticker) {
+      try {
+        const yahooFinance = require('yahoo-finance2').default
+        const quote = await yahooFinance.quote(ticker)
+        rate = parseFloat(quote.regularMarketPrice)
+        if (isNaN(rate)) rate = null
+      } catch {}
+    }
+
+    if (rate) {
+      await pool.query(
+        `UPDATE fx_rates SET is_manual=FALSE, rate=$1, updated_at=NOW(), updated_by='auto-sync (live)' WHERE currency=$2`,
+        [rate, currency]
+      )
+      res.json({ success: true, currency, rate, is_manual: false })
+    } else {
+      await pool.query('UPDATE fx_rates SET is_manual=FALSE WHERE currency=$1', [currency])
+      const row = await pool.query('SELECT rate FROM fx_rates WHERE currency=$1', [currency])
+      res.json({ success: true, currency, rate: row.rows[0]?.rate, is_manual: false })
+    }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
 })
 
@@ -834,16 +894,17 @@ app.get('/api/fx-rates', async (req, res) => {
   try {
     await ensureDB();
     const r = await pool.query('SELECT * FROM fx_rates ORDER BY currency');
-    const rates = {};
+    const rates = {}, is_manual = {};
     let updated_at = null, updated_by = '';
     r.rows.forEach(row => {
       rates[row.currency] = row.rate;
+      is_manual[row.currency] = !!row.is_manual;
       if (!updated_at || new Date(row.updated_at) > new Date(updated_at)) {
         updated_at = row.updated_at;
         updated_by = row.updated_by;
       }
     });
-    res.json({ rates, updated_at, updated_by });
+    res.json({ rates, is_manual, updated_at, updated_by });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -858,9 +919,9 @@ app.put('/api/fx-rates', requireAuth, async (req, res) => {
     const now = new Date();
     await Promise.all(Object.entries(rates).map(([currency, rate]) =>
       pool.query(
-        `INSERT INTO fx_rates (currency, rate, updated_at, updated_by)
-         VALUES ($1,$2,$3,$4)
-         ON CONFLICT (currency) DO UPDATE SET rate=$2, updated_at=$3, updated_by=$4`,
+        `INSERT INTO fx_rates (currency, rate, updated_at, updated_by, is_manual)
+         VALUES ($1,$2,$3,$4,TRUE)
+         ON CONFLICT (currency) DO UPDATE SET rate=$2, updated_at=$3, updated_by=$4, is_manual=TRUE`,
         [currency, parseFloat(rate), now, updatedBy]
       )
     ));
@@ -1078,7 +1139,7 @@ app.post('/api/leads', async (req, res) => {
 
 app.put('/api/leads/:id', async (req, res) => {
   try {
-    const allowed = ['customer_name','customer_email','quoted_price','industry','lead_score',
+    const allowed = ['customer_name','customer_email','quoted_price','industry',
                      'status','stage','risk_level','source','notes','next_follow_up','is_archived',
                      'follow_up_note','lost_reason','claimed_by']
     const updates = {}
@@ -1090,6 +1151,25 @@ app.put('/api/leads/:id', async (req, res) => {
     }
     const updated = (await pool.query('SELECT * FROM leads WHERE id=$1', [req.params.id])).rows[0]
     res.json(updated)
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.delete('/api/leads/:id', async (req, res) => {
+  try {
+    const lead = (await pool.query('SELECT customer_email, customer_name, industry, source, ref FROM leads WHERE id=$1', [req.params.id])).rows[0]
+    if (!lead) return res.status(404).json({ error: 'Lead not found' })
+    if (lead.customer_email) {
+      await pool.query(
+        `INSERT INTO marketing_contacts (email, customer_name, industry, source, lead_ref, archived_at)
+         VALUES ($1,$2,$3,$4,$5,NOW()) ON CONFLICT (email) DO NOTHING`,
+        [lead.customer_email, lead.customer_name, lead.industry, lead.source, lead.ref]
+      )
+    }
+    await pool.query('DELETE FROM leads WHERE id=$1', [req.params.id])
+    res.json({ success: true })
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
@@ -1277,6 +1357,75 @@ app.post('/api/rfq', async (req, res) => {
     res.status(201).json({ success: true, leadId, ref })
   } catch (err) {
     console.error('[ZHL] POST /api/rfq', err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// ─── LEADS PURGE CRON ────────────────────────────────────────────────────────
+// Called by Vercel cron daily. Copies email of leads >30 days old to
+// marketing_contacts, then deletes those lead records.
+app.get('/api/leads/purge-old', async (req, res) => {
+  const auth = req.headers.authorization
+  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  try {
+    await ensureDB()
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 30)
+
+    const oldLeads = await pool.query(
+      `SELECT id, ref, customer_name, customer_email, industry, source
+       FROM leads WHERE created_at < $1 AND (customer_email IS NOT NULL AND customer_email <> '')`,
+      [cutoff]
+    )
+
+    let archived = 0, skipped = 0, deleted = 0
+    for (const lead of oldLeads.rows) {
+      try {
+        await pool.query(
+          `INSERT INTO marketing_contacts (email, customer_name, industry, source, lead_ref, archived_at)
+           VALUES ($1,$2,$3,$4,$5,NOW())
+           ON CONFLICT (email) DO NOTHING`,
+          [lead.customer_email, lead.customer_name, lead.industry, lead.source, lead.ref]
+        )
+        archived++
+      } catch { skipped++ }
+    }
+
+    const del = await pool.query(`DELETE FROM leads WHERE created_at < $1`, [cutoff])
+    deleted = del.rowCount
+
+    console.log(`[ZHL] Leads purge: ${deleted} deleted, ${archived} emails archived, ${skipped} skipped`)
+    res.json({ success: true, deleted, archived, skipped, cutoff })
+  } catch (err) {
+    console.error('[ZHL] leads purge error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── MARKETING CONTACTS ──────────────────────────────────────────────────────
+app.get('/api/marketing-contacts', async (req, res) => {
+  try {
+    await ensureDB()
+    const r = await pool.query(
+      `SELECT id, email, customer_name, industry, source, lead_ref, archived_at
+       FROM marketing_contacts ORDER BY archived_at DESC`
+    )
+    res.json(r.rows)
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.delete('/api/marketing-contacts/:id', async (req, res) => {
+  try {
+    await ensureDB()
+    await pool.query('DELETE FROM marketing_contacts WHERE id=$1', [req.params.id])
+    res.json({ success: true })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
 })

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getLeads, createLead, updateLead, getLeadStats, claimLead, generateEmail } from '../api'
+import { getLeads, createLead, updateLead, getLeadStats, claimLead, generateEmail, getMarketingContacts, deleteMarketingContact } from '../api'
+import { supabase } from '../lib/supabase'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -221,7 +222,7 @@ function TagButton({ label, active, onClick }) {
 
 // ── Lead Modal ────────────────────────────────────────────────────────────────
 
-function LeadModal({ lead, onClose, onSave }) {
+function LeadModal({ lead, onClose, onSave, onClaim }) {
   const isNew = !lead.id
 
   // parse existing next_follow_up into date + time
@@ -237,7 +238,6 @@ function LeadModal({ lead, onClose, onSave }) {
     customer_email: lead.customer_email || '',
     quoted_price:   lead.quoted_price   || '',
     industry:       lead.industry       || 'General',
-    lead_score:     lead.lead_score     || 5,
     stage:          lead.stage          || 'New Lead',
     risk_level:     lead.risk_level     || 'Medium',
     source:         lead.source         || '',
@@ -248,8 +248,18 @@ function LeadModal({ lead, onClose, onSave }) {
     follow_up_note: lead.follow_up_note || '',
     lost_reason:    lead.lost_reason    || '',
   })
+  const [claimedBy, setClaimedBy] = useState(lead.claimed_by || null)
   const [saving, setSaving]   = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [err, setErr]         = useState('')
+
+  // Auto-claim on open — silently assign this lead to whoever opens it first
+  useEffect(() => {
+    if (isNew || lead.claimed_by) return
+    claimLead(lead.id)
+      .then(r => { setClaimedBy(r.data.claimed_by); onClaim?.(lead.id, r.data.claimed_by) })
+      .catch(e => { if (e.response?.status === 409) setClaimedBy(e.response.data.claimed_by) })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── action panel ──
   const [showQuoteIn, setShowQuoteIn] = useState(false)
@@ -284,7 +294,6 @@ function LeadModal({ lead, onClose, onSave }) {
         customer_email: form.customer_email,
         quoted_price:   form.quoted_price ? parseFloat(form.quoted_price) : 0,
         industry:       form.industry,
-        lead_score:     parseInt(form.lead_score, 10) || 5,
         stage:          form.stage,
         risk_level:     form.risk_level,
         source:         form.source,
@@ -302,6 +311,19 @@ function LeadModal({ lead, onClose, onSave }) {
       setErr(e?.response?.data?.error || 'Save failed')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // ── delete ──
+  async function handleDelete() {
+    if (!window.confirm(`Permanently delete this lead (${lead.customer_name || lead.ref})? This cannot be undone.`)) return
+    setDeleting(true)
+    try {
+      await import('../api').then(m => m.default.delete(`/leads/${lead.id}`))
+      onSave()
+    } catch (e) {
+      setErr(e?.response?.data?.error || 'Delete failed')
+      setDeleting(false)
     }
   }
 
@@ -359,9 +381,12 @@ function LeadModal({ lead, onClose, onSave }) {
               {isNew ? 'New Lead' : (lead.customer_name || lead.ref)}
             </div>
             {!isNew && (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                {lead.ref} · received {fmtDate(lead.created_at)}
-                {lead.claimed_by && <span style={{ marginLeft: 8, color: '#15803D', fontWeight: 700 }}>✓ {lead.claimed_by.split('@')[0]}</span>}
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span>{lead.ref} · received {fmtDate(lead.created_at)}</span>
+                {claimedBy
+                  ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(21,128,61,0.10)', border: '1px solid rgba(21,128,61,0.25)', borderRadius: 20, padding: '1px 8px', color: '#15803D', fontWeight: 700, fontSize: 10 }}>● {claimedBy.split('@')[0]}</span>
+                  : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(180,83,9,0.10)', border: '1px solid rgba(180,83,9,0.25)', borderRadius: 20, padding: '1px 8px', color: '#B45309', fontWeight: 700, fontSize: 10 }}>Unclaimed</span>
+                }
               </div>
             )}
           </div>
@@ -393,12 +418,6 @@ function LeadModal({ lead, onClose, onSave }) {
               )}
               {fieldRow('Quoted Price (SGD)',
                 <input {...inp} type="number" value={form.quoted_price} onChange={e => set('quoted_price', e.target.value)} placeholder="0" />
-              )}
-              {fieldRow('Lead Score (1–10)',
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 6 }}>
-                  <input type="range" min={1} max={10} value={form.lead_score} onChange={e => set('lead_score', e.target.value)} style={{ flex: 1 }} />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--blue)', minWidth: 24 }}>{form.lead_score}</span>
-                </div>
               )}
               {fieldRow('Stage',
                 <select {...inp} value={form.stage} onChange={e => set('stage', e.target.value)}>
@@ -535,7 +554,13 @@ function LeadModal({ lead, onClose, onSave }) {
             </label>
 
             {/* Footer */}
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center' }}>
+              {!isNew && (
+                <button className="btn btn-ghost btn-sm" onClick={handleDelete} disabled={deleting}
+                  style={{ color: '#DC2626', marginRight: 'auto' }}>
+                  {deleting ? 'Deleting…' : 'Delete Lead'}
+                </button>
+              )}
               <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
               <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving…' : 'Save Lead'}
@@ -799,8 +824,6 @@ function PipelineCard({ lead, onClick }) {
         <IndustryPill industry={lead.industry || 'General'} />
       </div>
 
-      <ScoreBar score={lead.lead_score} />
-
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: lead.quoted_price ? 'var(--blue)' : 'var(--text-muted)' }}>
           {fmtPrice(lead.quoted_price)}
@@ -920,6 +943,130 @@ function ListView({ leads, onRowClick, onStatusChange }) {
   )
 }
 
+// ── Marketing Contacts View ───────────────────────────────────────────────────
+
+function ContactsView() {
+  const [contacts, setContacts] = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState('')
+  const [search, setSearch]     = useState('')
+  const [deleting, setDeleting] = useState(null)
+
+  useEffect(() => {
+    setLoading(true)
+    getMarketingContacts()
+      .then(r => setContacts(r.data))
+      .catch(() => setError('Failed to load contacts'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleDelete(id) {
+    if (!window.confirm('Remove this contact from the mailing list?')) return
+    setDeleting(id)
+    try {
+      await deleteMarketingContact(id)
+      setContacts(prev => prev.filter(c => c.id !== id))
+    } catch { alert('Failed to delete contact') }
+    finally { setDeleting(null) }
+  }
+
+  function exportCSV() {
+    const rows = [
+      ['Email', 'Name', 'Industry', 'Source', 'Lead Ref', 'Archived Date'],
+      ...filtered.map(c => [
+        c.email, c.customer_name, c.industry, c.source, c.lead_ref,
+        c.archived_at ? new Date(c.archived_at).toLocaleDateString('en-SG') : '',
+      ])
+    ]
+    const csv = rows.map(r => r.map(v => `"${(v||'').replace(/"/g,'""')}"`).join(',')).join('\n')
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    a.download = `ZHL_Marketing_Contacts_${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+  }
+
+  const q = search.toLowerCase()
+  const filtered = contacts.filter(c =>
+    !q
+    || (c.email         || '').toLowerCase().includes(q)
+    || (c.customer_name || '').toLowerCase().includes(q)
+    || (c.industry      || '').toLowerCase().includes(q)
+    || (c.source        || '').toLowerCase().includes(q)
+    || (c.lead_ref      || '').toLowerCase().includes(q)
+  )
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input className="form-control search-input"
+          placeholder="Search email, name, industry..."
+          value={search} onChange={e => setSearch(e.target.value)}
+          style={{ flex: '1 1 260px', maxWidth: 360 }} />
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>
+          {filtered.length} contact{filtered.length !== 1 ? 's' : ''}
+        </span>
+        <button className="btn btn-ghost btn-sm" onClick={exportCSV} disabled={filtered.length === 0}
+          style={{ marginLeft: 'auto' }}>
+          Export CSV
+        </button>
+      </div>
+
+      {loading && <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>Loading…</div>}
+      {error   && <div className="alert alert-error">{error}</div>}
+
+      {!loading && !error && filtered.length === 0 && (
+        <div className="empty-state">
+          <div className="empty-state-icon" style={{ fontSize: 36 }}>📬</div>
+          <h3>{search ? 'No contacts match your search' : 'No archived contacts yet'}</h3>
+          <p style={{ fontSize: 13, marginTop: 4 }}>
+            {search ? 'Try a different search term' : 'Emails are archived here automatically when a lead record is purged after 30 days'}
+          </p>
+        </div>
+      )}
+
+      {!loading && !error && filtered.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Industry</th>
+                <th>Source</th>
+                <th>Lead Ref</th>
+                <th>Archived</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(c => (
+                <tr key={c.id}>
+                  <td><a href={`mailto:${c.email}`} style={{ color: 'var(--blue)', textDecoration: 'none' }}>{c.email}</a></td>
+                  <td style={{ color: 'var(--text)' }}>{c.customer_name || '—'}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{c.industry || '—'}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{c.source || '—'}</td>
+                  <td style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>{c.lead_ref || '—'}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{c.archived_at ? new Date(c.archived_at).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
+                  <td>
+                    <button className="btn btn-ghost btn-xs" style={{ color: '#DC2626' }}
+                      disabled={deleting === c.id} onClick={() => handleDelete(c.id)}>
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(24,95,165,0.05)', borderRadius: 8, border: '1px solid rgba(24,95,165,0.15)', fontSize: 12, color: 'var(--text-muted)' }}>
+        Emails are automatically archived here when a lead older than 30 days is purged from the pipeline. Use "Export CSV" to download the list for rate-sharing campaigns.
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function Leads() {
@@ -931,6 +1078,10 @@ export default function Leads() {
   const [showArchived, setShowArchived] = useState(false)
   const [search, setSearch]       = useState('')
   const [modalLead, setModalLead] = useState(null)
+
+  function handleClaim(id, claimedBy) {
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, claimed_by: claimedBy } : l))
+  }
 
   async function handleStatusChange(id, stage) {
     try {
@@ -973,7 +1124,7 @@ export default function Leads() {
   }, {})
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: view === 'pipeline' ? 'none' : 1200 }}>
+    <div style={{ padding: '24px 32px', maxWidth: view === 'pipeline' ? 'none' : 1200, margin: view === 'pipeline' ? undefined : '0 auto' }}>
 
       {/* Header */}
       <div className="flex-between" style={{ marginBottom: 20 }}>
@@ -988,7 +1139,7 @@ export default function Leads() {
       </div>
 
       {/* Stats bar */}
-      {stats && (
+      {stats && view !== 'contacts' && (
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
           <StatCard label="Active Leads" value={stats.total_active || 0} sub={`${leads.length} total loaded`} />
           <StatCard label="Pipeline Value"
@@ -1002,7 +1153,7 @@ export default function Leads() {
       )}
 
       {/* Unclaimed banner */}
-      {!loading && (() => {
+      {view !== 'contacts' && !loading && (() => {
         const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000
         const unclaimed = leads.filter(l => !l.claimed_by && !l.is_archived && new Date(l.created_at).getTime() < cutoff)
         return unclaimed.length > 0 ? <AttentionBanner leads={unclaimed} onClaimed={fetchAll} /> : null
@@ -1010,28 +1161,32 @@ export default function Leads() {
 
       {/* Controls */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input className="form-control search-input"
-          placeholder="Search company, email, ref, stage..."
-          value={search} onChange={e => setSearch(e.target.value)}
-          style={{ flex: '1 1 260px', maxWidth: 360 }} />
+        {view !== 'contacts' && (
+          <input className="form-control search-input"
+            placeholder="Search company, email, ref, stage..."
+            value={search} onChange={e => setSearch(e.target.value)}
+            style={{ flex: '1 1 260px', maxWidth: 360 }} />
+        )}
         <div style={{ display: 'flex', gap: 2, background: 'var(--sub-box-bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
-          {['pipeline', 'list'].map(v => (
+          {['pipeline', 'list', 'contacts'].map(v => (
             <button key={v} onClick={() => setView(v)}
               className={view === v ? 'btn btn-primary btn-xs' : 'btn btn-ghost btn-xs'}
               style={{ textTransform: 'capitalize' }}
             >{v}</button>
           ))}
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
-          <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />
-          Show archived
-        </label>
+        {view !== 'contacts' && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />
+            Show archived
+          </label>
+        )}
       </div>
 
-      {loading && <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>Loading…</div>}
-      {error   && <div className="alert alert-error">{error}</div>}
+      {view !== 'contacts' && loading && <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>Loading…</div>}
+      {view !== 'contacts' && error   && <div className="alert alert-error">{error}</div>}
 
-      {!loading && !error && filtered.length === 0 && (
+      {view !== 'contacts' && !loading && !error && filtered.length === 0 && (
         <div className="empty-state">
           <div className="empty-state-icon" style={{ fontSize: 36 }}>📋</div>
           <h3>{search ? 'No leads match your search' : 'No leads yet'}</h3>
@@ -1041,7 +1196,7 @@ export default function Leads() {
         </div>
       )}
 
-      {!loading && !error && filtered.length > 0 && view === 'pipeline' && (
+      {view !== 'contacts' && !loading && !error && filtered.length > 0 && view === 'pipeline' && (
         <div style={{ overflowX: 'auto', paddingBottom: 16 }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', minWidth: 'max-content' }}>
             {PIPELINE_STAGES.map(stage => (
@@ -1051,12 +1206,14 @@ export default function Leads() {
         </div>
       )}
 
-      {!loading && !error && filtered.length > 0 && view === 'list' && (
+      {view !== 'contacts' && !loading && !error && filtered.length > 0 && view === 'list' && (
         <ListView leads={filtered} onRowClick={setModalLead} onStatusChange={handleStatusChange} />
       )}
 
+      {view === 'contacts' && <ContactsView />}
+
       {modalLead !== null && (
-        <LeadModal lead={modalLead} onClose={() => setModalLead(null)} onSave={() => { setModalLead(null); fetchAll() }} />
+        <LeadModal lead={modalLead} onClose={() => setModalLead(null)} onSave={() => { setModalLead(null); fetchAll() }} onClaim={handleClaim} />
       )}
     </div>
   )
