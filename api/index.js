@@ -20,7 +20,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 // ─── AUTH MIDDLEWARE ─────────────────────────────────────────────────────────
-const SUPABASE_URL = process.env.SUPABASE_URL
+const SUPABASE_URL = 'https://wwaupgxlzardsrxikuvj.supabase.co'
 
 async function requireAuth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '')
@@ -237,10 +237,7 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
 }
 
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────────────
-app.use(cors({
-  origin: [process.env.ALLOWED_ORIGIN, 'http://localhost:5173', 'http://localhost:3000'].filter(Boolean),
-  credentials: true,
-}));
+app.use(cors());
 app.use(express.json());
 
 // Vercel rewrites /api/foo → /api/index?path=foo — restore the original path
