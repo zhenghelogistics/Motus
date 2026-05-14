@@ -91,6 +91,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS amount_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS total_payable REAL`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inventory_movement_id TEXT DEFAULT NULL`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inventory_movement_no TEXT DEFAULT NULL`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_follow_up TIMESTAMP`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS claimed_by TEXT`);
@@ -395,7 +396,7 @@ app.put('/api/jobs/:id', async (req, res) => {
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','agent','mode','status','customer_ref',
       'deadline_date','commodity','notes','gp_override',
-      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','zhl_invoice_no','created_by','inventory_movement_id'];
+      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','zhl_invoice_no','created_by','inventory_movement_id','inventory_movement_no'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) {
@@ -445,20 +446,22 @@ app.post('/api/jobs/:id/inventory-link', async (req, res) => {
     const job = (await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.id])).rows[0]
     if (!job) return res.status(404).json({ error: 'Job not found' })
     if (job.mode !== 'Warehousing') return res.status(400).json({ error: 'Job is not a Warehousing job' })
-    if (job.inventory_movement_id) return res.json({ inventory_movement_id: job.inventory_movement_id, already_linked: true })
+    if (job.inventory_movement_id) return res.json({ inventory_movement_id: job.inventory_movement_id, inventory_movement_no: job.inventory_movement_no, already_linked: true })
 
     const invUrl = process.env.INVENTORY_SUPABASE_URL
     const invKey = process.env.INVENTORY_SUPABASE_SERVICE_KEY
     if (!invUrl || !invKey) return res.status(500).json({ error: 'Inventory Supabase credentials not configured' })
 
     const payload = {
-      nexus_job_no:  job.job_number,
-      nexus_job_id:  String(job.id),
-      company_name:  job.customer_name || job.shipper || job.consignee || '',
-      salesperson:   job.salesperson   || job.created_by || '',
-      date_in:       job.date_out      || new Date().toISOString().slice(0, 10),
-      type:          'Inbound',
-      status:        'New',
+      type:         'Inbound',
+      company_name: job.customer_name || job.shipper || job.consignee || '',
+      contact_name: job.customer_contact_name || '',
+      phone:        job.customer_contact_number || '',
+      email:        job.customer_email || '',
+      customer_ref: job.customer_ref || '',
+      date_in:      job.date_out || new Date().toISOString().slice(0, 10),
+      nexus_job_no: job.job_number,
+      nexus_job_id: String(job.id),
     }
 
     const invRes = await fetch(`${invUrl}/rest/v1/movements`, {
@@ -480,10 +483,14 @@ app.post('/api/jobs/:id/inventory-link', async (req, res) => {
 
     const [movement] = await invRes.json()
     const movementId = String(movement.id)
+    const movementNo = movement.movement_no ? String(movement.movement_no) : movementId
 
-    await pool.query('UPDATE jobs SET inventory_movement_id=$1 WHERE id=$2', [movementId, job.id])
-    console.log(`[ZHL] Linked ${job.job_number} → Inventory movement ${movementId}`)
-    res.json({ inventory_movement_id: movementId })
+    await pool.query(
+      'UPDATE jobs SET inventory_movement_id=$1, inventory_movement_no=$2 WHERE id=$3',
+      [movementId, movementNo, job.id]
+    )
+    console.log(`[ZHL] Linked ${job.job_number} → Inventory movement ${movementNo} (id: ${movementId})`)
+    res.json({ inventory_movement_id: movementId, inventory_movement_no: movementNo })
   } catch (err) {
     console.error(`[ZHL] POST /api/jobs/:id/inventory-link`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })

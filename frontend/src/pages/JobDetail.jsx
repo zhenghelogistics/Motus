@@ -108,7 +108,7 @@ export default function JobDetail() {
       if (r.data.mode === 'Warehousing' && !r.data.inventory_movement_id) {
         try {
           const linked = await linkInventoryMovement(id)
-          setJob(j => ({ ...j, inventory_movement_id: linked.data.inventory_movement_id }))
+          setJob(j => ({ ...j, inventory_movement_id: linked.data.inventory_movement_id, inventory_movement_no: linked.data.inventory_movement_no }))
         } catch (e) {
           const msg = e?.response?.data?.error || e.message
           console.error('[Nexus] Inventory link failed:', msg)
@@ -1689,7 +1689,7 @@ function InfoEdit({ form, setField, staffList = [] }) {
           <label className="form-label">Inventory Movement</label>
           {form.inventory_movement_id
             ? <div style={{ padding: '8px 12px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, fontSize: 13, fontWeight: 700, color: '#1D4ED8' }}>
-                #{form.inventory_movement_id} — linked
+                {form.inventory_movement_no ? `${form.inventory_movement_no}` : `#${form.inventory_movement_id}`} — linked
               </div>
             : <div style={{ padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--border-solid)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
                 Not linked yet — save the job to create the Inventory movement
