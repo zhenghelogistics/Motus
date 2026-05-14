@@ -173,6 +173,7 @@ export default function JobDetail() {
   async function handleSyncLines() {
     setSyncingLines(true)
     try {
+      await updateJob(id, { packing_list_items: infoForm.packing_list_items })
       const r = await syncStockLines(id)
       alert(`${r.data.synced} stock line(s) synced to Hive.`)
     } catch (e) {
