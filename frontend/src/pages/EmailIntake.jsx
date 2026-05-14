@@ -99,6 +99,11 @@ export default function EmailIntake() {
       setParseError('Please upload a PDF file for DO / Packing List parsing.')
       return
     }
+    if (file.size > 4 * 1024 * 1024) {
+      setParseError('PDF is too large (max 4 MB). Please compress it first using ilovepdf.com or Smallpdf, then try again.')
+      if (doFileRef.current) doFileRef.current.value = ''
+      return
+    }
     setDoParsing(true)
     setParseError('')
     try {

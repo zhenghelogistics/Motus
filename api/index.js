@@ -754,21 +754,7 @@ Email/Job Order:\n${text.substring(0, 8000)}` }]
 // ─── PARSE DELIVERY ORDER / PACKING LIST ────────────────────────────────────
 app.post('/api/parse-do', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
-  try {
-    const base64 = req.file.buffer.toString('base64')
-    const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: base64 }
-          },
-          {
-            type: 'text',
-            text: `Extract job details from this delivery order or packing list. Return valid JSON only with these fields (null for missing):
+  const DO_PROMPT = `Extract job details from this delivery order or packing list. Return valid JSON only with these fields (null for missing):
 {
   "shipper": "supplier/seller company name",
   "consignee": "buyer/recipient company name",
@@ -790,9 +776,29 @@ app.post('/api/parse-do', upload.single('file'), async (req, res) => {
   "mode": "Warehousing"
 }
 Return only the JSON object.`
-          }
-        ]
-      }]
+  try {
+    // Try text extraction first (smaller Claude payload, works for text-based PDFs)
+    let msgContent
+    try {
+      const pdfParse = require('pdf-parse')
+      const { text } = await pdfParse(req.file.buffer)
+      if (text && text.trim().length > 100) {
+        msgContent = [{ type: 'text', text: `${DO_PROMPT}\n\nDocument text:\n${text.substring(0, 8000)}` }]
+      }
+    } catch (_) {}
+
+    // Fall back to base64 vision for scanned/image PDFs
+    if (!msgContent) {
+      msgContent = [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: req.file.buffer.toString('base64') } },
+        { type: 'text', text: DO_PROMPT }
+      ]
+    }
+
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: msgContent }]
     })
     const content = msg.content[0].text
     const match = content.match(/\{[\s\S]*\}/)
