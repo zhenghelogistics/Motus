@@ -4,7 +4,7 @@ import { parseEmail, parseEmailFile, createJob, getJobs, getCustomers } from '..
 import { useAuth } from '../lib/AuthContext'
 import DimensionBoxes from '../components/DimensionBoxes'
 
-const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
+const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold']
 
 const emptyJob = {
