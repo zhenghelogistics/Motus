@@ -448,7 +448,7 @@ app.post('/api/jobs/:id/inventory-link', async (req, res) => {
     if (job.inventory_movement_id) return res.json({ inventory_movement_id: job.inventory_movement_id, already_linked: true })
 
     const invUrl = process.env.INVENTORY_SUPABASE_URL
-    const invKey = process.env.INVENTORY_SUPABASE_ANON_KEY
+    const invKey = process.env.INVENTORY_SUPABASE_SERVICE_KEY
     if (!invUrl || !invKey) return res.status(500).json({ error: 'Inventory Supabase credentials not configured' })
 
     const payload = {
