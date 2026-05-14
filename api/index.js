@@ -405,6 +405,9 @@ app.put('/api/jobs/:id', async (req, res) => {
       const r = await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.id]);
       return res.json(await enrichJob(r.rows[0]));
     }
+    if (updates.packing_list_items !== undefined) {
+      updates.packing_list_items = JSON.stringify(updates.packing_list_items)
+    }
     const cols = Object.keys(updates).map((k, i) => `${k}=$${i+1}`).join(', ');
     const vals = [...Object.values(updates), req.params.id];
     await pool.query(`UPDATE jobs SET ${cols} WHERE id=$${vals.length}`, vals);
