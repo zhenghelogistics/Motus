@@ -753,7 +753,6 @@ Email/Job Order:\n${text.substring(0, 8000)}` }]
 
 // ─── PARSE DELIVERY ORDER / PACKING LIST ────────────────────────────────────
 app.post('/api/parse-do', upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
   const DO_PROMPT = `Extract job details from this delivery order or packing list. Return valid JSON only with these fields (null for missing):
 {
   "shipper": "supplier/seller company name",
@@ -777,22 +776,28 @@ app.post('/api/parse-do', upload.single('file'), async (req, res) => {
 }
 Return only the JSON object.`
   try {
-    // Try text extraction first (smaller Claude payload, works for text-based PDFs)
     let msgContent
-    try {
-      const pdfParse = require('pdf-parse')
-      const { text } = await pdfParse(req.file.buffer)
-      if (text && text.trim().length > 100) {
-        msgContent = [{ type: 'text', text: `${DO_PROMPT}\n\nDocument text:\n${text.substring(0, 8000)}` }]
-      }
-    } catch (_) {}
 
-    // Fall back to base64 vision for scanned/image PDFs
-    if (!msgContent) {
-      msgContent = [
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: req.file.buffer.toString('base64') } },
-        { type: 'text', text: DO_PROMPT }
-      ]
+    if (req.body.text) {
+      // Text extracted client-side — tiny payload, no size issues
+      msgContent = [{ type: 'text', text: `${DO_PROMPT}\n\nDocument text:\n${req.body.text.substring(0, 8000)}` }]
+    } else if (req.file) {
+      // File upload fallback (scanned PDFs, must be <4.5MB due to Vercel limit)
+      let extracted = ''
+      try {
+        const pdfParse = require('pdf-parse')
+        const { text } = await pdfParse(req.file.buffer)
+        if (text && text.trim().length > 100) extracted = text
+      } catch (_) {}
+
+      msgContent = extracted
+        ? [{ type: 'text', text: `${DO_PROMPT}\n\nDocument text:\n${extracted.substring(0, 8000)}` }]
+        : [
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: req.file.buffer.toString('base64') } },
+            { type: 'text', text: DO_PROMPT }
+          ]
+    } else {
+      return res.status(400).json({ error: 'No file or text provided' })
     }
 
     const msg = await anthropic.messages.create({

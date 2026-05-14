@@ -48,7 +48,8 @@ export const parseInvoice = (file) => {
   return api.post('/parse-invoice', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
 }
 
-export const parseDO = (file) => {
+export const parseDO = (file, text) => {
+  if (text) return api.post('/parse-do', { text })
   const fd = new FormData()
   fd.append('file', file)
   return api.post('/parse-do', fd, { headers: { 'Content-Type': 'multipart/form-data' } })

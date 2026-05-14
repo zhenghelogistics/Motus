@@ -93,21 +93,47 @@ export default function EmailIntake() {
     }
   }
 
+  async function extractPDFText(file) {
+    const pdfjsLib = await import('pdfjs-dist')
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).href
+    const arrayBuffer = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    let text = ''
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const content = await page.getTextContent()
+      text += content.items.map(item => item.str).join(' ') + '\n'
+    }
+    return text.trim()
+  }
+
   async function handleDOParse(file) {
     if (!file) return
     if (!file.name.toLowerCase().endsWith('.pdf')) {
       setParseError('Please upload a PDF file for DO / Packing List parsing.')
       return
     }
-    if (file.size > 4 * 1024 * 1024) {
-      setParseError('PDF is too large (max 4 MB). Please compress it first using ilovepdf.com or Smallpdf, then try again.')
-      if (doFileRef.current) doFileRef.current.value = ''
-      return
-    }
     setDoParsing(true)
     setParseError('')
     try {
-      const { data } = await parseDO(file)
+      // Extract text client-side first — sends a few KB instead of the full PDF
+      let text = ''
+      try { text = await extractPDFText(file) } catch (_) {}
+
+      let data
+      if (text.length > 100) {
+        // Text PDF: send extracted text (tiny payload, no size limit issue)
+        const { data: d } = await parseDO(null, text)
+        data = d
+      } else {
+        // Scanned/image PDF: fall back to uploading the file binary
+        if (file.size > 4 * 1024 * 1024) {
+          setParseError('This appears to be a scanned PDF and is too large to upload (max 4 MB). Please compress it at ilovepdf.com first.')
+          return
+        }
+        const { data: d } = await parseDO(file, null)
+        data = d
+      }
       applyParsedData(data)
     } catch (err) {
       setParseError(err.response?.data?.error || 'DO parsing failed. Please try again.')
