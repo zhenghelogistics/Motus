@@ -448,7 +448,18 @@ app.post('/api/jobs/:id/inventory-link', async (req, res) => {
     const job = (await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.id])).rows[0]
     if (!job) return res.status(404).json({ error: 'Job not found' })
     if (job.mode !== 'Warehousing') return res.status(400).json({ error: 'Job is not a Warehousing job' })
-    if (job.inventory_movement_id) return res.json({ inventory_movement_id: job.inventory_movement_id, inventory_movement_no: job.inventory_movement_no, already_linked: true })
+    if (job.inventory_movement_id) {
+      // Movement already exists — still push stock lines if there are any
+      const items = job.packing_list_items || []
+      if (Array.isArray(items) && items.length > 0) {
+        const invUrl = process.env.INVENTORY_SUPABASE_URL
+        const invKey = process.env.INVENTORY_SUPABASE_SERVICE_KEY
+        if (invUrl && invKey) {
+          try { await pushStockLines(invUrl, invKey, job.inventory_movement_id, job.job_number, items) } catch (_) {}
+        }
+      }
+      return res.json({ inventory_movement_id: job.inventory_movement_id, inventory_movement_no: job.inventory_movement_no, already_linked: true })
+    }
 
     const invUrl = process.env.INVENTORY_SUPABASE_URL
     const invKey = process.env.INVENTORY_SUPABASE_SERVICE_KEY
