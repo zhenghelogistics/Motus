@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { parseEmail, parseEmailFile, createJob, getJobs, getCustomers } from '../api'
+import { parseEmail, parseEmailFile, parseDO, createJob, getJobs, getCustomers } from '../api'
 import { useAuth } from '../lib/AuthContext'
 import DimensionBoxes from '../components/DimensionBoxes'
 
@@ -45,6 +45,8 @@ export default function EmailIntake() {
   const [showCustomerDrop, setShowCustomerDrop] = useState(false)
 
   const fileInputRef = useRef(null)
+  const doFileRef = useRef(null)
+  const [doParsing, setDoParsing] = useState(false)
   const navigate = useNavigate()
 
   function applyParsedData(data) {
@@ -88,6 +90,25 @@ export default function EmailIntake() {
       setParseError(err.response?.data?.error || 'File parsing failed. Please try again.')
     } finally {
       setParsing(false)
+    }
+  }
+
+  async function handleDOParse(file) {
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setParseError('Please upload a PDF file for DO / Packing List parsing.')
+      return
+    }
+    setDoParsing(true)
+    setParseError('')
+    try {
+      const { data } = await parseDO(file)
+      applyParsedData(data)
+    } catch (err) {
+      setParseError(err.response?.data?.error || 'DO parsing failed. Please try again.')
+    } finally {
+      setDoParsing(false)
+      if (doFileRef.current) doFileRef.current.value = ''
     }
   }
 
@@ -317,6 +338,21 @@ export default function EmailIntake() {
           </button>
           <button className="btn btn-ghost" onClick={handleManual}>Create Manually</button>
           <button className="btn btn-ghost" onClick={openCopyModal}>⎘ Copy from Previous Job</button>
+          <button
+            className="btn btn-ghost"
+            onClick={() => doFileRef.current?.click()}
+            disabled={doParsing}
+            style={{ borderColor: 'var(--blue)', color: 'var(--blue)' }}
+          >
+            {doParsing ? <><span className="spinner"></span> Parsing DO...</> : '📦 Parse DO / Packing List'}
+          </button>
+          <input
+            ref={doFileRef}
+            type="file"
+            accept=".pdf"
+            style={{ display: 'none' }}
+            onChange={e => handleDOParse(e.target.files[0])}
+          />
         </div>
       </div>
 

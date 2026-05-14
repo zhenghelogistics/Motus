@@ -751,6 +751,61 @@ Email/Job Order:\n${text.substring(0, 8000)}` }]
   }
 });
 
+// ─── PARSE DELIVERY ORDER / PACKING LIST ────────────────────────────────────
+app.post('/api/parse-do', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+  try {
+    const base64 = req.file.buffer.toString('base64')
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+          },
+          {
+            type: 'text',
+            text: `Extract job details from this delivery order or packing list. Return valid JSON only with these fields (null for missing):
+{
+  "shipper": "supplier/seller company name",
+  "consignee": "buyer/recipient company name",
+  "customer_name": "same as consignee",
+  "customer_contact_name": "contact person name if present",
+  "customer_contact_number": "contact phone if present",
+  "pickup_address": "origin/seller address if present",
+  "delivery_address": "full delivery address of recipient",
+  "delivery_contact_name": "delivery contact name if present",
+  "delivery_contact_number": "delivery contact number if present",
+  "packages": <total number of cartons/packages as integer>,
+  "weight": <total weight in KG as number>,
+  "cbm": <total volume in CBM or M3 as number>,
+  "dimensions": "carton measurements in format: LxWxH cm ×qty — comma-separated if multiple sizes, e.g. '59x34x38 cm ×16, 41x31x38 cm ×7'",
+  "commodity": "short description of the goods",
+  "customer_ref": "DO number or invoice number",
+  "date_out": "delivery or invoice date as YYYY-MM-DD or null",
+  "notes": "any special instructions or remarks",
+  "mode": "Warehousing"
+}
+Return only the JSON object.`
+          }
+        ]
+      }]
+    })
+    const content = msg.content[0].text
+    const match = content.match(/\{[\s\S]*\}/)
+    if (!match) return res.status(422).json({ error: 'Could not parse document' })
+    const parsed = JSON.parse(match[0])
+    parsed.mode = 'Warehousing'
+    res.json(parsed)
+  } catch (err) {
+    console.error('[ZHL] POST /api/parse-do', err.message)
+    res.status(500).json({ error: 'Document parsing failed. Please try again.' })
+  }
+})
+
 // ─── PARSE INVOICE ──────────────────────────────────────────────────────────
 app.post('/api/parse-invoice', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
