@@ -1426,7 +1426,7 @@ export default function JobDetail() {
       </div>
 
       {/* Packing List — Warehousing only */}
-      {job.mode === 'Warehousing' && (
+      {(infoForm.mode === 'Warehousing' || job.mode === 'Warehousing') && (
         <div className="card mb-4">
           <div className="section-title">
             Packing List
