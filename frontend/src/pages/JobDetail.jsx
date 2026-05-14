@@ -110,7 +110,9 @@ export default function JobDetail() {
           const linked = await linkInventoryMovement(id)
           setJob(j => ({ ...j, inventory_movement_id: linked.data.inventory_movement_id }))
         } catch (e) {
-          console.error('[Nexus] Inventory link failed:', e?.response?.data?.error || e.message)
+          const msg = e?.response?.data?.error || e.message
+          console.error('[Nexus] Inventory link failed:', msg)
+          alert(`Inventory link failed: ${msg}\n\nThe job was saved but no movement was created in Inventory.`)
         }
       }
     } finally { setSaving(false) }
