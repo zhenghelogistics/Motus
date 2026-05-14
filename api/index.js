@@ -92,6 +92,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS total_payable REAL`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inventory_movement_id TEXT DEFAULT NULL`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inventory_movement_no TEXT DEFAULT NULL`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS packing_list_items JSONB DEFAULT '[]'`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_follow_up TIMESTAMP`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS claimed_by TEXT`);
@@ -343,8 +344,8 @@ app.post('/api/jobs', async (req, res) => {
       INSERT INTO jobs (job_number, year, sequence, shipper, consignee, weight, packages,
         dimensions, cbm, pickup_address, pickup_contact_name, pickup_contact_number,
         delivery_address, delivery_contact_name, delivery_contact_number,
-        date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+        date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes, created_by, packing_list_items)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
       RETURNING *
     `, [
       job_number, year, sequence,
@@ -355,7 +356,8 @@ app.post('/api/jobs', async (req, res) => {
       f.date_out||null, f.date_delivered||null,
       f.agent||'', f.mode||'Local Delivery', f.status||'New',
       f.customer_ref||'', f.deadline_date||null, f.commodity||'', f.notes||'',
-      req.user?.email || ''
+      req.user?.email || '',
+      JSON.stringify(f.packing_list_items || [])
     ]);
     const job = result.rows[0];
     if (f.billing_lines && Array.isArray(f.billing_lines)) {
@@ -396,7 +398,7 @@ app.put('/api/jobs/:id', async (req, res) => {
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','agent','mode','status','customer_ref',
       'deadline_date','commodity','notes','gp_override',
-      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','zhl_invoice_no','created_by','inventory_movement_id','inventory_movement_no'];
+      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','zhl_invoice_no','created_by','inventory_movement_id','inventory_movement_no','packing_list_items'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) {
@@ -490,12 +492,56 @@ app.post('/api/jobs/:id/inventory-link', async (req, res) => {
       [movementId, movementNo, job.id]
     )
     console.log(`[ZHL] Linked ${job.job_number} → Inventory movement ${movementNo} (id: ${movementId})`)
+
+    // Push stock lines if packing list items exist
+    const items = job.packing_list_items || []
+    if (Array.isArray(items) && items.length > 0) {
+      await pushStockLines(invUrl, invKey, movementId, job.job_number, items)
+    }
+
     res.json({ inventory_movement_id: movementId, inventory_movement_no: movementNo })
   } catch (err) {
     console.error(`[ZHL] POST /api/jobs/:id/inventory-link`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
 })
+
+async function pushStockLines(invUrl, invKey, movementId, nexusJobNo, items) {
+  // Replace all lines for this movement
+  await fetch(`${invUrl}/rest/v1/stock_lines?movement_id=eq.${movementId}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${invKey}`, 'apikey': invKey },
+  })
+  const lines = items.map(item => ({
+    movement_id:  movementId,
+    nexus_job_no: nexusJobNo,
+    line_type:    'Inbound',
+    sku:          item.sku || null,
+    description:  item.description || '',
+    qty_actual:   item.qty_actual ? Number(item.qty_actual) : null,
+    unit:         item.unit || null,
+    num_packages: item.num_packages ? Number(item.num_packages) : null,
+    length_cm:    item.length_cm ? Number(item.length_cm) : null,
+    breadth_cm:   item.breadth_cm ? Number(item.breadth_cm) : null,
+    height_cm:    item.height_cm ? Number(item.height_cm) : null,
+  }))
+  const linesRes = await fetch(`${invUrl}/rest/v1/stock_lines`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${invKey}`,
+      'apikey': invKey,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal',
+    },
+    body: JSON.stringify(lines),
+  })
+  if (!linesRes.ok) {
+    const err = await linesRes.text()
+    console.error('[ZHL] Stock lines insert failed:', err)
+    throw new Error(`Stock lines insert failed: ${err}`)
+  }
+  console.log(`[ZHL] Pushed ${lines.length} stock line(s) for movement ${movementId}`)
+}
 
 app.put('/api/jobs/:id/inventory-void', async (req, res) => {
   try {
@@ -530,6 +576,27 @@ app.put('/api/jobs/:id/inventory-void', async (req, res) => {
   } catch (err) {
     console.error(`[ZHL] PUT /api/jobs/:id/inventory-void`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.post('/api/jobs/:id/inventory-sync-lines', async (req, res) => {
+  try {
+    await ensureDB()
+    const job = (await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.id])).rows[0]
+    if (!job) return res.status(404).json({ error: 'Job not found' })
+    if (!job.inventory_movement_id) return res.status(400).json({ error: 'No linked inventory movement' })
+    const items = job.packing_list_items || []
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'No packing list items to sync' })
+
+    const invUrl = process.env.INVENTORY_SUPABASE_URL
+    const invKey = process.env.INVENTORY_SUPABASE_SERVICE_KEY
+    if (!invUrl || !invKey) return res.status(500).json({ error: 'Inventory credentials not configured' })
+
+    await pushStockLines(invUrl, invKey, job.inventory_movement_id, job.job_number, items)
+    res.json({ ok: true, synced: items.length })
+  } catch (err) {
+    console.error(`[ZHL] POST /api/jobs/:id/inventory-sync-lines`, err.message)
+    res.status(500).json({ error: err.message || 'Sync failed. Please try again.' })
   }
 })
 
@@ -821,6 +888,56 @@ Return only the JSON object.`
   } catch (err) {
     console.error('[ZHL] POST /api/parse-do', err.message)
     res.status(500).json({ error: 'Document parsing failed. Please try again.' })
+  }
+})
+
+// ─── PARSE PACKING LIST ─────────────────────────────────────────────────────
+app.post('/api/parse-packing-list', upload.single('file'), async (req, res) => {
+  const PROMPT = `Extract all line items from this packing list. Return a JSON array only — no other text.
+Each element must have these fields (use null for missing values):
+[{
+  "sku": "item code/SKU or null",
+  "description": "product name or description",
+  "qty_actual": <total quantity as number>,
+  "unit": "pcs/cartons/boxes/sets/etc",
+  "num_packages": <number of packages/cartons as integer or null>,
+  "length_cm": <carton length in cm as number or null>,
+  "breadth_cm": <carton width/breadth in cm as number or null>,
+  "height_cm": <carton height in cm as number or null>
+}]
+If no items are found return [].`
+  try {
+    let msgContent
+    if (req.body.text) {
+      msgContent = [{ type: 'text', text: `${PROMPT}\n\nDocument text:\n${req.body.text.substring(0, 8000)}` }]
+    } else if (req.file) {
+      let extracted = ''
+      try {
+        const pdfParse = require('pdf-parse')
+        const { text } = await pdfParse(req.file.buffer)
+        if (text && text.trim().length > 50) extracted = text
+      } catch (_) {}
+      msgContent = extracted
+        ? [{ type: 'text', text: `${PROMPT}\n\nDocument text:\n${extracted.substring(0, 8000)}` }]
+        : [
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: req.file.buffer.toString('base64') } },
+            { type: 'text', text: PROMPT }
+          ]
+    } else {
+      return res.status(400).json({ error: 'No file or text provided' })
+    }
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: msgContent }]
+    })
+    const content = msg.content[0].text
+    const match = content.match(/\[[\s\S]*\]/)
+    if (!match) return res.status(422).json({ error: 'Could not parse packing list' })
+    res.json(JSON.parse(match[0]))
+  } catch (err) {
+    console.error('[ZHL] POST /api/parse-packing-list', err.message)
+    res.status(500).json({ error: 'Packing list parsing failed. Please try again.' })
   }
 })
 

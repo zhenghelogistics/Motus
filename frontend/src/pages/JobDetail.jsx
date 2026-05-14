@@ -7,7 +7,7 @@ import {
   getJob, updateJob, deleteJob,
   addCostLine, updateCostLine, deleteCostLine,
   addBillingLine, updateBillingLine, deleteBillingLine,
-  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates, linkInventoryMovement, voidInventoryMovement
+  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates, linkInventoryMovement, voidInventoryMovement, parsePackingList, syncStockLines
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
 
@@ -60,7 +60,10 @@ export default function JobDetail() {
   const [showPdfCcyMenu, setShowPdfCcyMenu] = useState(false)
   const [createdByEdit, setCreatedByEdit] = useState(false)
   const [createdByVal, setCreatedByVal] = useState('')
+  const [plParsing, setPlParsing] = useState(false)
+  const [syncingLines, setSyncingLines] = useState(false)
   const invoiceRef = useRef()
+  const plFileRef = useRef()
   const logoRef = useRef(null)
   const logoBlueRef = useRef(null)
 
@@ -119,6 +122,63 @@ export default function JobDetail() {
   }
 
   function setInfo(k, v) { setInfoForm(f => ({ ...f, [k]: v })) }
+
+  // ── Packing list ─────────────────────────────────────────────────────────
+  async function extractPDFTextPL(file) {
+    const pdfjsLib = await import('pdfjs-dist')
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).href
+    const arrayBuffer = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    let text = ''
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const content = await page.getTextContent()
+      text += content.items.map(item => item.str).join(' ') + '\n'
+    }
+    return text.trim()
+  }
+
+  async function handlePLParse(file) {
+    if (!file) return
+    setPlParsing(true)
+    try {
+      let text = ''
+      try { text = await extractPDFTextPL(file) } catch (_) {}
+      const { data } = text.length > 50
+        ? await parsePackingList(null, text)
+        : await parsePackingList(file, null)
+      setInfo('packing_list_items', data)
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Packing list parsing failed.')
+    } finally {
+      setPlParsing(false)
+      if (plFileRef.current) plFileRef.current.value = ''
+    }
+  }
+
+  function updatePLItem(i, key, val) {
+    const items = [...(infoForm.packing_list_items || [])]
+    items[i] = { ...items[i], [key]: val }
+    setInfo('packing_list_items', items)
+  }
+
+  function removePLItem(i) {
+    setInfo('packing_list_items', (infoForm.packing_list_items || []).filter((_, idx) => idx !== i))
+  }
+
+  function addPLRow() {
+    setInfo('packing_list_items', [...(infoForm.packing_list_items || []), { sku: '', description: '', qty_actual: '', unit: 'pcs', num_packages: '', length_cm: '', breadth_cm: '', height_cm: '' }])
+  }
+
+  async function handleSyncLines() {
+    setSyncingLines(true)
+    try {
+      const r = await syncStockLines(id)
+      alert(`${r.data.synced} stock line(s) synced to Hive.`)
+    } catch (e) {
+      alert(`Sync failed: ${e?.response?.data?.error || e.message}`)
+    } finally { setSyncingLines(false) }
+  }
 
   // ── Status quick-change ───────────────────────────────────────────────────
   async function changeStatus(status) {
@@ -1364,6 +1424,77 @@ export default function JobDetail() {
         <div className="section-title">Job Information</div>
         <InfoEdit form={infoForm} setField={setInfo} staffList={staffList} />
       </div>
+
+      {/* Packing List — Warehousing only */}
+      {job.mode === 'Warehousing' && (
+        <div className="card mb-4">
+          <div className="section-title">
+            Packing List
+            <div className="flex gap-2">
+              <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                {plParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : '⬆ Parse PDF'}
+                <input ref={plFileRef} type="file" accept=".pdf" style={{ display: 'none' }}
+                  onChange={e => handlePLParse(e.target.files[0])} />
+              </label>
+              {job.inventory_movement_id && (
+                <button className="btn btn-outline btn-sm" onClick={handleSyncLines} disabled={syncingLines || !(infoForm.packing_list_items?.length)}>
+                  {syncingLines ? <><span className="spinner spinner-dark"></span> Syncing...</> : '↑ Sync to Hive'}
+                </button>
+              )}
+              <button className="btn btn-outline btn-sm" onClick={addPLRow}>+ Add Row</button>
+            </div>
+          </div>
+          {!(infoForm.packing_list_items?.length) ? (
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 0' }}>
+              No items yet — upload a packing list PDF or add rows manually.
+            </p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-solid)', color: 'var(--text-muted)', textAlign: 'left' }}>
+                    {['SKU','Description','Qty','Unit','Pkgs','L cm','B cm','H cm',''].map(h => (
+                      <th key={h} style={{ padding: '4px 6px', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(infoForm.packing_list_items || []).map((item, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border-solid)' }}>
+                      {[
+                        ['sku', 80, false],
+                        ['description', 160, false],
+                        ['qty_actual', 60, true],
+                        ['unit', 65, false],
+                        ['num_packages', 55, true],
+                        ['length_cm', 55, true],
+                        ['breadth_cm', 55, true],
+                        ['height_cm', 55, true],
+                      ].map(([key, w, isNum]) => (
+                        <td key={key} style={{ padding: '3px 4px' }}>
+                          <input
+                            className="form-control"
+                            type={isNum ? 'number' : 'text'}
+                            value={item[key] ?? ''}
+                            onChange={e => updatePLItem(i, key, isNum ? e.target.value : e.target.value)}
+                            style={{ padding: '2px 6px', fontSize: 12, width: w, textAlign: isNum ? 'right' : 'left' }}
+                          />
+                        </td>
+                      ))}
+                      <td style={{ padding: '3px 4px' }}>
+                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removePLItem(i)}>✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+            {(infoForm.packing_list_items || []).length} item(s) — changes saved with Job Info
+          </div>
+        </div>
+      )}
 
       {/* Cost Lines */}
       <div className="card mb-4">

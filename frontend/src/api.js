@@ -77,6 +77,14 @@ export const unlockFxRate = (currency) => api.put(`/fx-rates/${currency}/unlock`
 
 export const linkInventoryMovement = (jobId) => api.post(`/jobs/${jobId}/inventory-link`)
 export const voidInventoryMovement = (jobId) => api.put(`/jobs/${jobId}/inventory-void`)
+export const syncStockLines = (jobId) => api.post(`/jobs/${jobId}/inventory-sync-lines`)
+
+export const parsePackingList = (file, text) => {
+  if (text) return api.post('/parse-packing-list', { text })
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.post('/parse-packing-list', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
 
 export const getMarketingContacts = () => api.get('/marketing-contacts')
 export const deleteMarketingContact = (id) => api.delete(`/marketing-contacts/${id}`)
