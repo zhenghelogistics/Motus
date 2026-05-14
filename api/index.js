@@ -490,6 +490,42 @@ app.post('/api/jobs/:id/inventory-link', async (req, res) => {
   }
 })
 
+app.put('/api/jobs/:id/inventory-void', async (req, res) => {
+  try {
+    await ensureDB()
+    const job = (await pool.query('SELECT inventory_movement_id FROM jobs WHERE id=$1', [req.params.id])).rows[0]
+    if (!job) return res.status(404).json({ error: 'Job not found' })
+    if (!job.inventory_movement_id) return res.status(400).json({ error: 'No linked inventory movement' })
+
+    const invUrl = process.env.INVENTORY_SUPABASE_URL
+    const invKey = process.env.INVENTORY_SUPABASE_SERVICE_KEY
+    if (!invUrl || !invKey) return res.status(500).json({ error: 'Inventory Supabase credentials not configured' })
+
+    const invRes = await fetch(`${invUrl}/rest/v1/movements?id=eq.${job.inventory_movement_id}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${invKey}`,
+        'apikey': invKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify({ status: 'Voided' }),
+    })
+
+    if (!invRes.ok) {
+      const err = await invRes.text()
+      console.error('[ZHL] Inventory void failed:', err)
+      return res.status(502).json({ error: `Inventory void failed: ${err}` })
+    }
+
+    console.log(`[ZHL] Voided Inventory movement ${job.inventory_movement_id}`)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error(`[ZHL] PUT /api/jobs/:id/inventory-void`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
 app.put('/api/jobs/:id/costs/:lid', async (req, res) => {
   try {
     const { vendor='', amount=0, invoice_no='', invoice_date=null, service='', remarks='', currency='SGD', amount_local=null, total_payable=null } = req.body;

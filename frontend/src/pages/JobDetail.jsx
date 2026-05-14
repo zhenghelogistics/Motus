@@ -7,7 +7,7 @@ import {
   getJob, updateJob, deleteJob,
   addCostLine, updateCostLine, deleteCostLine,
   addBillingLine, updateBillingLine, deleteBillingLine,
-  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates, linkInventoryMovement
+  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates, linkInventoryMovement, voidInventoryMovement
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
 
@@ -48,6 +48,7 @@ export default function JobDetail() {
   const [sendToAccountsModal, setSendToAccountsModal] = useState(false)
   const [voidModal, setVoidModal] = useState(false)
   const [voidReason, setVoidReason] = useState('')
+  const [voidLinkedInventory, setVoidLinkedInventory] = useState(true)
   const [voiding, setVoiding] = useState(false)
   const [gpEditing, setGpEditing] = useState(false)
   const [gpInput, setGpInput] = useState('')
@@ -240,6 +241,11 @@ export default function JobDetail() {
     try {
       const r = await updateJob(id, { status: 'Voided', void_reason: voidReason.trim() })
       setJob(j => ({ ...j, status: 'Voided', void_reason: r.data.void_reason }))
+      if (job.inventory_movement_id && voidLinkedInventory) {
+        try { await voidInventoryMovement(id) } catch (e) {
+          console.error('[Nexus] Inventory void failed:', e?.response?.data?.error || e.message)
+        }
+      }
       setVoidModal(false)
       setVoidReason('')
     } finally { setVoiding(false) }
@@ -1253,6 +1259,19 @@ export default function JobDetail() {
                 The job number will be <strong>permanently reserved</strong> and cannot be reused or reassigned.
                 The job record is kept for audit purposes.
               </p>
+              {job.inventory_movement_id && (
+                <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+                  <div style={{ fontWeight: 600, color: '#92400E', marginBottom: 6 }}>Linked Inventory movement #{job.inventory_movement_id}</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#78350F' }}>
+                    <input
+                      type="checkbox"
+                      checked={voidLinkedInventory}
+                      onChange={e => setVoidLinkedInventory(e.target.checked)}
+                    />
+                    Also void this movement in Inventory
+                  </label>
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">Reason for voiding <span style={{ color: 'var(--red)' }}>*</span></label>
                 <textarea
@@ -1332,7 +1351,7 @@ export default function JobDetail() {
             {saving ? <><span className="spinner"></span> Saving...</> : '✓ Save Changes'}
           </button>
           {job.status !== 'Voided'
-            ? <button className="btn btn-danger btn-sm" onClick={() => { setVoidReason(''); setVoidModal(true) }}>Void Job</button>
+            ? <button className="btn btn-danger btn-sm" onClick={() => { setVoidReason(''); setVoidLinkedInventory(true); setVoidModal(true) }}>Void Job</button>
             : <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', padding: '0 4px' }}>Voided</span>
           }
         </div>

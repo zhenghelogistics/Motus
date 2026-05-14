@@ -69,6 +69,7 @@ export const generateEmail = (id, data) => api.post(`/leads/${id}/generate-email
 export const unlockFxRate = (currency) => api.put(`/fx-rates/${currency}/unlock`)
 
 export const linkInventoryMovement = (jobId) => api.post(`/jobs/${jobId}/inventory-link`)
+export const voidInventoryMovement = (jobId) => api.put(`/jobs/${jobId}/inventory-void`)
 
 export const getMarketingContacts = () => api.get('/marketing-contacts')
 export const deleteMarketingContact = (id) => api.delete(`/marketing-contacts/${id}`)
