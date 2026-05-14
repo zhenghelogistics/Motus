@@ -7,11 +7,11 @@ import {
   getJob, updateJob, deleteJob,
   addCostLine, updateCostLine, deleteCostLine,
   addBillingLine, updateBillingLine, deleteBillingLine,
-  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates
+  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates, linkInventoryMovement
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
 
-const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
+const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
 const CURRENCIES = ['SGD', 'USD', 'IDR', 'EUR']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 const DOC_TYPES = ['CI', 'PL', 'DO', 'Invoice', 'Other']
@@ -103,6 +103,15 @@ export default function JobDetail() {
     try {
       const r = await updateJob(id, infoForm)
       setJob(j => ({ ...j, ...r.data }))
+      // Auto-link to Inventory if this is a new Warehousing job
+      if (r.data.mode === 'Warehousing' && !r.data.inventory_movement_id) {
+        try {
+          const linked = await linkInventoryMovement(id)
+          setJob(j => ({ ...j, inventory_movement_id: linked.data.inventory_movement_id }))
+        } catch (e) {
+          console.error('[Nexus] Inventory link failed:', e?.response?.data?.error || e.message)
+        }
+      }
     } finally { setSaving(false) }
   }
 
@@ -1653,6 +1662,20 @@ function InfoEdit({ form, setField, staffList = [] }) {
         <label className="form-label">Notes</label>
         <textarea className="form-control" rows={2} value={form.notes||''} onChange={e => setField('notes',e.target.value)} />
       </div>
+
+      {form.mode === 'Warehousing' && (
+        <div className="form-group" style={{ marginTop: 10 }}>
+          <label className="form-label">Inventory Movement</label>
+          {form.inventory_movement_id
+            ? <div style={{ padding: '8px 12px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, fontSize: 13, fontWeight: 700, color: '#1D4ED8' }}>
+                #{form.inventory_movement_id} — linked
+              </div>
+            : <div style={{ padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--border-solid)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                Not linked yet — save the job to create the Inventory movement
+              </div>
+          }
+        </div>
+      )}
     </div>
   )
 }

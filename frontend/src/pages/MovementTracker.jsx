@@ -5,7 +5,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { getJobs } from '../api'
 
-const MODES = ['', 'Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL']
+const MODES = ['', 'Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
 const STATUSES = ['', 'New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -433,6 +433,7 @@ function ModeTag({ mode }) {
     'Sea LCL': { bg: '#BFDBFE', color: '#1E40AF' },
     'Local Delivery': { bg: '#D1FAE5', color: '#065F46' },
     'Local Clearance & Delivery': { bg: '#D1FAE5', color: '#065F46' },
+    'Warehousing': { bg: '#E0F2FE', color: '#0369A1' },
   }
   const style = colors[mode] || { bg: '#F1F4F7', color: '#6B7E93' }
   return (

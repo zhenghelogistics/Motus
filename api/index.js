@@ -90,6 +90,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS amount_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS total_payable REAL`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inventory_movement_id TEXT DEFAULT NULL`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_follow_up TIMESTAMP`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS claimed_by TEXT`);
@@ -394,7 +395,7 @@ app.put('/api/jobs/:id', async (req, res) => {
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','agent','mode','status','customer_ref',
       'deadline_date','commodity','notes','gp_override',
-      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','zhl_invoice_no','created_by'];
+      'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','zhl_invoice_no','created_by','inventory_movement_id'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) {
@@ -436,6 +437,58 @@ app.post('/api/jobs/:id/costs', async (req, res) => {
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
+
+// ─── INVENTORY INTEGRATION ───────────────────────────────────────────────────
+app.post('/api/jobs/:id/inventory-link', async (req, res) => {
+  try {
+    await ensureDB()
+    const job = (await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.id])).rows[0]
+    if (!job) return res.status(404).json({ error: 'Job not found' })
+    if (job.mode !== 'Warehousing') return res.status(400).json({ error: 'Job is not a Warehousing job' })
+    if (job.inventory_movement_id) return res.json({ inventory_movement_id: job.inventory_movement_id, already_linked: true })
+
+    const invUrl = process.env.INVENTORY_SUPABASE_URL
+    const invKey = process.env.INVENTORY_SUPABASE_SERVICE_KEY
+    if (!invUrl || !invKey) return res.status(500).json({ error: 'Inventory Supabase credentials not configured' })
+
+    const payload = {
+      nexus_job_no:  job.job_number,
+      nexus_job_id:  String(job.id),
+      company_name:  job.customer_name || job.shipper || job.consignee || '',
+      salesperson:   job.salesperson   || job.created_by || '',
+      date_in:       job.date_out      || new Date().toISOString().slice(0, 10),
+      type:          'Inbound',
+      status:        'New',
+    }
+
+    const invRes = await fetch(`${invUrl}/rest/v1/movements`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${invKey}`,
+        'apikey': invKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!invRes.ok) {
+      const err = await invRes.text()
+      console.error('[ZHL] Inventory insert failed:', err)
+      return res.status(502).json({ error: `Inventory insert failed: ${err}` })
+    }
+
+    const [movement] = await invRes.json()
+    const movementId = String(movement.id)
+
+    await pool.query('UPDATE jobs SET inventory_movement_id=$1 WHERE id=$2', [movementId, job.id])
+    console.log(`[ZHL] Linked ${job.job_number} → Inventory movement ${movementId}`)
+    res.json({ inventory_movement_id: movementId })
+  } catch (err) {
+    console.error(`[ZHL] POST /api/jobs/:id/inventory-link`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
 
 app.put('/api/jobs/:id/costs/:lid', async (req, res) => {
   try {
