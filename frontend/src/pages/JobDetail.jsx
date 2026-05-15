@@ -1988,7 +1988,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
                 )}
               </td>
               <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.qty||''} onChange={e => setDraft(l.id,'qty',parseFloat(e.target.value)||1)} /> : l.qty}</td>
-              <td><strong>{fmt(isEdit ? total : l.total)}</strong></td>
+              <td><strong style={{ fontSize: 15 }}>{fmt(isEdit ? total : l.total)}</strong></td>
               <td>
                 {isEdit
                   ? <input type="number" className="form-control form-control-sm" placeholder="Enter amount"
