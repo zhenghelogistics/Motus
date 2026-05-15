@@ -555,7 +555,7 @@ export default function JobDetail() {
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
-      columnStyles: { 0:{cellWidth:8}, 3:{halign:'right', cellWidth:26}, 4:{cellWidth:14}, 5:{halign:'right', fontStyle:'bold', cellWidth:28} },
+      columnStyles: { 0:{cellWidth:8}, 2:{cellWidth:34}, 3:{halign:'right', cellWidth:16}, 4:{halign:'right', fontStyle:'bold', cellWidth:40}, 5:{cellWidth:26} },
       margin: { left: ml, right: mr },
       tableWidth: tw,
     })
@@ -722,7 +722,7 @@ export default function JobDetail() {
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
-      columnStyles: { 0:{cellWidth:8}, 3:{halign:'right', cellWidth:26}, 4:{cellWidth:14}, 5:{halign:'right', fontStyle:'bold', cellWidth:28} },
+      columnStyles: { 0:{cellWidth:8}, 2:{cellWidth:34}, 3:{halign:'right', cellWidth:16}, 4:{halign:'right', fontStyle:'bold', cellWidth:40}, 5:{cellWidth:26} },
       margin: { left: ml, right: mr },
       tableWidth: tw,
     })
