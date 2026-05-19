@@ -107,15 +107,28 @@ export default function JobDetail() {
     try {
       const r = await updateJob(id, infoForm)
       setJob(j => ({ ...j, ...r.data }))
-      // Auto-link to Inventory if this is a new Warehousing job
-      if (r.data.mode === 'Warehousing' && !r.data.inventory_movement_id) {
+
+      let movementId = r.data.inventory_movement_id || job.inventory_movement_id
+
+      // Auto-link to Inventory if this is a new Warehousing job without a movement
+      if (r.data.mode === 'Warehousing' && !movementId) {
         try {
           const linked = await linkInventoryMovement(id)
-          setJob(j => ({ ...j, inventory_movement_id: linked.data.inventory_movement_id, inventory_movement_no: linked.data.inventory_movement_no }))
+          movementId = linked.data.inventory_movement_id
+          setJob(j => ({ ...j, inventory_movement_id: movementId, inventory_movement_no: linked.data.inventory_movement_no }))
         } catch (e) {
           const msg = e?.response?.data?.error || e.message
-          console.error('[Nexus] Inventory link failed:', msg)
+          console.error('[Motus] Inventory link failed:', msg)
           alert(`Inventory link failed: ${msg}\n\nThe job was saved but no movement was created in Inventory.`)
+        }
+      }
+
+      // Auto-sync stock lines to Hive on every save
+      if (r.data.mode === 'Warehousing' && movementId && infoForm.packing_list_items?.length) {
+        try {
+          await syncStockLines(id)
+        } catch (e) {
+          console.error('[Motus] Auto-sync stock lines failed:', e?.response?.data?.error || e.message)
         }
       }
     } finally { setSaving(false) }
@@ -1437,11 +1450,6 @@ export default function JobDetail() {
                 <input ref={plFileRef} type="file" accept=".pdf" style={{ display: 'none' }}
                   onChange={e => handlePLParse(e.target.files[0])} />
               </label>
-              {job.inventory_movement_id && (
-                <button className="btn btn-outline btn-sm" onClick={handleSyncLines} disabled={syncingLines || !(infoForm.packing_list_items?.length)}>
-                  {syncingLines ? <><span className="spinner spinner-dark"></span> Syncing...</> : '↑ Sync to Hive'}
-                </button>
-              )}
               <button className="btn btn-outline btn-sm" onClick={addPLRow}>+ Add Row</button>
             </div>
           </div>
@@ -1492,7 +1500,7 @@ export default function JobDetail() {
             </div>
           )}
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-            {(infoForm.packing_list_items || []).length} item(s) — changes saved with Job Info
+            {(infoForm.packing_list_items || []).length} item(s) — auto-synced to Hive on save
           </div>
         </div>
       )}

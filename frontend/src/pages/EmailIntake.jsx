@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { parseEmail, parseEmailFile, parseDO, createJob, getJobs, getCustomers } from '../api'
+import { parseEmail, parseEmailFile, parseDO, parsePackingList, createJob, getJobs, getCustomers } from '../api'
 import { useAuth } from '../lib/AuthContext'
 import DimensionBoxes from '../components/DimensionBoxes'
 
@@ -47,6 +47,9 @@ export default function EmailIntake() {
   const fileInputRef = useRef(null)
   const doFileRef = useRef(null)
   const [doParsing, setDoParsing] = useState(false)
+  const [doDragOver, setDoDragOver] = useState(false)
+  const [plItems, setPlItems] = useState([])
+  const [plParsing, setPlParsing] = useState(false)
   const navigate = useNavigate()
 
   function applyParsedData(data) {
@@ -94,17 +97,21 @@ export default function EmailIntake() {
   }
 
   async function extractPDFText(file) {
-    const pdfjsLib = await import('pdfjs-dist')
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).href
-    const arrayBuffer = await file.arrayBuffer()
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-    let text = ''
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i)
-      const content = await page.getTextContent()
-      text += content.items.map(item => item.str).join(' ') + '\n'
+    try {
+      const pdfjsLib = await import('pdfjs-dist')
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).href
+      const arrayBuffer = await file.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+      let text = ''
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i)
+        const content = await page.getTextContent()
+        text += content.items.map(item => item.str).join(' ') + '\n'
+      }
+      return text.trim()
+    } catch (_) {
+      return ''
     }
-    return text.trim()
   }
 
   async function handleDOParse(file) {
@@ -116,31 +123,65 @@ export default function EmailIntake() {
     setDoParsing(true)
     setParseError('')
     try {
-      // Extract text client-side first — sends a few KB instead of the full PDF
-      let text = ''
-      try { text = await extractPDFText(file) } catch (_) {}
-
-      let data
+      const text = await extractPDFText(file)
+      let jobData, items
       if (text.length > 100) {
-        // Text PDF: send extracted text (tiny payload, no size limit issue)
-        const { data: d } = await parseDO(null, text)
-        data = d
+        const [doRes, plRes] = await Promise.allSettled([
+          parseDO(null, text),
+          parsePackingList(null, text)
+        ])
+        if (doRes.status === 'fulfilled') jobData = doRes.value.data
+        if (plRes.status === 'fulfilled') items = plRes.value.data
       } else {
-        // Scanned/image PDF: fall back to uploading the file binary
         if (file.size > 4 * 1024 * 1024) {
           setParseError('This appears to be a scanned PDF and is too large to upload (max 4 MB). Please compress it at ilovepdf.com first.')
           return
         }
-        const { data: d } = await parseDO(file, null)
-        data = d
+        const [doRes, plRes] = await Promise.allSettled([
+          parseDO(file, null),
+          parsePackingList(file, null)
+        ])
+        if (doRes.status === 'fulfilled') jobData = doRes.value.data
+        if (plRes.status === 'fulfilled') items = plRes.value.data
       }
-      applyParsedData(data)
+      if (jobData) applyParsedData(jobData)
+      if (Array.isArray(items) && items.length) setPlItems(items)
     } catch (err) {
-      setParseError(err.response?.data?.error || 'DO parsing failed. Please try again.')
+      setParseError(err.response?.data?.error || 'DO / Packing List parsing failed. Please try again.')
     } finally {
       setDoParsing(false)
       if (doFileRef.current) doFileRef.current.value = ''
     }
+  }
+
+  async function handlePLParse(file) {
+    if (!file) return
+    setPlParsing(true)
+    try {
+      const text = await extractPDFText(file)
+      const { data } = text.length > 50
+        ? await parsePackingList(null, text)
+        : await parsePackingList(file, null)
+      setPlItems(Array.isArray(data) ? data : [])
+    } catch (e) {
+      setParseError(e?.response?.data?.error || 'Packing list parsing failed.')
+    } finally {
+      setPlParsing(false)
+    }
+  }
+
+  function updatePLItem(i, key, val) {
+    const items = [...plItems]
+    items[i] = { ...items[i], [key]: val }
+    setPlItems(items)
+  }
+
+  function removePLItem(i) {
+    setPlItems(plItems.filter((_, idx) => idx !== i))
+  }
+
+  function addPLRow() {
+    setPlItems([...plItems, { sku: '', description: '', qty_actual: '', unit: 'pcs', num_packages: '', length_cm: '', breadth_cm: '', height_cm: '' }])
   }
 
   function setField(k, v) {
@@ -171,6 +212,7 @@ export default function EmailIntake() {
         weight: form.weight ? parseFloat(form.weight) : null,
         packages: form.packages ? parseInt(form.packages) : null,
         cbm: form.cbm ? parseFloat(form.cbm) : null,
+        packing_list_items: plItems,
         billing_lines: (form.billing_lines || []).map(bl => ({
           ...bl,
           rate: parseFloat(bl.rate) || 0,
@@ -316,37 +358,69 @@ export default function EmailIntake() {
           Upload a PDF or .eml file, or paste email text — Claude will extract all job details automatically.
         </p>
 
-        {/* File drop zone */}
-        <div
-          onClick={() => !parsing && fileInputRef.current.click()}
-          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={e => { e.preventDefault(); setDragOver(false); handleFileParse(e.dataTransfer.files[0]) }}
-          style={{
-            border: `2px dashed ${dragOver ? 'var(--blue)' : 'var(--border)'}`,
-            borderRadius: 10,
-            padding: '24px 16px',
-            textAlign: 'center',
-            cursor: parsing ? 'not-allowed' : 'pointer',
-            background: dragOver ? 'rgba(24,95,165,0.04)' : 'var(--bg)',
-            marginBottom: 16,
-            transition: 'all 0.15s'
-          }}
-        >
-          <div style={{ fontSize: 28, marginBottom: 6 }}>📎</div>
-          <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)' }}>
-            {parsing ? 'Extracting...' : 'Drop file here or click to upload'}
+        {/* File drop zones — Email/Quote + DO/Packing List */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <div
+            onClick={() => !parsing && fileInputRef.current.click()}
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => { e.preventDefault(); setDragOver(false); handleFileParse(e.dataTransfer.files[0]) }}
+            style={{
+              border: `2px dashed ${dragOver ? 'var(--blue)' : 'var(--border)'}`,
+              borderRadius: 10,
+              padding: '20px 12px',
+              textAlign: 'center',
+              cursor: parsing ? 'not-allowed' : 'pointer',
+              background: dragOver ? 'rgba(24,95,165,0.04)' : 'var(--bg)',
+              transition: 'all 0.15s'
+            }}
+          >
+            <div style={{ fontSize: 24, marginBottom: 4 }}>📎</div>
+            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
+              {parsing ? 'Extracting...' : 'Email / Quote'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+              PDF, .eml, .msg — extracts order details
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.eml,.msg,.txt"
+              style={{ display: 'none' }}
+              onChange={e => handleFileParse(e.target.files[0])}
+            />
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-            PDF, .eml, .msg — Claude reads and extracts all fields
+
+          <div
+            onClick={() => !doParsing && doFileRef.current.click()}
+            onDragOver={e => { e.preventDefault(); setDoDragOver(true) }}
+            onDragLeave={() => setDoDragOver(false)}
+            onDrop={e => { e.preventDefault(); setDoDragOver(false); handleDOParse(e.dataTransfer.files[0]) }}
+            style={{
+              border: `2px dashed ${doDragOver ? '#0369A1' : '#93C5FD'}`,
+              borderRadius: 10,
+              padding: '20px 12px',
+              textAlign: 'center',
+              cursor: doParsing ? 'not-allowed' : 'pointer',
+              background: doDragOver ? 'rgba(3,105,161,0.04)' : 'var(--bg)',
+              transition: 'all 0.15s'
+            }}
+          >
+            <div style={{ fontSize: 24, marginBottom: 4 }}>📦</div>
+            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
+              {doParsing ? 'Parsing DO...' : 'Delivery Order / Packing List'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+              DO PDF — sets Warehousing mode + extracts items
+            </div>
+            <input
+              ref={doFileRef}
+              type="file"
+              accept=".pdf"
+              style={{ display: 'none' }}
+              onChange={e => handleDOParse(e.target.files[0])}
+            />
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.eml,.msg,.txt"
-            style={{ display: 'none' }}
-            onChange={e => handleFileParse(e.target.files[0])}
-          />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -369,21 +443,6 @@ export default function EmailIntake() {
           </button>
           <button className="btn btn-ghost" onClick={handleManual}>Create Manually</button>
           <button className="btn btn-ghost" onClick={openCopyModal}>⎘ Copy from Previous Job</button>
-          <button
-            className="btn btn-ghost"
-            onClick={() => doFileRef.current?.click()}
-            disabled={doParsing}
-            style={{ borderColor: 'var(--blue)', color: 'var(--blue)' }}
-          >
-            {doParsing ? <><span className="spinner"></span> Parsing DO...</> : '📦 Parse DO / Packing List'}
-          </button>
-          <input
-            ref={doFileRef}
-            type="file"
-            accept=".pdf"
-            style={{ display: 'none' }}
-            onChange={e => handleDOParse(e.target.files[0])}
-          />
         </div>
       </div>
 
@@ -398,7 +457,9 @@ export default function EmailIntake() {
                   Submitting as <strong>{nameFromEmail(user.email)}</strong>
                 </span>
               )}
-              <button className="btn btn-primary" onClick={handleCreate} disabled={saving}>
+              <button className="btn btn-primary" onClick={handleCreate}
+                disabled={saving || (form.mode === 'Warehousing' && !plItems.length)}
+                title={form.mode === 'Warehousing' && !plItems.length ? 'Add a packing list before creating a Warehousing job' : ''}>
                 {saving ? <><span className="spinner"></span> Saving...</> : '✓ Create Job'}
               </button>
             </div>
@@ -573,6 +634,71 @@ export default function EmailIntake() {
             <textarea className="form-control" value={form.notes} onChange={e => setField('notes', e.target.value)} rows={2} />
           </div>
 
+          {/* Packing list — required for Warehousing jobs */}
+          {form.mode === 'Warehousing' && (
+            <div style={{ background: plItems.length ? '#F0FDF4' : '#FFF7ED', border: `1px solid ${plItems.length ? '#BBF7D0' : '#FED7AA'}`, borderRadius: 8, padding: 14, marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: plItems.length ? '#166534' : '#92400E', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  {plItems.length ? `Packing List — ${plItems.length} item(s)` : 'Packing List Required'}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                    {plParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : '⬆ Upload PDF'}
+                    <input type="file" accept=".pdf" style={{ display: 'none' }}
+                      onChange={e => { handlePLParse(e.target.files[0]); e.target.value = '' }} />
+                  </label>
+                  <button className="btn btn-ghost btn-sm" onClick={addPLRow}>+ Row</button>
+                </div>
+              </div>
+              {!plItems.length ? (
+                <p style={{ fontSize: 13, color: '#78350F', margin: 0 }}>
+                  Warehousing jobs require a packing list before creation. Upload a packing list PDF or add rows manually.
+                </p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #BBF7D0', color: '#166534', textAlign: 'left' }}>
+                        {['SKU', 'Description', 'Qty', 'Unit', 'Pkgs', 'L cm', 'B cm', 'H cm', ''].map(h => (
+                          <th key={h} style={{ padding: '4px 6px', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plItems.map((item, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #DCFCE7' }}>
+                          {[
+                            ['sku', 80, false],
+                            ['description', 160, false],
+                            ['qty_actual', 60, true],
+                            ['unit', 65, false],
+                            ['num_packages', 55, true],
+                            ['length_cm', 55, true],
+                            ['breadth_cm', 55, true],
+                            ['height_cm', 55, true],
+                          ].map(([key, w, isNum]) => (
+                            <td key={key} style={{ padding: '3px 4px' }}>
+                              <input
+                                className="form-control"
+                                type={isNum ? 'number' : 'text'}
+                                value={item[key] ?? ''}
+                                onChange={e => updatePLItem(i, key, e.target.value)}
+                                style={{ padding: '2px 6px', fontSize: 12, width: w }}
+                              />
+                            </td>
+                          ))}
+                          <td style={{ padding: '3px 4px' }}>
+                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removePLItem(i)}>✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Billing lines pre-fill */}
           <div className="section-title">
             Pre-filled Billing Lines
@@ -615,8 +741,13 @@ export default function EmailIntake() {
                   Submitting as <strong>{nameFromEmail(user.email)}</strong>
                 </span>
               )}
-              <button className="btn btn-navy" onClick={handleCreate} disabled={saving}>
-                {saving ? <><span className="spinner"></span> Creating...</> : '✓ Create Job'}
+              <button className="btn btn-navy" onClick={handleCreate}
+                disabled={saving || (form.mode === 'Warehousing' && !plItems.length)}>
+                {saving
+                  ? <><span className="spinner"></span> Creating...</>
+                  : form.mode === 'Warehousing' && !plItems.length
+                    ? 'Add Packing List First'
+                    : '✓ Create Job'}
               </button>
             </div>
           </div>
