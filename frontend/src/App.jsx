@@ -357,7 +357,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount }) {
             alt="Zhenghe Logistics"
             style={{ width: '100%', height: 'auto', display: 'block', marginBottom: 4 }}
           />
-          <div className="sidebar-sub" style={{ paddingLeft: 2 }}>Nexus</div>
+          <div className="sidebar-sub" style={{ paddingLeft: 2 }}>Motus</div>
         </div>
       </div>
 
@@ -418,7 +418,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount }) {
           </button>
         </div>
 
-        <div className="sidebar-version">Nexus v1.0</div>
+        <div className="sidebar-version">Motus v1.0</div>
       </div>
     </aside>
   )
