@@ -101,6 +101,15 @@ async function initDB() {
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lost_reason TEXT`);
   await pool.query(`ALTER TABLE fx_rates ADD COLUMN IF NOT EXISTS is_manual BOOLEAN DEFAULT FALSE`);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_profiles (
+      email         TEXT PRIMARY KEY,
+      display_name  TEXT DEFAULT '',
+      designation   TEXT DEFAULT '',
+      signature_data TEXT DEFAULT '',
+      updated_at    TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS marketing_contacts (
       id            SERIAL PRIMARY KEY,
       email         TEXT NOT NULL,
@@ -1390,6 +1399,29 @@ app.get('/api/leads/stats', async (req, res) => {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
+})
+
+// ── User Profile ─────────────────────────────────────────────────────────────
+app.get('/api/profile', async (req, res) => {
+  try {
+    const email = req.user.email
+    const r = await pool.query('SELECT * FROM user_profiles WHERE email=$1', [email])
+    res.json(r.rows[0] || { email, display_name: '', designation: '', signature_data: '' })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.put('/api/profile', async (req, res) => {
+  try {
+    const email = req.user.email
+    const { display_name, designation, signature_data } = req.body
+    await pool.query(`
+      INSERT INTO user_profiles (email, display_name, designation, signature_data, updated_at)
+      VALUES ($1,$2,$3,$4,NOW())
+      ON CONFLICT (email) DO UPDATE SET
+        display_name=$2, designation=$3, signature_data=$4, updated_at=NOW()
+    `, [email, display_name || '', designation || '', signature_data || ''])
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 app.get('/api/leads/new-count', async (req, res) => {

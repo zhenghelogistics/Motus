@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
+const ProfileModal = lazy(() => import('./components/ProfileModal'))
 import Dashboard from './pages/Dashboard'
 import MovementTracker from './pages/MovementTracker'
 import JobDetail from './pages/JobDetail'
@@ -345,7 +346,7 @@ function FxReminderBanner({ updatedAt, onOpenRates }) {
   )
 }
 
-function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount, newLeadsCount }) {
+function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount, newLeadsCount }) {
   const { user, signOut } = useAuth()
 
   return (
@@ -414,11 +415,19 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount, newLeadsCount 
           Currency Converter
         </button>
 
-        {/* Logged-in user + sign out */}
+        {/* Logged-in user + account + sign out */}
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 10, marginTop: 4 }}>
           <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 6, paddingLeft: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {user?.email}
           </div>
+          <button
+            className="sidebar-link"
+            onClick={onProfileClick}
+            style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', marginBottom: 2 }}
+          >
+            <span className="sidebar-icon">⊙</span>
+            My Account
+          </button>
           <button
             className="sidebar-link"
             onClick={signOut}
@@ -483,6 +492,7 @@ function AppShell() {
   const location = useLocation()
   const [showCurrency, setShowCurrency] = useState(false)
   const [showWhatsNew, setShowWhatsNew] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const [fxUpdatedAt, setFxUpdatedAt] = useState(null)
   const [newLeadsCount, setNewLeadsCount] = useState(0)
   const seen = parseInt(localStorage.getItem(SEEN_KEY) || '0', 10)
@@ -537,6 +547,7 @@ function AppShell() {
       <Sidebar
         onCurrencyClick={() => setShowCurrency(true)}
         onWhatsNewClick={() => setShowWhatsNew(true)}
+        onProfileClick={() => setShowProfile(true)}
         unreadCount={unreadCount}
         newLeadsCount={newLeadsCount}
       />
@@ -555,6 +566,11 @@ function AppShell() {
       </main>
       {showCurrency && <CurrencyConverter onClose={() => setShowCurrency(false)} onRatesSaved={rates => { setFxUpdatedAt(new Date().toISOString()) }} />}
       {showWhatsNew && <WhatsNewModal onClose={() => setShowWhatsNew(false)} />}
+      {showProfile && (
+        <Suspense fallback={null}>
+          <ProfileModal onClose={() => setShowProfile(false)} />
+        </Suspense>
+      )}
     </div>
   )
 }

@@ -57,6 +57,9 @@ export const parseDO = (file, text) => {
 
 export const getDashboard = () => api.get('/dashboard')
 
+export const getProfile = () => api.get('/profile')
+export const updateProfile = (data) => api.put('/profile', data)
+
 export const getFxRates = () => api.get('/fx-rates')
 export const updateFxRates = (rates) => api.put('/fx-rates', { rates })
 

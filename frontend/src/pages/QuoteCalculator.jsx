@@ -1,4 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
+import { getProfile } from '../api'
 
 const PRESET_DESCRIPTIONS = [
   'Ocean Freight', 'Air Freight', 'Origin THC', 'Destination THC',
@@ -39,6 +42,20 @@ export default function QuoteCalculator() {
   const [copiedQuote, setCopiedQuote] = useState(false)
   const [refId] = useState(() => `Q-${Date.now().toString(36).toUpperCase().slice(-6)}`)
 
+  // PDF generation state
+  const [showPdfModal, setShowPdfModal] = useState(false)
+  const [recipient, setRecipient] = useState({ company: '', address: '', attn: '', phone: '', email: '', validUntil: '', subject: '' })
+  const [profile, setProfile] = useState({ display_name: '', designation: '', signature_data: '' })
+  const [generatingPdf, setGeneratingPdf] = useState(false)
+  const logoRef = useRef(null)
+
+  useEffect(() => {
+    getProfile().then(r => setProfile(r.data || {})).catch(() => {})
+    const img = new Image()
+    img.onload = () => { logoRef.current = img }
+    img.src = '/logo-cropped.png'
+  }, [])
+
   const sym = currency === 'USD' ? 'US$' : 'S$'
 
   const lineTotals = useMemo(() => lines.map(calcLine), [lines])
@@ -65,6 +82,199 @@ export default function QuoteCalculator() {
     setGstActive(false)
     setRoute('')
     setMode('SEA')
+  }
+
+  function openPdfModal() {
+    setRecipient(r => ({ ...r, subject: r.subject || (route ? `${mode} Freight Rates Quotation — ${route}` : '') }))
+    setShowPdfModal(true)
+  }
+
+  function generateQuotePDF() {
+    setGeneratingPdf(true)
+    try {
+      const navy = [4, 44, 83]
+      const blue = [24, 95, 165]
+      const doc = new jsPDF('p', 'mm', 'a4')
+      const pw = 210, ml = 18, mr = 18, tw = pw - ml - mr
+
+      // ── Header bar ──────────────────────────────────────────────────
+      doc.setFillColor(...navy)
+      doc.rect(0, 0, pw, 40, 'F')
+      if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 6, 2, 28, 36)
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+      doc.text('Zhenghe Logistics Pte Ltd', 40, 14)
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal')
+      doc.text('75 Bukit Timah Road, #05-01 Boon Siew Building, Singapore 229833', 40, 21)
+      doc.text('T: 6955 8298   F: 6980 2095   rfq@zhenghe.com.sg   Reg No. 201734570K', 40, 27)
+
+      // ── Ref + Date (top right) ───────────────────────────────────────
+      let y = 48
+      doc.setTextColor(...navy)
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold')
+      doc.text(refId, pw - mr, y, { align: 'right' })
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80)
+      doc.text(new Date().toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' }), pw - mr, y + 5, { align: 'right' })
+
+      // ── Recipient block ──────────────────────────────────────────────
+      doc.setFontSize(9); doc.setTextColor(30, 30, 30)
+      const labelX = ml, valX = ml + 22
+      const rows = []
+      if (recipient.company) rows.push(['To', recipient.company])
+      if (recipient.address) {
+        const parts = recipient.address.split('\n')
+        rows.push(['Address', parts[0]])
+        parts.slice(1).forEach(p => rows.push(['', p]))
+      }
+      if (recipient.attn)  rows.push(['Attn',  recipient.attn])
+      if (recipient.phone) rows.push(['Tel',   recipient.phone])
+      if (recipient.email) rows.push(['Email', recipient.email])
+
+      rows.forEach((row, i) => {
+        const ry = y + i * 6
+        if (row[0]) {
+          doc.setFont('helvetica', 'normal'); doc.setTextColor(90, 90, 90)
+          doc.text(row[0], labelX, ry)
+          doc.setTextColor(20, 20, 20)
+          doc.text(`:  ${row[1]}`, valX, ry)
+        } else {
+          doc.setTextColor(20, 20, 20)
+          doc.text(`   ${row[1]}`, valX, ry)
+        }
+      })
+
+      y += Math.max(rows.length * 6, 6) + 10
+
+      // ── Subject ──────────────────────────────────────────────────────
+      const subjectText = recipient.subject || (route ? `${mode} Freight Rates Quotation — ${route}` : 'Freight Rates Quotation')
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text(`Re: ${subjectText}`, ml, y, { maxWidth: tw })
+      const subjectLines = doc.splitTextToSize(`Re: ${subjectText}`, tw)
+      y += subjectLines.length * 5.5 + 6
+
+      // ── Greeting + intro ─────────────────────────────────────────────
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(40, 40, 40)
+      const greeting = recipient.attn ? `Dear ${recipient.attn},` : 'Dear Sir/Madam,'
+      doc.text(greeting, ml, y); y += 6
+      const intro = 'Thank you for giving us this opportunity to offer our services. Please find below our rates offer for your kind consideration.'
+      const introLines = doc.splitTextToSize(intro, tw)
+      doc.text(introLines, ml, y); y += introLines.length * 5 + 8
+
+      // ── Charges table ────────────────────────────────────────────────
+      // Show quoted rates (with per-line + global markup, excluding GST)
+      const globalFactor = subtotal > 0 ? preGst / subtotal : 1
+      const tableRows = lines.map((line, i) => {
+        const qty = parseFloat(line.qty)
+        const { total } = lineTotals[i]
+        const adjustedTotal = total * globalFactor
+        const unitRate = (!isNaN(qty) && qty > 0) ? adjustedTotal / qty : adjustedTotal
+        const unitStr = (!isNaN(qty) && qty > 0 && line.unit) ? ` PER ${line.unit.toUpperCase()}` : ''
+        const rateStr = `${sym}${unitRate.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${unitStr}`
+        const qtyStr = (!isNaN(qty) && qty > 0) ? `${qty}${line.unit ? ' ' + line.unit : ''}` : '—'
+        return [String(i + 1), line.description || '—', qtyStr, rateStr, recipient.validUntil || '—', '']
+      })
+
+      autoTable(doc, {
+        startY: y,
+        head: [['S/No', 'Freight Charges', 'Qty', `Rate (${currency})`, 'Validity', 'Remarks']],
+        body: tableRows,
+        headStyles: { fillColor: navy, fontSize: 8, fontStyle: 'bold', textColor: [255, 255, 255] },
+        styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak', valign: 'middle' },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 'auto' },
+          2: { cellWidth: 24, halign: 'center' },
+          3: { cellWidth: 52, fontStyle: 'bold' },
+          4: { cellWidth: 22, halign: 'center' },
+          5: { cellWidth: 38 },
+        },
+        margin: { left: ml, right: mr },
+        tableWidth: tw,
+      })
+
+      y = doc.lastAutoTable.finalY + 6
+
+      // ── Total ────────────────────────────────────────────────────────
+      if (gstActive && gstAmt > 0) {
+        doc.setFontSize(8.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80)
+        doc.text(`GST (9%): ${sym}${gstAmt.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, pw - mr, y, { align: 'right' })
+        y += 6
+      }
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      const totalLabel = gstActive ? `Total Quoted Price (incl. GST):` : `Total Quoted Price:`
+      doc.text(`${totalLabel}  ${sym}${finalPrice.toLocaleString('en-SG')}`, pw - mr, y, { align: 'right' })
+      y += 10
+
+      // ── Remarks / Standard clauses ───────────────────────────────────
+      const clauses = [
+        'Quoted rates are subject to space and equipment availability at the time of booking.',
+        'Rates exclude local charges at Port of Loading (POL) and Port of Discharge (POD), which will be billed separately.',
+        'Cargo acceptance is subject to the carrier\'s discretion and approval.',
+        'A free demurrage period of 7 days is granted at the Singapore transshipment port; extension charges apply thereafter.',
+        'Zhenghe Logistics Pte Ltd shall not be held responsible for any customs clearance issues encountered at the Port of Discharge.',
+        'All charges are subject to final rate and space confirmation at the time of booking.',
+      ]
+
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('Remarks:', ml, y); y += 6
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(55, 55, 55)
+      clauses.forEach(c => {
+        const wrapped = doc.splitTextToSize(`• ${c}`, tw - 4)
+        doc.text(wrapped, ml + 2, y)
+        y += wrapped.length * 5 + 1.5
+      })
+      y += 6
+
+      // ── Closing ──────────────────────────────────────────────────────
+      // Add new page if not enough space for closing + signature
+      if (y > 230) { doc.addPage(); y = 20 }
+
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(50, 50, 50)
+      const closing = 'We hope the above rates quoted will meet your requirements. Should you need any further assistance or clarification, please feel free to contact us.'
+      const closingLines = doc.splitTextToSize(closing, tw)
+      doc.text(closingLines, ml, y); y += closingLines.length * 5 + 6
+      doc.text('Thank you!', ml, y); y += 10
+
+      // ── Signature block ──────────────────────────────────────────────
+      doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(60, 60, 60)
+      doc.text('Yours sincerely', ml, y); y += 8
+
+      if (profile.signature_data) {
+        doc.addImage(profile.signature_data, 'PNG', ml, y, 55, 22)
+        y += 26
+      } else {
+        doc.setDrawColor(180, 180, 180); doc.setLineWidth(0.3)
+        doc.line(ml, y + 14, ml + 60, y + 14)
+        y += 18
+      }
+
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text(profile.display_name || 'Zhenghe Logistics', ml, y)
+      if (profile.designation) {
+        y += 5; doc.setFont('helvetica', 'normal'); doc.setTextColor(70, 70, 70)
+        doc.text(profile.designation, ml, y)
+      }
+      y += 5; doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('Zhenghe Logistics Pte Ltd', ml, y)
+
+      // ── Footer ───────────────────────────────────────────────────────
+      const pageCount = doc.internal.getNumberOfPages()
+      for (let p = 1; p <= pageCount; p++) {
+        doc.setPage(p); doc.setFontSize(7); doc.setTextColor(160, 160, 160)
+        doc.text('Zhenghe Logistics Pte Ltd  |  75 Bukit Timah Road, #05-01 Boon Siew Building, Singapore 229833  |  T: 6955 8298  |  rfq@zhenghe.com.sg', pw / 2, 290, { align: 'center' })
+      }
+
+      // ── File name: CompanyName_DDMmmYYYY_Quotation.pdf ───────────────
+      const companySlug = (recipient.company || 'Quote').replace(/[^a-zA-Z0-9]/g, '')
+      const dateStr = new Date().toLocaleDateString('en-SG', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '')
+      doc.save(`${companySlug}_${dateStr}_Quotation.pdf`)
+
+      setShowPdfModal(false)
+    } catch (e) {
+      alert('PDF generation failed: ' + e.message)
+    } finally {
+      setGeneratingPdf(false)
+    }
   }
 
   function copyPrice() {
@@ -421,9 +631,14 @@ export default function QuoteCalculator() {
             <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--heading)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
               Client Quote Preview
             </span>
-            <button className="btn btn-outline btn-sm" onClick={copyQuote}>
-              {copiedQuote ? '✓ Copied!' : 'Copy Quote'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-outline btn-sm" onClick={copyQuote}>
+                {copiedQuote ? '✓ Copied!' : 'Copy Quote'}
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={openPdfModal}>
+                Generate Quotation PDF
+              </button>
+            </div>
           </div>
           <pre style={{
             fontFamily: 'ui-monospace, "SF Mono", "Courier New", monospace',
@@ -440,6 +655,113 @@ export default function QuoteCalculator() {
           }}>
             {buildQuoteText()}
           </pre>
+        </div>
+      )}
+
+      {/* ── Recipient Details Modal ──────────────────────────────────────── */}
+      {showPdfModal && (
+        <div className="modal-overlay" onClick={() => setShowPdfModal(false)}>
+          <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Generate Quotation PDF</h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowPdfModal(false)}>✕</button>
+            </div>
+
+            <div className="modal-body" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="form-grid-2">
+                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                  <label className="form-label">Company Name *</label>
+                  <input
+                    className="form-control"
+                    placeholder="e.g. Blue Aqua International"
+                    value={recipient.company}
+                    onChange={e => setRecipient(r => ({ ...r, company: e.target.value }))}
+                    autoFocus
+                  />
+                </div>
+
+                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                  <label className="form-label">Address</label>
+                  <textarea
+                    className="form-control"
+                    placeholder={'Line 1\nLine 2\nCity, Country'}
+                    rows={3}
+                    value={recipient.address}
+                    onChange={e => setRecipient(r => ({ ...r, address: e.target.value }))}
+                    style={{ resize: 'vertical', fontFamily: 'var(--font)' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Attn / Contact Person</label>
+                  <input
+                    className="form-control"
+                    placeholder="e.g. John Lee"
+                    value={recipient.attn}
+                    onChange={e => setRecipient(r => ({ ...r, attn: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Phone</label>
+                  <input
+                    className="form-control"
+                    placeholder="e.g. +65 9123 4567"
+                    value={recipient.phone}
+                    onChange={e => setRecipient(r => ({ ...r, phone: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Email</label>
+                  <input
+                    className="form-control"
+                    type="email"
+                    placeholder="e.g. john@company.com"
+                    value={recipient.email}
+                    onChange={e => setRecipient(r => ({ ...r, email: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Valid Until</label>
+                  <input
+                    className="form-control"
+                    placeholder="e.g. 31 May 2026"
+                    value={recipient.validUntil}
+                    onChange={e => setRecipient(r => ({ ...r, validUntil: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                  <label className="form-label">Subject</label>
+                  <input
+                    className="form-control"
+                    placeholder="e.g. SEA Freight Rates Quotation — China → Singapore"
+                    value={recipient.subject}
+                    onChange={e => setRecipient(r => ({ ...r, subject: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {!profile.signature_data && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg)', borderRadius: 7 }}>
+                  No signature on file — PDF will include a blank signature line. Add one in My Account.
+                </div>
+              )}
+            </div>
+
+            <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
+              <button className="btn btn-ghost" onClick={() => setShowPdfModal(false)}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                onClick={generateQuotePDF}
+                disabled={generatingPdf || !recipient.company.trim()}
+              >
+                {generatingPdf ? <><span className="spinner"></span> Generating...</> : 'Generate PDF'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
