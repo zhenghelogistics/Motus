@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
 import MovementTracker from './pages/MovementTracker'
@@ -11,7 +11,7 @@ import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
 import { CHANGELOG } from './changelog'
-import { getFxRates, updateFxRates, unlockFxRate } from './api'
+import { getFxRates, updateFxRates, unlockFxRate, getNewLeadsCount } from './api'
 
 const NAV = [
   { to: '/',       icon: '▦',  label: 'Dashboard',         exact: true },
@@ -345,7 +345,7 @@ function FxReminderBanner({ updatedAt, onOpenRates }) {
   )
 }
 
-function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount }) {
+function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount, newLeadsCount }) {
   const { user, signOut } = useAuth()
 
   return (
@@ -370,9 +370,20 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, unreadCount }) {
             to={to}
             end={exact}
             className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
+            style={{ position: 'relative' }}
           >
             <span className="sidebar-icon">{icon}</span>
             {label}
+            {to === '/leads' && newLeadsCount > 0 && (
+              <span style={{
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                background: '#EF4444', color: 'white', borderRadius: 10,
+                fontSize: 10, fontWeight: 800, padding: '1px 6px', minWidth: 18, textAlign: 'center',
+                lineHeight: '16px',
+              }}>
+                {newLeadsCount > 99 ? '99+' : newLeadsCount}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>
@@ -465,17 +476,44 @@ function HashErrorBanner() {
   )
 }
 
+const LEADS_SEEN_KEY = (email) => `leads_seen_at_${email}`
+
 function AppShell() {
   const { user, loading } = useAuth()
+  const location = useLocation()
   const [showCurrency, setShowCurrency] = useState(false)
   const [showWhatsNew, setShowWhatsNew] = useState(false)
   const [fxUpdatedAt, setFxUpdatedAt] = useState(null)
+  const [newLeadsCount, setNewLeadsCount] = useState(0)
   const seen = parseInt(localStorage.getItem(SEEN_KEY) || '0', 10)
   const unreadCount = Math.max(0, CHANGELOG.length - seen)
 
   useEffect(() => {
     getFxRates().then(r => setFxUpdatedAt(r.data.updated_at)).catch(() => {})
   }, [])
+
+  // Fetch new leads count on mount and poll every 60s
+  useEffect(() => {
+    if (!user) return
+    async function fetchCount() {
+      try {
+        const since = localStorage.getItem(LEADS_SEEN_KEY(user.email))
+        const { data } = await getNewLeadsCount(since || undefined)
+        setNewLeadsCount(data.count)
+      } catch (_) {}
+    }
+    fetchCount()
+    const interval = setInterval(fetchCount, 60000)
+    return () => clearInterval(interval)
+  }, [user])
+
+  // Clear badge when user visits /leads
+  useEffect(() => {
+    if (location.pathname === '/leads' && user) {
+      localStorage.setItem(LEADS_SEEN_KEY(user.email), new Date().toISOString())
+      setNewLeadsCount(0)
+    }
+  }, [location.pathname, user])
 
   // Supabase redirects auth errors to root with #error=... hash fragments
   if (window.location.hash.includes('error=')) return <HashErrorBanner />
@@ -500,6 +538,7 @@ function AppShell() {
         onCurrencyClick={() => setShowCurrency(true)}
         onWhatsNewClick={() => setShowWhatsNew(true)}
         unreadCount={unreadCount}
+        newLeadsCount={newLeadsCount}
       />
       <main className="main-content">
         <FxReminderBanner updatedAt={fxUpdatedAt} onOpenRates={() => setShowCurrency(true)} />

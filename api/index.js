@@ -1392,6 +1392,19 @@ app.get('/api/leads/stats', async (req, res) => {
   }
 })
 
+app.get('/api/leads/new-count', async (req, res) => {
+  try {
+    const since = req.query.since ? new Date(req.query.since) : new Date(0)
+    const r = await pool.query(
+      `SELECT COUNT(*) as count FROM leads WHERE created_at > $1 AND (is_archived IS NULL OR is_archived = FALSE)`,
+      [since]
+    )
+    res.json({ count: parseInt(r.rows[0].count) })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/leads', async (req, res) => {
   try {
     const archived = req.query.archived === 'true'

@@ -67,6 +67,7 @@ export const getCompanyStats = (params) => api.get('/stats/company', { params })
 export const getCompanyList = () => api.get('/stats/companies')
 
 export const getLeads = (params) => api.get('/leads', { params })
+export const getNewLeadsCount = (since) => api.get('/leads/new-count', { params: since ? { since } : {} })
 export const createLead = (data) => api.post('/leads', data)
 export const updateLead = (id, data) => api.put(`/leads/${id}`, data)
 export const getLeadStats = () => api.get('/leads/stats')
