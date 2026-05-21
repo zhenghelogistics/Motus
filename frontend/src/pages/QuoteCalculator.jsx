@@ -99,17 +99,15 @@ export default function QuoteCalculator() {
 
       // ── Header bar ──────────────────────────────────────────────────
       doc.setFillColor(...navy)
-      doc.rect(0, 0, pw, 40, 'F')
-      if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 6, 2, 28, 36)
+      doc.rect(0, 0, pw, 44, 'F')
+      if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 5, 4, 72, 36)
       doc.setTextColor(255, 255, 255)
-      doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-      doc.text('Zhenghe Logistics Pte Ltd', 40, 14)
       doc.setFontSize(8); doc.setFont('helvetica', 'normal')
-      doc.text('75 Bukit Timah Road, #05-01 Boon Siew Building, Singapore 229833', 40, 21)
-      doc.text('T: 6955 8298   F: 6980 2095   rfq@zhenghe.com.sg   Reg No. 201734570K', 40, 27)
+      doc.text('75 Bukit Timah Road, #05-01 Boon Siew Building, Singapore 229833', 82, 20)
+      doc.text('T: 6955 8298   F: 6980 2095   rfq@zhenghe.com.sg   Reg No. 201734570K', 82, 28)
 
       // ── Ref + Date (top right) ───────────────────────────────────────
-      let y = 48
+      let y = 52
       doc.setTextColor(...navy)
       doc.setFontSize(8); doc.setFont('helvetica', 'bold')
       doc.text(refId, pw - mr, y, { align: 'right' })
@@ -176,17 +174,17 @@ export default function QuoteCalculator() {
 
       autoTable(doc, {
         startY: y,
-        head: [['S/No', 'Freight Charges', 'Qty', `Rate (${currency})`, 'Validity', 'Remarks']],
+        head: [['No.', 'Freight Charges', 'Qty', `Rate (${currency})`, 'Validity', 'Remarks']],
         body: tableRows,
         headStyles: { fillColor: navy, fontSize: 8, fontStyle: 'bold', textColor: [255, 255, 255] },
         styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak', valign: 'middle' },
         columnStyles: {
-          0: { cellWidth: 10, halign: 'center' },
+          0: { cellWidth: 14, halign: 'center' },
           1: { cellWidth: 'auto' },
           2: { cellWidth: 24, halign: 'center' },
-          3: { cellWidth: 52, fontStyle: 'bold' },
+          3: { cellWidth: 50, fontStyle: 'bold' },
           4: { cellWidth: 22, halign: 'center' },
-          5: { cellWidth: 38 },
+          5: { cellWidth: 36 },
         },
         margin: { left: ml, right: mr },
         tableWidth: tw,
@@ -237,25 +235,24 @@ export default function QuoteCalculator() {
 
       // ── Signature block ──────────────────────────────────────────────
       doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(60, 60, 60)
-      doc.text('Yours sincerely', ml, y); y += 8
+      doc.text('Yours sincerely,', ml, y); y += 8
+
+      // Name and role first, then signature image below
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text(profile.display_name || '___________________', ml, y); y += 5
+      if (profile.designation) {
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(70, 70, 70)
+        doc.text(profile.designation, ml, y); y += 5
+      }
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('Zhenghe Logistics Pte Ltd', ml, y); y += 10
 
       if (profile.signature_data) {
         doc.addImage(profile.signature_data, 'PNG', ml, y, 55, 22)
-        y += 26
       } else {
         doc.setDrawColor(180, 180, 180); doc.setLineWidth(0.3)
         doc.line(ml, y + 14, ml + 60, y + 14)
-        y += 18
       }
-
-      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text(profile.display_name || 'Zhenghe Logistics', ml, y)
-      if (profile.designation) {
-        y += 5; doc.setFont('helvetica', 'normal'); doc.setTextColor(70, 70, 70)
-        doc.text(profile.designation, ml, y)
-      }
-      y += 5; doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text('Zhenghe Logistics Pte Ltd', ml, y)
 
       // ── Footer ───────────────────────────────────────────────────────
       const pageCount = doc.internal.getNumberOfPages()
