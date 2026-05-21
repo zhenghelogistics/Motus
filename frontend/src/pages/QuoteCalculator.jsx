@@ -233,26 +233,57 @@ export default function QuoteCalculator() {
       doc.text(closingLines, ml, y); y += closingLines.length * 5 + 6
       doc.text('Thank you!', ml, y); y += 10
 
-      // ── Signature block ──────────────────────────────────────────────
+      // ── Signature block (two-column: ZHL left, customer ack right) ──
+      const sigY = y
+      const rX = 112   // right column start x
+      const rW = pw - mr - rX  // right column width (~80mm)
+      const labelW = 26  // label area within right column
+
+      // LEFT: our side heading
       doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(60, 60, 60)
-      doc.text('Yours sincerely,', ml, y); y += 8
+      doc.text('Yours sincerely,', ml, sigY)
 
-      // Name and role first, then signature image below
+      // RIGHT: heading
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('Acknowledged & Agreed:', rX, sigY)
+
+      // LEFT: name, designation, company
+      let lY = sigY + 8
       doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text(profile.display_name || '___________________', ml, y); y += 5
+      doc.text(profile.display_name || '___________________', ml, lY); lY += 5
       if (profile.designation) {
-        doc.setFont('helvetica', 'normal'); doc.setTextColor(70, 70, 70)
-        doc.text(profile.designation, ml, y); y += 5
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(70, 70, 70)
+        doc.text(profile.designation, ml, lY); lY += 5
       }
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text('Zhenghe Logistics Pte Ltd', ml, y); y += 10
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('Zhenghe Logistics Pte Ltd', ml, lY); lY += 10
 
+      // LEFT: signature image or line
       if (profile.signature_data) {
-        doc.addImage(profile.signature_data, 'PNG', ml, y, 55, 22)
+        doc.addImage(profile.signature_data, 'PNG', ml, lY, 55, 22)
       } else {
         doc.setDrawColor(180, 180, 180); doc.setLineWidth(0.3)
-        doc.line(ml, y + 14, ml + 60, y + 14)
+        doc.line(ml, lY + 16, ml + 62, lY + 16)
       }
+
+      // RIGHT: customer fill-in fields
+      const fields = ['Name', 'Company', 'Contact No.', 'Email']
+      let rY = sigY + 10
+      doc.setLineWidth(0.3); doc.setDrawColor(180, 180, 180)
+      fields.forEach(label => {
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(90, 90, 90)
+        doc.text(`${label}:`, rX, rY)
+        doc.line(rX + labelW, rY + 1, rX + rW, rY + 1)
+        rY += 9
+      })
+
+      // RIGHT: signature space + line
+      rY += 10
+      doc.line(rX, rY, rX + rW, rY)
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(120, 120, 120)
+      doc.text('Signature & Date', rX, rY + 4)
+
+      y = Math.max(lY + 24, rY + 8)
 
       // ── Footer ───────────────────────────────────────────────────────
       const pageCount = doc.internal.getNumberOfPages()
