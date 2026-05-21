@@ -100,7 +100,13 @@ export default function QuoteCalculator() {
       // ── Header bar ──────────────────────────────────────────────────
       doc.setFillColor(...navy)
       doc.rect(0, 0, pw, 40, 'F')
-      if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 5, 6, 50, 28)
+      if (logoRef.current) {
+        const nw = logoRef.current.naturalWidth || 1
+        const nh = logoRef.current.naturalHeight || 1
+        const lw = 50
+        const lh = (nh / nw) * lw
+        doc.addImage(logoRef.current, 'PNG', 5, Math.max(2, (40 - lh) / 2), lw, lh)
+      }
       doc.setTextColor(255, 255, 255)
       doc.setFontSize(8); doc.setFont('helvetica', 'normal')
       doc.text('75 Bukit Timah Road, #05-01 Boon Siew Building, Singapore 229833', 60, 18)
@@ -245,7 +251,9 @@ export default function QuoteCalculator() {
       let lY = sigY + 6
       if (profile.signature_data) {
         doc.addImage(profile.signature_data, 'PNG', ml, lY, 55, 22)
-        lY += 26
+        doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.3)
+        doc.line(ml, lY + 23, ml + 62, lY + 23)
+        lY += 28
       } else {
         doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.3)
         doc.line(ml, lY + 18, ml + 62, lY + 18)
@@ -275,7 +283,12 @@ export default function QuoteCalculator() {
       doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
       if (recipient.attn) { doc.text(recipient.attn, rX, rY); rY += 5 }
       doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(70, 70, 70)
-      if (recipient.company) { doc.text(recipient.company, rX, rY) }
+      if (recipient.company) { doc.text(recipient.company, rX, rY); rY += 5 }
+      if (recipient.email) {
+        doc.setFontSize(8.5); doc.setTextColor(100, 100, 100)
+        doc.text(recipient.email, rX, rY)
+        rY += 5
+      }
 
       y = Math.max(lY + 6, rY + 8)
 
