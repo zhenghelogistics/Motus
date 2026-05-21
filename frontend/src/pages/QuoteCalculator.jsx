@@ -224,8 +224,8 @@ export default function QuoteCalculator() {
       y += 6
 
       // ── Closing ──────────────────────────────────────────────────────
-      // Add new page if not enough space for closing + signature
-      if (y > 230) { doc.addPage(); y = 20 }
+      // Need ~85mm for closing + signature block — add page if not enough
+      if (y > 200) { doc.addPage(); y = 20 }
 
       doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(50, 50, 50)
       const closing = 'We hope the above rates quoted will meet your requirements. Should you need any further assistance or clarification, please feel free to contact us.'
@@ -236,19 +236,21 @@ export default function QuoteCalculator() {
       // ── Signature block (two-column: ZHL left, customer ack right) ──
       const sigY = y
       const rX = 112   // right column start x
-      const rW = pw - mr - rX  // right column width (~80mm)
-      const labelW = 26  // label area within right column
+      const rW = pw - mr - rX  // ~80mm
 
-      // LEFT: our side heading
+      // ── LEFT: Yours sincerely → signature → name → role → company ──
       doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(60, 60, 60)
       doc.text('Yours sincerely,', ml, sigY)
 
-      // RIGHT: heading
-      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text('Acknowledged & Agreed:', rX, sigY)
-
-      // LEFT: name, designation, company
-      let lY = sigY + 8
+      let lY = sigY + 6
+      if (profile.signature_data) {
+        doc.addImage(profile.signature_data, 'PNG', ml, lY, 55, 22)
+        lY += 26
+      } else {
+        doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.3)
+        doc.line(ml, lY + 18, ml + 62, lY + 18)
+        lY += 22
+      }
       doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
       doc.text(profile.display_name || '___________________', ml, lY); lY += 5
       if (profile.designation) {
@@ -256,34 +258,26 @@ export default function QuoteCalculator() {
         doc.text(profile.designation, ml, lY); lY += 5
       }
       doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text('Zhenghe Logistics Pte Ltd', ml, lY); lY += 10
+      doc.text('Zhenghe Logistics Pte Ltd', ml, lY)
 
-      // LEFT: signature image or line
-      if (profile.signature_data) {
-        doc.addImage(profile.signature_data, 'PNG', ml, lY, 55, 22)
-      } else {
-        doc.setDrawColor(180, 180, 180); doc.setLineWidth(0.3)
-        doc.line(ml, lY + 16, ml + 62, lY + 16)
-      }
+      // ── RIGHT: Acknowledged & Agreed → signature box → pre-filled name + company ──
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('Acknowledged & Agreed:', rX, sigY)
 
-      // RIGHT: customer fill-in fields
-      const fields = ['Name', 'Company', 'Contact No.', 'Email']
-      let rY = sigY + 10
-      doc.setLineWidth(0.3); doc.setDrawColor(180, 180, 180)
-      fields.forEach(label => {
-        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(90, 90, 90)
-        doc.text(`${label}:`, rX, rY)
-        doc.line(rX + labelW, rY + 1, rX + rW, rY + 1)
-        rY += 9
-      })
+      // Signature box (empty space + bottom line)
+      const boxTop = sigY + 6
+      const boxBot = sigY + 34
+      doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.3)
+      doc.line(rX, boxBot, rX + rW, boxBot)
 
-      // RIGHT: signature space + line
-      rY += 10
-      doc.line(rX, rY, rX + rW, rY)
-      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(120, 120, 120)
-      doc.text('Signature & Date', rX, rY + 4)
+      // Pre-filled recipient details below the box
+      let rY = boxBot + 7
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      if (recipient.attn) { doc.text(recipient.attn, rX, rY); rY += 5 }
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(70, 70, 70)
+      if (recipient.company) { doc.text(recipient.company, rX, rY) }
 
-      y = Math.max(lY + 24, rY + 8)
+      y = Math.max(lY + 6, rY + 8)
 
       // ── Footer ───────────────────────────────────────────────────────
       const pageCount = doc.internal.getNumberOfPages()
