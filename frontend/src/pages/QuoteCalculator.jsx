@@ -99,15 +99,15 @@ export default function QuoteCalculator() {
 
       // ── Header bar ──────────────────────────────────────────────────
       doc.setFillColor(...navy)
-      doc.rect(0, 0, pw, 44, 'F')
-      if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 5, 4, 72, 36)
+      doc.rect(0, 0, pw, 40, 'F')
+      if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 5, 6, 50, 28)
       doc.setTextColor(255, 255, 255)
       doc.setFontSize(8); doc.setFont('helvetica', 'normal')
-      doc.text('75 Bukit Timah Road, #05-01 Boon Siew Building, Singapore 229833', 82, 20)
-      doc.text('T: 6955 8298   F: 6980 2095   rfq@zhenghe.com.sg   Reg No. 201734570K', 82, 28)
+      doc.text('75 Bukit Timah Road, #05-01 Boon Siew Building, Singapore 229833', 60, 18)
+      doc.text('T: 6955 8298   F: 6980 2095   rfq@zhenghe.com.sg   Reg No. 201734570K', 60, 26)
 
       // ── Ref + Date (top right) ───────────────────────────────────────
-      let y = 52
+      let y = 48
       doc.setTextColor(...navy)
       doc.setFontSize(8); doc.setFont('helvetica', 'bold')
       doc.text(refId, pw - mr, y, { align: 'right' })
