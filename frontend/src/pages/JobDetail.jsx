@@ -55,6 +55,7 @@ export default function JobDetail() {
   const [docUploading, setDocUploading] = useState(false)
   const [doModal, setDoModal] = useState(null)
   const [subCertModal, setSubCertModal] = useState(null)
+  const [releaseDOModal, setReleaseDOModal] = useState(null)
   const [fxRates, setFxRates] = useState({})
   const [staffList, setStaffList] = useState([])
   const [showPdfCcyMenu, setShowPdfCcyMenu] = useState(false)
@@ -1165,6 +1166,116 @@ export default function JobDetail() {
     doc.save(`ZHL_${job.job_number.replace('/', '-')}_LocalDO.pdf`)
   }
 
+  function openReleaseDOModal() {
+    const totalPkgs = (job.packing_list_items || []).reduce((s, it) => s + (parseInt(it.num_packages) || 0), 0)
+    setReleaseDOModal({
+      company:     job.consignee || '',
+      veh_no:      '',
+      description: job.commodity || (job.packing_list_items || []).map(it => it.description).filter(Boolean).join(', ') || '',
+      num_packages: totalPkgs > 0 ? String(totalPkgs) : (job.packages != null ? String(job.packages) : ''),
+    })
+  }
+
+  function exportReleaseDO(fields) {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const navy = [4, 44, 83]
+    const lw = 38
+
+    // Header
+    doc.setFillColor(...navy)
+    doc.rect(0, 0, pw, 40, 'F')
+    if (logoRef.current) {
+      const img = logoRef.current
+      const nw = typeof img === 'string' ? 400 : (img.naturalWidth || 400)
+      const nh = typeof img === 'string' ? 200 : (img.naturalHeight || 200)
+      const lh = (nh / nw) * 28
+      doc.addImage(img, 'PNG', 6, (40 - lh) / 2, 28, lh)
+    }
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold')
+    doc.text('RELEASE DELIVERY ORDER', pw - mr, 16, { align: 'right' })
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal')
+    doc.text(`Job No: ${job.job_number}`, pw - mr, 25, { align: 'right' })
+    doc.text(`Date: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 31, { align: 'right' })
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal')
+    doc.text('Zhenghe Logistics Pte Ltd', 38, 22)
+    doc.text('rfq@zhenghe.com.sg  |  T: 6955 8298', 38, 29)
+
+    const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
+
+    // Collecting party
+    let y = 46
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('COLLECTED BY', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Company',    { content: fields.company || '—',  colSpan: 3 }],
+        ['Vehicle No.', { content: fields.veh_no || '—', colSpan: 3 }],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 9, cellPadding: 5, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Cargo description
+    y = doc.lastAutoTable.finalY + 6
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('CARGO RELEASED', ml, y); y += 2
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Description',   { content: fields.description || '—', colSpan: 3 }],
+        ['No. of Packages', { content: fields.num_packages ? `${fields.num_packages} pkgs` : '—', colSpan: 3 }],
+      ],
+      columnStyles: { 0: labelCol, 1: { cellWidth: 'auto' }, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 9, cellPadding: 5, overflow: 'linebreak' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    // Packing list breakdown (if available)
+    const plItems = job.packing_list_items || []
+    if (plItems.length) {
+      y = doc.lastAutoTable.finalY + 6
+      doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+      doc.text('ITEM BREAKDOWN', ml, y); y += 2
+      autoTable(doc, {
+        startY: y,
+        head: [['SKU', 'Description', 'Qty', 'Pkgs']],
+        body: plItems.map(it => [it.sku || '—', it.description || '—', it.qty_actual ? `${it.qty_actual} ${it.unit || ''}`.trim() : '—', it.num_packages || '—']),
+        headStyles: { fillColor: navy, fontSize: 8, fontStyle: 'bold', textColor: [255, 255, 255] },
+        styles: { fontSize: 8.5, cellPadding: 4, overflow: 'linebreak' },
+        columnStyles: { 0: { cellWidth: 28 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 22, halign: 'center' }, 3: { cellWidth: 18, halign: 'center' } },
+        margin: { left: ml, right: mr },
+        tableWidth: tw,
+      })
+    }
+
+    // Acknowledgement
+    y = Math.max(doc.lastAutoTable.finalY + 12, 210)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text('ACKNOWLEDGEMENT OF RECEIPT', ml, y); y += 6
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(70, 70, 70)
+    doc.text('I/We confirm that the above-listed cargo has been released and collected in good order and condition.', ml, y, { maxWidth: tw }); y += 14
+    doc.setDrawColor(160, 160, 160); doc.setLineWidth(0.4)
+    doc.line(ml, y, 95, y)
+    doc.line(115, y, pw - mr, y)
+    doc.setFontSize(8); doc.setTextColor(110, 110, 110)
+    doc.text("Collector's Signature / Name", ml, y + 5)
+    doc.text('Date / Time', 115, y + 5)
+    y += 18
+    doc.line(ml, y, 80, y)
+    doc.text('Company Stamp', ml, y + 5)
+
+    doc.setFontSize(7); doc.setTextColor(160, 160, 160)
+    doc.text(`Zhenghe Logistics Pte Ltd — Release D/O — ${job.job_number} — ${new Date().toLocaleDateString('en-SG')}`, ml, 290)
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_ReleaseDO.pdf`)
+    setReleaseDOModal(null)
+  }
+
   function exportInternationalDO(d = job) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
@@ -1292,6 +1403,49 @@ export default function JobDetail() {
         />
       )}
 
+      {/* Release D/O Modal */}
+      {releaseDOModal && (
+        <div className="modal-overlay" onClick={() => setReleaseDOModal(null)}>
+          <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Release D/O</h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setReleaseDOModal(null)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="form-group">
+                <label className="form-label">Company</label>
+                <input className="form-control" placeholder="Collecting company name"
+                  value={releaseDOModal.company}
+                  onChange={e => setReleaseDOModal(m => ({ ...m, company: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Vehicle No.</label>
+                <input className="form-control" placeholder="e.g. SGX1234A" autoFocus
+                  value={releaseDOModal.veh_no}
+                  onChange={e => setReleaseDOModal(m => ({ ...m, veh_no: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea className="form-control" rows={3} placeholder="Description of goods"
+                  value={releaseDOModal.description}
+                  onChange={e => setReleaseDOModal(m => ({ ...m, description: e.target.value }))}
+                  style={{ resize: 'vertical', fontFamily: 'var(--font)' }} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">No. of Packages</label>
+                <input className="form-control" type="number" min="0" placeholder="0"
+                  value={releaseDOModal.num_packages}
+                  onChange={e => setReleaseDOModal(m => ({ ...m, num_packages: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
+              <button className="btn btn-ghost" onClick={() => setReleaseDOModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={() => exportReleaseDO(releaseDOModal)}>Generate PDF</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Send to Accounts Modal */}
       {sendToAccountsModal && (
         <div className="modal-overlay" onClick={() => setSendToAccountsModal(false)}>
@@ -1399,6 +1553,7 @@ export default function JobDetail() {
           <button className="btn btn-ghost btn-sm" onClick={exportPDF}>↓ Costing PDF</button>
           <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}>🚛 Pickup Order</button>
           <button className="btn btn-ghost btn-sm" onClick={openDOModal}>📦 Delivery Order</button>
+          <button className="btn btn-ghost btn-sm" onClick={openReleaseDOModal}>📋 Release D/O</button>
           <button className="btn btn-ghost btn-sm" onClick={openSubCertModal}>🛃 Sub Cert</button>
           <div style={{ position: 'relative' }}>
             <div style={{ display: 'flex', borderRadius: 6, overflow: 'visible', border: '1.5px solid var(--border-solid)' }}>
