@@ -225,7 +225,7 @@ body {
   font-weight: 600;
   color: var(--sidebar-text);
   text-decoration: none;
-  transition: all 0.18s ease;
+  transition: background 150ms ease, color 150ms ease;
   position: relative;
 }
 
@@ -316,9 +316,9 @@ body {
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
   padding: 22px;
-  transition: box-shadow 0.2s;
+  transition: box-shadow 150ms ease, transform 150ms ease;
 }
-.card:hover { box-shadow: var(--glass-shadow-hover); }
+.card:hover { box-shadow: var(--glass-shadow-hover); transform: translateY(-2px); }
 .card-sm { padding: 16px; }
 
 /* ─── Metric Cards ───────────────────────────────────────────────────────── */
@@ -415,6 +415,7 @@ body {
 .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 7px; }
 .btn-xs { padding: 3px 8px; font-size: 11px; border-radius: 5px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+.btn:active:not(:disabled) { transform: scale(0.97) translateY(0) !important; transition-duration: 80ms !important; }
 
 /* ─── Status Pills ───────────────────────────────────────────────────────── */
 .pill {
@@ -664,12 +665,22 @@ select.form-control { cursor: pointer; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ─── Modal ──────────────────────────────────────────────────────────────── */
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-10px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
 .modal-overlay {
   position: fixed; inset: 0;
   background: rgba(4,44,83,0.3);
   backdrop-filter: blur(4px);
   z-index: 200;
   display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: overlay-in 180ms cubic-bezier(.165,.84,.44,1) both;
 }
 [data-theme="dark"] .modal-overlay { background: rgba(0,0,0,0.5); }
 
@@ -681,6 +692,7 @@ select.form-control { cursor: pointer; }
   overflow-y: auto;
   box-shadow: var(--glass-shadow-hover);
   border: 1px solid var(--glass-border);
+  animation: modal-in 240ms cubic-bezier(.165,.84,.44,1) both;
 }
 .modal-header {
   padding: 20px 24px;
@@ -695,6 +707,15 @@ select.form-control { cursor: pointer; }
 .modal-header h2 { font-size: 16px; font-weight: 800; color: var(--heading); }
 .modal-body { padding: 24px; }
 .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border-solid); display: flex; justify-content: flex-end; gap: 10px; }
+
+/* ─── Accessibility — Reduced Motion ─────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 /* ─── GP% Colors ─────────────────────────────────────────────────────────── */
 .gp-high { color: var(--green); font-weight: 700; }
