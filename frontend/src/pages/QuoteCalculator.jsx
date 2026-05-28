@@ -17,6 +17,30 @@ const QUICK_ADD = [
 ]
 const MARKUP_PRESETS = [5, 10, 15, 20, 25]
 
+const PRESET_REMARKS = [
+  { label: 'Rates subject to change',       text: 'Rates, surcharges and schedules are subject to change without prior notice at carrier\'s discretion based on final cargo details & market conditions.' },
+  { label: 'Space subject to confirmation', text: 'Space availability is subject to carrier\'s acceptance and confirmation.' },
+  { label: 'General cargo only',            text: 'The above quotations are for general cargo only. Hazardous, over-length, odd-size, perishables or any other special cargo is subject to rate adjustment at the discretion of the respective shipping agent.' },
+  { label: 'Standard permit only',          text: 'Quoted price is for standard export non-controlled permit. Extra charges apply for any other permit requirement based on shipper\'s instructions.' },
+  { label: 'Chargeable weight basis',       text: 'All charges are based on the chargeable weight of each shipment as specified in the Bill of Lading / Shipping Note. Chargeable rates are based on actual gross or volumetric weight / CBM, whichever is higher.' },
+  { label: 'Excludes recoverable expenses', text: 'The above does not include recoverable expenses paid by us on your behalf, e.g. GST, surveyor\'s fee, storage charges, and duties.' },
+  { label: 'Additional charges apply',      text: 'Additional charges will apply for urgent shipments, diversion, extra works performed, use of mechanical aids, overtime incurred, etc.' },
+  { label: 'Marine insurance excluded',     text: 'Marine insurance is not inclusive unless stated within the quotation.' },
+  { label: 'Post-validity rate revision',   text: 'If shipment departs after the quotation validity, any revision in rates will supersede the current rates provided.' },
+  { label: 'Subject to Singapore GST',      text: 'All rates quoted are subject to prevailing Goods and Services Tax in Singapore.' },
+  { label: 'Excludes storage & port charges', text: 'Above rates do not include storage rent, inspection, loading at port, or unloading at place of consignee (if any).' },
+  { label: 'Outer packaging only',          text: 'Cargo acceptance is based on outer packaging (e.g. cartons, cases, crates & pallets) only. Inner contents will not be our liability.' },
+  { label: 'Excludes insurance & packing',  text: 'Rates quoted exclude insurance, packing, manpower, transshipment, and import into Singapore.' },
+  { label: 'Delivery delays possible',      text: 'Delivery time is normally within the stated period. Delays may occur due to port conditions, customs formalities, connecting vessel/airline delays & acts of God.' },
+  { label: 'Client loading equipment',      text: 'Clients are to ensure they have proper equipment to load or unload at premises. Prior notice must be given. Extra charges may apply depending on equipment and availability.' },
+  { label: 'Standard trading conditions',   text: 'All business handled is subject to our Standard Trading Conditions, a copy of which is available on application.' },
+  { label: 'Rates effective on booking',    text: 'Acceptance of rates is effected upon confirmation of bookings.' },
+  { label: 'Payment terms (30 days)',       text: 'Payment term is 30 days upon receiving our invoice.' },
+  { label: 'Contact for other destinations', text: 'For other destinations, cities or countries, please contact us.' },
+  { label: 'Cargo packaging (IATA)',        text: 'Please ensure cargo is packed in good condition in accordance with IATA requirements. Additional charges will apply if repacking is needed.' },
+]
+const DEFAULT_REMARKS = new Set([0, 1, 7, 9, 16])
+
 let _uid = 1
 function makeRow(description = '') {
   return { id: _uid++, description, qty: '', unit: '', rate: '', markup: '' }
@@ -40,6 +64,9 @@ export default function QuoteCalculator() {
   const [mode, setMode] = useState('SEA')
   const [copiedPrice, setCopiedPrice] = useState(false)
   const [copiedQuote, setCopiedQuote] = useState(false)
+  const [selectedRemarks, setSelectedRemarks] = useState(() => new Set(DEFAULT_REMARKS))
+  const [customRemarks, setCustomRemarks] = useState([])
+  const [newCustomRemark, setNewCustomRemark] = useState('')
   const [refId] = useState(() => `Q-${Date.now().toString(36).toUpperCase().slice(-6)}`)
 
   // PDF generation state
@@ -82,7 +109,30 @@ export default function QuoteCalculator() {
     setGstActive(false)
     setRoute('')
     setMode('SEA')
+    setSelectedRemarks(new Set(DEFAULT_REMARKS))
+    setCustomRemarks([])
+    setNewCustomRemark('')
   }
+
+  function toggleRemark(i) {
+    setSelectedRemarks(prev => {
+      const next = new Set(prev)
+      next.has(i) ? next.delete(i) : next.add(i)
+      return next
+    })
+  }
+
+  function addCustomRemark() {
+    const t = newCustomRemark.trim()
+    if (!t) return
+    setCustomRemarks(prev => [...prev, t])
+    setNewCustomRemark('')
+  }
+
+  const allRemarks = [
+    ...PRESET_REMARKS.filter((_, i) => selectedRemarks.has(i)).map(r => r.text),
+    ...customRemarks,
+  ]
 
   function openPdfModal() {
     setRecipient(r => ({ ...r, subject: r.subject || (route ? `${mode} Freight Rates Quotation — ${route}` : '') }))
@@ -209,25 +259,18 @@ export default function QuoteCalculator() {
       doc.text(`${totalLabel}  ${sym}${finalPrice.toLocaleString('en-SG')}`, pw - mr, y, { align: 'right' })
       y += 10
 
-      // ── Remarks / Standard clauses ───────────────────────────────────
-      const clauses = [
-        'Quoted rates are subject to space and equipment availability at the time of booking.',
-        'Rates exclude local charges at Port of Loading (POL) and Port of Discharge (POD), which will be billed separately.',
-        'Cargo acceptance is subject to the carrier\'s discretion and approval.',
-        'A free demurrage period of 7 days is granted at the Singapore transshipment port; extension charges apply thereafter.',
-        'Zhenghe Logistics Pte Ltd shall not be held responsible for any customs clearance issues encountered at the Port of Discharge.',
-        'All charges are subject to final rate and space confirmation at the time of booking.',
-      ]
-
-      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
-      doc.text('Remarks:', ml, y); y += 6
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(55, 55, 55)
-      clauses.forEach(c => {
-        const wrapped = doc.splitTextToSize(`• ${c}`, tw - 4)
-        doc.text(wrapped, ml + 2, y)
-        y += wrapped.length * 5 + 1.5
-      })
-      y += 6
+      // ── Remarks ──────────────────────────────────────────────────────
+      if (allRemarks.length) {
+        doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+        doc.text('Remarks:', ml, y); y += 6
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(55, 55, 55)
+        allRemarks.forEach(c => {
+          const wrapped = doc.splitTextToSize(`• ${c}`, tw - 4)
+          doc.text(wrapped, ml + 2, y)
+          y += wrapped.length * 5 + 1.5
+        })
+        y += 6
+      }
 
       // ── Closing ──────────────────────────────────────────────────────
       // Need ~85mm for closing + signature block — add page if not enough
@@ -344,7 +387,10 @@ export default function QuoteCalculator() {
       out += padRow('GST (9%):', fmtM(gstAmt)) + '\n'
     }
     out += padRow('Total Quoted Price', fmtM(finalPrice)) + '\n'
-    out += `\nAll charges subject to space and rate confirmation.`
+    if (allRemarks.length) {
+      out += `\nREMARKS\n${sep}\n`
+      allRemarks.forEach((r, i) => { out += `${i + 1}. ${r}\n` })
+    }
     return out
   }
 
@@ -658,6 +704,67 @@ export default function QuoteCalculator() {
       <datalist id="unit-opts">
         {UNIT_OPTIONS.map(u => <option key={u} value={u} />)}
       </datalist>
+
+      {/* ── Remarks ─────────────────────────────────────────────────────── */}
+      <div className="card" style={{ marginTop: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--heading)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Remarks</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>Included in PDF &amp; copied quote</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn btn-ghost btn-xs" onClick={() => setSelectedRemarks(new Set(PRESET_REMARKS.map((_, i) => i)))}>Select all</button>
+            <button className="btn btn-ghost btn-xs" onClick={() => setSelectedRemarks(new Set())}>Clear all</button>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: 14 }}>
+          {PRESET_REMARKS.map((r, i) => (
+            <label key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer', padding: '5px 6px', borderRadius: 6, background: selectedRemarks.has(i) ? 'var(--blue-light)' : 'transparent', transition: 'background 0.12s' }}>
+              <input
+                type="checkbox"
+                checked={selectedRemarks.has(i)}
+                onChange={() => toggleRemark(i)}
+                style={{ marginTop: 2, accentColor: 'var(--navy)', flexShrink: 0 }}
+              />
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{r.label}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 1 }}>{r.text.slice(0, 80)}{r.text.length > 80 ? '…' : ''}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        {customRemarks.length > 0 && (
+          <div style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {customRemarks.map((r, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 10px', background: 'var(--sub-box-bg)', borderRadius: 6, border: '1px solid var(--sub-box-border)' }}>
+                <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, lineHeight: 1.5 }}>{r}</span>
+                <button onClick={() => setCustomRemarks(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 14, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <textarea
+            className="form-control"
+            rows={2}
+            placeholder="Add a custom remark…"
+            value={newCustomRemark}
+            onChange={e => setNewCustomRemark(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addCustomRemark() } }}
+            style={{ resize: 'none', fontSize: 12, fontFamily: 'var(--font)', flex: 1 }}
+          />
+          <button className="btn btn-outline btn-sm" onClick={addCustomRemark} disabled={!newCustomRemark.trim()} style={{ alignSelf: 'flex-end' }}>Add</button>
+        </div>
+
+        {allRemarks.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+            {allRemarks.length} remark{allRemarks.length !== 1 ? 's' : ''} selected
+          </div>
+        )}
+      </div>
 
       {/* ── Quote Preview ───────────────────────────────────────────────── */}
       {subtotal > 0 && (

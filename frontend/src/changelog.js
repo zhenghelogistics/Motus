@@ -3,6 +3,51 @@
 
 export const CHANGELOG = [
   {
+    id: 'remarks-selector',
+    date: '2026-05-28',
+    title: 'Remarks Selector in Quote Calculator',
+    description:
+      '20 standard freight remarks are now selectable from the Quote Calculator. Tick the ones relevant to your quote — they appear in the Quotation PDF and in the copied quote text. Add your own custom remarks for anything not on the list. Defaults to the most universally applicable clauses.',
+    route: '/quote',
+    routeLabel: 'Open Quote Calculator',
+  },
+  {
+    id: 'release-do',
+    date: '2026-05-28',
+    title: 'Release D/O PDF',
+    description:
+      'A "Release D/O" button is now on every job. Click it, confirm the collecting company (pre-filled from consignee), enter the vehicle number, and adjust the description and package count if needed. Generates a Release Delivery Order PDF with a cargo description table, item breakdown (if a packing list exists), and an acknowledgement block for the collector\'s signature and company stamp.',
+    route: '/jobs',
+    routeLabel: 'Open Movement Tracker',
+  },
+  {
+    id: 'quotation-pdf',
+    date: '2026-05-27',
+    title: 'Quotation PDF Generator',
+    description:
+      'Generate a branded, client-ready Quotation PDF straight from the Quote Calculator. Fill in the recipient details (company, address, contact, validity), hit Generate — the PDF includes the ZHL header, a charges table with your markup hidden from the client, selected remarks, and a two-column signature block with your signature on the left and an acknowledgement space for the customer on the right. File is named CompanyName_DDMmmYYYY_Quotation.pdf automatically.',
+    route: '/quote',
+    routeLabel: 'Open Quote Calculator',
+  },
+  {
+    id: 'account-settings',
+    date: '2026-05-27',
+    title: 'My Account — Signature & Profile',
+    description:
+      'Click "My Account" at the bottom of the sidebar to set your display name, job title, and signature. Draw directly on the canvas or upload a PNG/JPG. Your signature is stored per user and embedded automatically in all exported Quotation PDFs.',
+    route: null,
+    routeLabel: null,
+  },
+  {
+    id: 'leads-badge',
+    date: '2026-05-26',
+    title: 'New Leads Badge',
+    description:
+      'A red badge on the Leads Pipeline tab shows how many new leads have come in since you last visited. Each user\'s count is tracked independently — the badge clears when you open the page. Updates every 60 seconds automatically.',
+    route: '/leads',
+    routeLabel: 'Open Leads Pipeline',
+  },
+  {
     id: 'quote-calculator',
     date: '2026-05-12',
     title: 'Quote Calculator',
