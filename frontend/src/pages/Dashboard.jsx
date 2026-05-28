@@ -1,10 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { getDashboard, getJobs } from '../api'
 
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtGP = (n) => n == null ? '—' : `${Number(n).toFixed(1)}%`
+
+function CountUp({ value, format, duration = 900 }) {
+  const [display, setDisplay] = useState(0)
+  const rafRef = useRef(null)
+  useEffect(() => {
+    if (value == null) return
+    const target = Number(value)
+    if (isNaN(target)) return
+    cancelAnimationFrame(rafRef.current)
+    const start = performance.now()
+    const tick = (now) => {
+      const progress = Math.min((now - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 4)
+      setDisplay(target * eased)
+      if (progress < 1) rafRef.current = requestAnimationFrame(tick)
+      else setDisplay(target)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [value, duration])
+  if (format) return format(display)
+  return Math.round(display)
+}
 
 function deadlineClass(date) {
   if (!date) return ''
@@ -61,23 +84,23 @@ export default function Dashboard() {
       <div className="metric-grid">
         <div className="metric-card">
           <div className="metric-label">Jobs This Month</div>
-          <div className="metric-value blue">{m.jobs}</div>
+          <div className="metric-value blue"><CountUp value={m.jobs} /></div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Revenue</div>
-          <div className="metric-value">{fmt(m.revenue)}</div>
+          <div className="metric-value"><CountUp value={m.revenue} format={fmt} /></div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Total Cost</div>
-          <div className="metric-value">{fmt(m.cost)}</div>
+          <div className="metric-value"><CountUp value={m.cost} format={fmt} /></div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Profit</div>
-          <div className={`metric-value ${m.profit >= 0 ? 'green' : ''}`}>{fmt(m.profit)}</div>
+          <div className={`metric-value ${m.profit >= 0 ? 'green' : ''}`}><CountUp value={m.profit} format={fmt} /></div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Avg GP%</div>
-          <div className={`metric-value ${gpClass(m.gp_percent)}`}>{fmtGP(m.gp_percent)}</div>
+          <div className={`metric-value ${gpClass(m.gp_percent)}`}><CountUp value={m.gp_percent} format={fmtGP} /></div>
         </div>
       </div>
 

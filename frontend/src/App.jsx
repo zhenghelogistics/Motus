@@ -376,13 +376,16 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount
             <span className="sidebar-icon">{icon}</span>
             {label}
             {to === '/leads' && newLeadsCount > 0 && (
-              <span style={{
-                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                background: '#EF4444', color: 'white', borderRadius: 10,
-                fontSize: 10, fontWeight: 800, padding: '1px 6px', minWidth: 18, textAlign: 'center',
-                lineHeight: '16px',
-              }}>
-                {newLeadsCount > 99 ? '99+' : newLeadsCount}
+              <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', display: 'inline-block' }}>
+                <span className="badge-ping" />
+                <span style={{
+                  position: 'relative', zIndex: 1, display: 'inline-block',
+                  background: '#EF4444', color: 'white', borderRadius: 10,
+                  fontSize: 10, fontWeight: 800, padding: '1px 6px', minWidth: 18, textAlign: 'center',
+                  lineHeight: '16px',
+                }}>
+                  {newLeadsCount > 99 ? '99+' : newLeadsCount}
+                </span>
               </span>
             )}
           </NavLink>
@@ -553,16 +556,18 @@ function AppShell() {
       />
       <main className="main-content">
         <FxReminderBanner updatedAt={fxUpdatedAt} onOpenRates={() => setShowCurrency(true)} />
-        <Routes>
-          <Route path="/"         element={<Dashboard />} />
-          <Route path="/jobs"     element={<MovementTracker />} />
-          <Route path="/jobs/:id" element={<JobDetail />} />
-          <Route path="/intake"   element={<EmailIntake />} />
-          <Route path="/stats"    element={<CompanyStats />} />
-          <Route path="/quote"    element={<QuoteCalculator />} />
-          <Route path="/leads"    element={<Leads />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
-        </Routes>
+        <div key={location.pathname} className="page-enter">
+          <Routes>
+            <Route path="/"         element={<Dashboard />} />
+            <Route path="/jobs"     element={<MovementTracker />} />
+            <Route path="/jobs/:id" element={<JobDetail />} />
+            <Route path="/intake"   element={<EmailIntake />} />
+            <Route path="/stats"    element={<CompanyStats />} />
+            <Route path="/quote"    element={<QuoteCalculator />} />
+            <Route path="/leads"    element={<Leads />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+          </Routes>
+        </div>
       </main>
       {showCurrency && <CurrencyConverter onClose={() => setShowCurrency(false)} onRatesSaved={rates => { setFxUpdatedAt(new Date().toISOString()) }} />}
       {showWhatsNew && <WhatsNewModal onClose={() => setShowWhatsNew(false)} />}
