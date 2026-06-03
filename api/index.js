@@ -1117,15 +1117,23 @@ app.get('/api/dashboard', async (req, res) => {
 // Yahoo Finance tickers: 1 SGD = X [currency]
 const FX_YAHOO_PAIRS = { USD: 'SGDUSD=X', EUR: 'SGDEUR=X', IDR: 'SGDIDR=X' }
 
-// Fetch the last recorded closing price for the previous calendar month from Yahoo Finance.
-// Requests the full month so whichever day was the last trading day (31st, 30th, 29th, etc.)
-// is what gets returned — no guessing.
+// Returns the last Mon–Fri of the previous calendar month (UTC Date object)
+function lastWeekdayOfPrevMonth(now) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)) // last calendar day of prev month
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1)
+  return d
+}
+
+// Fetch the closing price of the last trading day of the previous month from Yahoo Finance.
+// Yahoo's API sometimes stores a date's close with a timestamp 1 day later, so we find
+// the entry closest to the expected date rather than trusting the timestamp's day-of-week.
 async function fetchPrevMonthEndClose(ticker) {
   const now = new Date()
-  const prevYear  = now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear()
-  const prevMonth = now.getUTCMonth() === 0 ? 11 : now.getUTCMonth() - 1
-  const p1 = Math.floor(Date.UTC(prevYear, prevMonth, 1) / 1000)          // first of prev month
-  const p2 = Math.floor(Date.UTC(prevYear, prevMonth + 1, 1) / 1000) + 1  // first of current month + 1s buffer
+  const target = lastWeekdayOfPrevMonth(now)
+  const targetTs = target.getTime() / 1000
+  // Fetch a 10-day window centred on the expected last trading day
+  const p1 = Math.floor(targetTs - 7 * 86400)
+  const p2 = Math.floor(targetTs + 3 * 86400)
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&period1=${p1}&period2=${p2}`
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
@@ -1137,19 +1145,16 @@ async function fetchPrevMonthEndClose(ticker) {
   if (!result) throw new Error('No data from Yahoo Finance')
   const timestamps = result.timestamp || []
   const closes = result.indicators?.quote?.[0]?.close || []
-  // Walk back: last weekday (Mon–Fri) entry in the previous month
-  let lastIdx = -1
-  for (let i = closes.length - 1; i >= 0; i--) {
+  // Pick the entry whose timestamp is closest to the target date (within 36 hours)
+  let bestIdx = -1, bestDiff = Infinity
+  for (let i = 0; i < closes.length; i++) {
     if (closes[i] == null || isNaN(closes[i])) continue
-    const d = new Date(timestamps[i] * 1000)
-    const dow = d.getUTCDay()
-    if (d.getUTCFullYear() === prevYear && d.getUTCMonth() === prevMonth && dow !== 0 && dow !== 6) {
-      lastIdx = i; break
-    }
+    const diff = Math.abs(timestamps[i] - targetTs)
+    if (diff < bestDiff && diff <= 129600) { bestDiff = diff; bestIdx = i }
   }
-  if (lastIdx === -1) throw new Error(`No close prices found in previous month for ${ticker}`)
-  const date = new Date(timestamps[lastIdx] * 1000).toISOString().split('T')[0]
-  return { rate: parseFloat(closes[lastIdx]), date }
+  if (bestIdx === -1) throw new Error(`No close price found near ${target.toISOString().split('T')[0]} for ${ticker}`)
+  const date = target.toISOString().split('T')[0] // use our calculated date, not Yahoo's offset timestamp
+  return { rate: parseFloat(closes[bestIdx]), date }
 }
 
 app.get('/api/fx-rates/sync', async (req, res) => {
