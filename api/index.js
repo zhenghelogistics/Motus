@@ -1122,8 +1122,10 @@ const FX_YAHOO_PAIRS = { USD: 'SGDUSD=X', EUR: 'SGDEUR=X', IDR: 'SGDIDR=X' }
 // is what gets returned — no guessing.
 async function fetchPrevMonthEndClose(ticker) {
   const now = new Date()
-  const p1 = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1) / 1000) // first of prev month
-  const p2 = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000)      // first of current month
+  const prevYear  = now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear()
+  const prevMonth = now.getUTCMonth() === 0 ? 11 : now.getUTCMonth() - 1
+  const p1 = Math.floor(Date.UTC(prevYear, prevMonth, 1) / 1000)          // first of prev month
+  const p2 = Math.floor(Date.UTC(prevYear, prevMonth + 1, 1) / 1000) + 1  // first of current month + 1s buffer
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&period1=${p1}&period2=${p2}`
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
@@ -1135,10 +1137,12 @@ async function fetchPrevMonthEndClose(ticker) {
   if (!result) throw new Error('No data from Yahoo Finance')
   const timestamps = result.timestamp || []
   const closes = result.indicators?.quote?.[0]?.close || []
-  // Walk back from end to find the last non-null close
+  // Walk back, keeping only entries that actually fall in the previous month
   let lastIdx = -1
   for (let i = closes.length - 1; i >= 0; i--) {
-    if (closes[i] != null && !isNaN(closes[i])) { lastIdx = i; break }
+    if (closes[i] == null || isNaN(closes[i])) continue
+    const d = new Date(timestamps[i] * 1000)
+    if (d.getUTCFullYear() === prevYear && d.getUTCMonth() === prevMonth) { lastIdx = i; break }
   }
   if (lastIdx === -1) throw new Error(`No close prices found in previous month for ${ticker}`)
   const date = new Date(timestamps[lastIdx] * 1000).toISOString().split('T')[0]
