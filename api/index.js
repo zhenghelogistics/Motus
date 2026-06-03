@@ -1117,6 +1117,39 @@ app.get('/api/dashboard', async (req, res) => {
 // Yahoo Finance tickers: 1 SGD = X [currency]
 const FX_YAHOO_PAIRS = { USD: 'SGDUSD=X', EUR: 'SGDEUR=X', IDR: 'SGDIDR=X' }
 
+// Returns the last Monday–Friday of the previous calendar month (UTC)
+function getLastWorkingDayOfPrevMonth() {
+  const now = new Date()
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)) // last day of prev month
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1)
+  return d
+}
+
+// Fetch the closing price from Yahoo Finance for a specific date
+async function fetchYahooClose(ticker, date) {
+  const p1 = Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - 1) / 1000)
+  const p2 = Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 3) / 1000)
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&period1=${p1}&period2=${p2}`
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    signal: AbortSignal.timeout(9000),
+  })
+  if (!res.ok) throw new Error(`Yahoo HTTP ${res.status} for ${ticker}`)
+  const data = await res.json()
+  const result = data?.chart?.result?.[0]
+  if (!result) throw new Error('No data from Yahoo Finance')
+  const targetTs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / 1000
+  const timestamps = result.timestamp || []
+  const closes = result.indicators?.quote?.[0]?.close || []
+  let bestIdx = -1, bestDiff = Infinity
+  for (let i = 0; i < timestamps.length; i++) {
+    const diff = Math.abs(timestamps[i] - targetTs)
+    if (diff < bestDiff && closes[i] != null) { bestDiff = diff; bestIdx = i }
+  }
+  if (bestIdx === -1) throw new Error(`No close price found for ${ticker} on ${date.toISOString().split('T')[0]}`)
+  return { rate: parseFloat(closes[bestIdx]), date: new Date(timestamps[bestIdx] * 1000).toISOString().split('T')[0] }
+}
+
 app.get('/api/fx-rates/sync', async (req, res) => {
   const auth = req.headers.authorization
   if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -1124,34 +1157,33 @@ app.get('/api/fx-rates/sync', async (req, res) => {
   }
   try {
     await ensureDB()
-    const yahooFinance = require('yahoo-finance2').default
+    const targetDate = getLastWorkingDayOfPrevMonth()
     const results = []
 
     for (const [currency, ticker] of Object.entries(FX_YAHOO_PAIRS)) {
-      // Skip currencies the user has manually locked
       const lockRow = await pool.query('SELECT is_manual FROM fx_rates WHERE currency=$1', [currency])
       if (lockRow.rows[0]?.is_manual) {
         results.push({ currency, skipped: true, reason: 'manually locked' })
         continue
       }
       try {
-        const quote = await yahooFinance.quote(ticker)
-        const rate = parseFloat(quote.regularMarketPrice)
-        if (!rate || isNaN(rate)) throw new Error('Invalid rate')
+        const { rate, date } = await fetchYahooClose(ticker, targetDate)
+        const updatedBy = `auto-sync (Yahoo close ${date})`
         await pool.query(
           `INSERT INTO fx_rates (currency, rate, updated_at, updated_by, is_manual)
-           VALUES ($1,$2,NOW(),'auto-sync (Yahoo Finance)',FALSE)
-           ON CONFLICT (currency) DO UPDATE SET rate=$2, updated_at=NOW(), updated_by='auto-sync (Yahoo Finance)', is_manual=FALSE`,
-          [currency, rate]
+           VALUES ($1,$2,NOW(),$3,FALSE)
+           ON CONFLICT (currency) DO UPDATE SET rate=$2, updated_at=NOW(), updated_by=$3, is_manual=FALSE`,
+          [currency, rate, updatedBy]
         )
-        console.log(`[ZHL] FX sync: 1 SGD = ${rate} ${currency}`)
-        results.push({ currency, rate, updated: true })
+        console.log(`[ZHL] FX sync: 1 SGD = ${rate} ${currency} (close ${date})`)
+        results.push({ currency, rate, date, updated: true })
       } catch (e) {
+        console.error(`[ZHL] FX sync failed for ${currency}:`, e.message)
         results.push({ currency, error: e.message })
       }
     }
 
-    res.json({ success: true, results, synced_at: new Date() })
+    res.json({ success: true, target_date: targetDate.toISOString().split('T')[0], results, synced_at: new Date() })
   } catch (err) {
     console.error('[ZHL] FX auto-sync error:', err.message)
     res.status(500).json({ error: err.message })
@@ -1168,17 +1200,18 @@ app.put('/api/fx-rates/:currency/unlock', requireAuth, async (req, res) => {
 
     if (ticker) {
       try {
-        const yahooFinance = require('yahoo-finance2').default
-        const quote = await yahooFinance.quote(ticker)
-        rate = parseFloat(quote.regularMarketPrice)
-        if (isNaN(rate)) rate = null
+        const targetDate = getLastWorkingDayOfPrevMonth()
+        const result = await fetchYahooClose(ticker, targetDate)
+        rate = result.rate
       } catch {}
     }
 
     if (rate) {
+      const targetDate = getLastWorkingDayOfPrevMonth()
+      const dateStr = targetDate.toISOString().split('T')[0]
       await pool.query(
-        `UPDATE fx_rates SET is_manual=FALSE, rate=$1, updated_at=NOW(), updated_by='auto-sync (live)' WHERE currency=$2`,
-        [rate, currency]
+        `UPDATE fx_rates SET is_manual=FALSE, rate=$1, updated_at=NOW(), updated_by=$3 WHERE currency=$2`,
+        [rate, currency, `auto-sync (Yahoo close ${dateStr})`]
       )
       res.json({ success: true, currency, rate, is_manual: false })
     } else {
