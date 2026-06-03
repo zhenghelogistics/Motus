@@ -1137,12 +1137,15 @@ async function fetchPrevMonthEndClose(ticker) {
   if (!result) throw new Error('No data from Yahoo Finance')
   const timestamps = result.timestamp || []
   const closes = result.indicators?.quote?.[0]?.close || []
-  // Walk back, keeping only entries that actually fall in the previous month
+  // Walk back: last weekday (Mon–Fri) entry in the previous month
   let lastIdx = -1
   for (let i = closes.length - 1; i >= 0; i--) {
     if (closes[i] == null || isNaN(closes[i])) continue
     const d = new Date(timestamps[i] * 1000)
-    if (d.getUTCFullYear() === prevYear && d.getUTCMonth() === prevMonth) { lastIdx = i; break }
+    const dow = d.getUTCDay()
+    if (d.getUTCFullYear() === prevYear && d.getUTCMonth() === prevMonth && dow !== 0 && dow !== 6) {
+      lastIdx = i; break
+    }
   }
   if (lastIdx === -1) throw new Error(`No close prices found in previous month for ${ticker}`)
   const date = new Date(timestamps[lastIdx] * 1000).toISOString().split('T')[0]
