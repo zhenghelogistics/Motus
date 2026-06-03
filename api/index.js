@@ -1117,18 +1117,13 @@ app.get('/api/dashboard', async (req, res) => {
 // Yahoo Finance tickers: 1 SGD = X [currency]
 const FX_YAHOO_PAIRS = { USD: 'SGDUSD=X', EUR: 'SGDEUR=X', IDR: 'SGDIDR=X' }
 
-// Returns the last Monday–Friday of the previous calendar month (UTC)
-function getLastWorkingDayOfPrevMonth() {
+// Fetch the last recorded closing price for the previous calendar month from Yahoo Finance.
+// Requests the full month so whichever day was the last trading day (31st, 30th, 29th, etc.)
+// is what gets returned — no guessing.
+async function fetchPrevMonthEndClose(ticker) {
   const now = new Date()
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)) // last day of prev month
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1)
-  return d
-}
-
-// Fetch the closing price from Yahoo Finance for a specific date
-async function fetchYahooClose(ticker, date) {
-  const p1 = Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - 1) / 1000)
-  const p2 = Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 3) / 1000)
+  const p1 = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1) / 1000) // first of prev month
+  const p2 = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000)      // first of current month
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&period1=${p1}&period2=${p2}`
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
@@ -1138,16 +1133,16 @@ async function fetchYahooClose(ticker, date) {
   const data = await res.json()
   const result = data?.chart?.result?.[0]
   if (!result) throw new Error('No data from Yahoo Finance')
-  const targetTs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / 1000
   const timestamps = result.timestamp || []
   const closes = result.indicators?.quote?.[0]?.close || []
-  let bestIdx = -1, bestDiff = Infinity
-  for (let i = 0; i < timestamps.length; i++) {
-    const diff = Math.abs(timestamps[i] - targetTs)
-    if (diff < bestDiff && closes[i] != null) { bestDiff = diff; bestIdx = i }
+  // Walk back from end to find the last non-null close
+  let lastIdx = -1
+  for (let i = closes.length - 1; i >= 0; i--) {
+    if (closes[i] != null && !isNaN(closes[i])) { lastIdx = i; break }
   }
-  if (bestIdx === -1) throw new Error(`No close price found for ${ticker} on ${date.toISOString().split('T')[0]}`)
-  return { rate: parseFloat(closes[bestIdx]), date: new Date(timestamps[bestIdx] * 1000).toISOString().split('T')[0] }
+  if (lastIdx === -1) throw new Error(`No close prices found in previous month for ${ticker}`)
+  const date = new Date(timestamps[lastIdx] * 1000).toISOString().split('T')[0]
+  return { rate: parseFloat(closes[lastIdx]), date }
 }
 
 app.get('/api/fx-rates/sync', async (req, res) => {
@@ -1157,7 +1152,6 @@ app.get('/api/fx-rates/sync', async (req, res) => {
   }
   try {
     await ensureDB()
-    const targetDate = getLastWorkingDayOfPrevMonth()
     const results = []
 
     for (const [currency, ticker] of Object.entries(FX_YAHOO_PAIRS)) {
@@ -1167,7 +1161,7 @@ app.get('/api/fx-rates/sync', async (req, res) => {
         continue
       }
       try {
-        const { rate, date } = await fetchYahooClose(ticker, targetDate)
+        const { rate, date } = await fetchPrevMonthEndClose(ticker)
         const updatedBy = `auto-sync (Yahoo close ${date})`
         await pool.query(
           `INSERT INTO fx_rates (currency, rate, updated_at, updated_by, is_manual)
@@ -1183,7 +1177,7 @@ app.get('/api/fx-rates/sync', async (req, res) => {
       }
     }
 
-    res.json({ success: true, target_date: targetDate.toISOString().split('T')[0], results, synced_at: new Date() })
+    res.json({ success: true, results, synced_at: new Date() })
   } catch (err) {
     console.error('[ZHL] FX auto-sync error:', err.message)
     res.status(500).json({ error: err.message })
@@ -1198,20 +1192,19 @@ app.put('/api/fx-rates/:currency/unlock', requireAuth, async (req, res) => {
     const ticker = FX_YAHOO_PAIRS[currency]
     let rate = null
 
+    let closeDate = null
     if (ticker) {
       try {
-        const targetDate = getLastWorkingDayOfPrevMonth()
-        const result = await fetchYahooClose(ticker, targetDate)
+        const result = await fetchPrevMonthEndClose(ticker)
         rate = result.rate
+        closeDate = result.date
       } catch {}
     }
 
     if (rate) {
-      const targetDate = getLastWorkingDayOfPrevMonth()
-      const dateStr = targetDate.toISOString().split('T')[0]
       await pool.query(
         `UPDATE fx_rates SET is_manual=FALSE, rate=$1, updated_at=NOW(), updated_by=$3 WHERE currency=$2`,
-        [rate, currency, `auto-sync (Yahoo close ${dateStr})`]
+        [rate, currency, `auto-sync (Yahoo close ${closeDate})`]
       )
       res.json({ success: true, currency, rate, is_manual: false })
     } else {
