@@ -2154,7 +2154,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
               <td><strong style={{ fontSize: 15 }}>{fmt(isEdit ? total : l.total)}</strong></td>
               <td>
                 {isEdit
-                  ? <input type="number" className="form-control form-control-sm" placeholder="Enter amount"
+                  ? <input type="number" className="form-control form-control-sm" placeholder=""
                       value={d.total_payable ?? ''} onChange={e => setDraft(l.id,'total_payable',e.target.value)} />
                   : l.total_payable != null
                     ? <strong style={{ color:'var(--navy)' }}>{fmt(l.total_payable)}</strong>
