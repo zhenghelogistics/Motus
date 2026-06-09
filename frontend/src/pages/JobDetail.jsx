@@ -2152,15 +2152,6 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
               </td>
               <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.qty||''} onChange={e => setDraft(l.id,'qty',parseFloat(e.target.value)||1)} /> : l.qty}</td>
               <td><strong style={{ fontSize: 15 }}>{fmt(isEdit ? total : l.total)}</strong></td>
-              <td>
-                {isEdit
-                  ? <input type="number" className="form-control form-control-sm" placeholder=""
-                      value={d.total_payable ?? ''} onChange={e => setDraft(l.id,'total_payable',e.target.value)} />
-                  : l.total_payable != null
-                    ? <strong style={{ color:'var(--navy)' }}>{fmt(l.total_payable)}</strong>
-                    : <span style={{ color:'var(--text-muted)', fontSize:12 }}>—</span>
-                }
-              </td>
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               <td>
                 <div className="flex gap-2">
