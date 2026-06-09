@@ -2072,7 +2072,7 @@ function CostTable({ lines, onSave, onDelete, fxRates }) {
                     : <span style={{ color:'var(--text-muted)', fontSize:12 }}>—</span>
                 }
               </td>
-              <td>{isEdit ? <input className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
+              <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               <td>
                 <div className="flex gap-2">
                   {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':'✓'}</button>
@@ -2161,7 +2161,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
                     : <span style={{ color:'var(--text-muted)', fontSize:12 }}>—</span>
                 }
               </td>
-              <td>{isEdit ? <input className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
+              <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               <td>
                 <div className="flex gap-2">
                   {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':'✓'}</button>
