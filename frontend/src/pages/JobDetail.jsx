@@ -1971,8 +1971,8 @@ function InfoEdit({ form, setField, staffList = [] }) {
           </div>
         </div>
       </div>
-      <div className="form-grid-2 mb-4">
-        {inp('date_out','Date Out','date')} {inp('date_delivered','Date Delivered','date')}
+      <div className="form-grid-3 mb-4">
+        {inp('date_out','ETD','date')} {inp('eta','ETA','date')} {inp('date_delivered','Date Delivered','date')}
       </div>
       <div className="form-group">
         <label className="form-label">Notes</label>

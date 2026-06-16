@@ -91,6 +91,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS amount_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS total_payable REAL`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inventory_movement_id TEXT DEFAULT NULL`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS eta TEXT DEFAULT NULL`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inventory_movement_no TEXT DEFAULT NULL`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS packing_list_items JSONB DEFAULT '[]'`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_follow_up TIMESTAMP`);
@@ -405,7 +406,7 @@ app.put('/api/jobs/:id', async (req, res) => {
     const allowed = ['shipper','consignee','weight','packages','dimensions','cbm',
       'pickup_address','pickup_contact_name','pickup_contact_number',
       'delivery_address','delivery_contact_name','delivery_contact_number',
-      'date_out','date_delivered','agent','mode','status','customer_ref',
+      'date_out','date_delivered','eta','agent','mode','status','customer_ref',
       'deadline_date','commodity','notes','gp_override',
       'customer_name','customer_contact_name','customer_contact_number','customer_email','void_reason','zhl_invoice_no','created_by','inventory_movement_id','inventory_movement_no','packing_list_items'];
     const updates = {};
