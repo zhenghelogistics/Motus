@@ -377,11 +377,11 @@ export default function CompanyStats() {
 
               {/* Mode share pie */}
               {modePieData.length > 1 && (
-                <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 12, padding: '16px 16px 8px' }}>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border-solid)', borderRadius: 12, padding: '16px 16px 16px' }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
                     Revenue Share by Mode
                   </div>
-                  <ResponsiveContainer width="100%" height={200}>
+                  <ResponsiveContainer width="100%" height={230}>
                     <PieChart>
                       <Pie data={modePieData} dataKey="value" nameKey="name" cx="35%" cy="50%" outerRadius={75}>
                         {modePieData.map((_, i) => <Cell key={i} fill={MODE_COLORS[i % MODE_COLORS.length]} />)}
