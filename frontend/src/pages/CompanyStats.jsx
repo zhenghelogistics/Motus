@@ -383,10 +383,17 @@ export default function CompanyStats() {
                   </div>
                   <ResponsiveContainer width="100%" height={200}>
                     <PieChart>
-                      <Pie data={modePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`} labelLine={false}>
+                      <Pie data={modePieData} dataKey="value" nameKey="name" cx="35%" cy="50%" outerRadius={75}>
                         {modePieData.map((_, i) => <Cell key={i} fill={MODE_COLORS[i % MODE_COLORS.length]} />)}
                       </Pie>
                       <Tooltip formatter={(v) => fmt(v)} />
+                      <Legend
+                        layout="vertical"
+                        align="right"
+                        verticalAlign="middle"
+                        wrapperStyle={{ fontSize: 11, lineHeight: '18px' }}
+                        formatter={(value, entry) => `${value} ${(entry.payload.percent * 100).toFixed(0)}%`}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
