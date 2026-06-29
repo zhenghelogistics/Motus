@@ -1,55 +1,79 @@
 # ZHL Job Movement — Operations Tool
 
-Internal freight operations tool for Zhenghe Logistics. Tracks jobs, generates PDFs (quotations, delivery orders, accounts references), and provides a financial dashboard.
+Internal freight operations tool for Zhenghe Logistics ("Motus"). It tracks jobs end to
+end, generates client-ready PDFs (quotations, delivery orders, accounts references), runs a
+financial dashboard, manages sales leads, and uses AI to parse incoming emails and documents
+into structured job data.
 
 ## Stack
 
-- **Frontend** — React + Vite, deployed on Vercel
-- **Backend** — Node/Express API routes via Vercel serverless functions
-- **Database** — Supabase (PostgreSQL)
-- **Auth** — Supabase Auth (magic link / email OTP)
-- **PDF export** — jsPDF + html2canvas (client-side)
+- **Frontend** — React 18 + Vite, React Router, Recharts (charts), deployed on Vercel
+- **Backend** — Node/Express, exposed as a single Vercel serverless function (`api/index.js`)
+- **Database** — Supabase (PostgreSQL), accessed via `pg`
+- **Auth** — Supabase Auth (magic link / email OTP); the API verifies the Supabase JWT
+- **File storage** — Supabase Storage (`documents` bucket)
+- **AI** — Anthropic Claude (`@anthropic-ai/sdk`) for email/invoice/DO/packing-list parsing and lead email drafting
+- **FX rates** — Yahoo Finance (`yahoo-finance2`), synced daily via a Vercel cron
+- **PDF export** — jsPDF + jspdf-autotable (client-side)
 
-## Local development
+## Features
 
-```bash
-# Install all dependencies
-npm install
+- **Dashboard** — KPI cards, GP% trend chart, revenue-share-by-mode pie chart, and a
+  toggleable Job Status overview.
+- **Movement Tracker** (`/jobs`) — the job list: create, search, filter, and open jobs;
+  generate Quotation, Local/International Delivery Order, Release D/O, and Accounts Reference PDFs.
+- **Job Detail** (`/jobs/:id`) — costing and billing lines, documents, dimension/CBM
+  breakdown, and inventory linking/sync.
+- **Quote Calculator** (`/quote`) — build a quote with markup, pick standard remarks, and
+  export a branded Quotation PDF.
+- **Email Intake** (`/intake`) — paste or upload an email/invoice/DO/packing list and let
+  Claude extract structured fields to pre-fill a job.
+- **Leads / CRM** (`/leads`) — capture leads, claim them, draft outreach emails with AI;
+  old leads are auto-purged via a daily cron.
+- **Company Stats** (`/stats`) — per-company performance breakdowns.
+- **My Account** — set display name, job title, and a drawn/uploaded signature that is
+  embedded into exported Quotation PDFs.
+- **In-app Changelog** — a "What's New" feed sourced from `frontend/src/changelog.js`.
 
-# Start frontend (port 5173) + backend API (port 3001) together
-npm run dev
+## Project layout
+
+```
+api/index.js        # Vercel serverless Express app — the entire backend API
+package.json        # API dependencies (installed by Vercel)
+frontend/           # React + Vite app
+vercel.json         # Vercel build, routing, function, and cron config
 ```
 
-The frontend proxies `/api/*` to the local backend during development.
+## Development workflow
+
+There is no local server — the app runs only on Vercel. To make changes:
+
+1. Edit `api/index.js` (backend) and/or files under `frontend/src/`.
+2. Commit and push to `main`.
+3. Vercel auto-deploys; check the change on the live site.
+
+## Environment variables
+
+Set these in the Vercel project settings:
+
+- `DATABASE_URL` — Supabase Postgres connection string
+- `SUPABASE_URL` — Supabase project URL (storage)
+- `SUPABASE_SERVICE_KEY` — Supabase service role key (storage + privileged DB access)
+- `SUPABASE_JWT_SECRET` — base64 JWT secret used to verify auth tokens
+- `ANTHROPIC_API_KEY` — Claude API key for AI parsing / drafting
+
+The frontend needs the Supabase anon credentials (see `frontend/src/lib/supabase.js`),
+configured via Vite env vars.
 
 ## Deployment
 
-Push to `main` → Vercel auto-deploys frontend + API routes.
+Push to `main` → Vercel auto-deploys the frontend and the `api/index.js` serverless function.
 
-Environment variables required in Vercel:
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `ANTHROPIC_API_KEY` (for AI email/invoice parsing)
-
----
+Scheduled jobs (Vercel cron, see `vercel.json`):
+- `GET /api/fx-rates/sync` — daily at 16:00 (refresh FX rates)
+- `GET /api/leads/purge-old` — daily at 02:00 (purge stale leads)
 
 ## Changelog
 
-### 2026-05-05
-- **Job Status Overview on Dashboard** — Toggleable status pills (New, In Progress, On Hold, Completed, Missing Costing) with live counts. Click any pill to see the jobs in that bucket.
-- **Copy from Previous Job** — New job form can prefill shipper, consignee, addresses and mode from any past job.
-- **Customer Autocomplete** — Customer name field in new job searches past jobs as you type.
-- **Dimension Boxes with CBM Auto-Calc** — Per-box L×W×H grid replaces flat dimension input; CBM and volumetric weight calculated automatically.
-- **Delivery Order Modal** — DO button opens an edit modal; choose Local DO, International DO, or both before generating.
-
-### 2026-05-04
-- **Air Freight & LCL modes** — Added Air Freight and LCL as selectable job modes.
-- **Local & International Delivery Orders** — DO split into two separate templates; both can be generated from a single job.
-- **Performance** — Fixed N+1 query on jobs list; dashboard runs 7 queries in parallel.
-- **KPI cards** — Fixed NaN display when PostgreSQL returns numeric strings.
-- **GP% trend chart** — Zero-fills missing months so the 6-month chart always renders correctly.
-
-### 2026-04-30
-- **Logo on all PDFs** — Zhenghe Logistics logo added to Quotation, Accounts Reference, Local DO, International DO.
-- **Notes section on all PDFs** — Job notes now appear on every export.
-- **Dimension input redesign** — Vertical layout with add/remove box buttons and a CBM breakdown panel.
+The maintained changelog lives in [`frontend/src/changelog.js`](frontend/src/changelog.js)
+and is shown in-app under "What's New". Add new entries at the top of that file.

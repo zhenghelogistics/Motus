@@ -1,17 +1,20 @@
 # Dependencies
 node_modules/
 frontend/node_modules/
-backend/node_modules/
-
-# Database & uploads (local only)
-backend/zhl.db
-backend/zhl.db-shm
-backend/zhl.db-wal
-backend/uploads/
 
 # Environment variables (never commit)
-backend/.env
 .env
+.env.local
+*.env.local
+**/.env.local
+
+# Local-only data & leftovers (never commit)
+*.db
+*.db-shm
+*.db-wal
+backend/
+my_leads.json
+migrate_leads.js
 
 # Build output
 frontend/dist/
