@@ -3,6 +3,15 @@
 
 export const CHANGELOG = [
   {
+    id: 'eta-etd-fields',
+    date: '2026-06-16',
+    title: 'ETA Field & ETD Rename',
+    description:
+      'Jobs now have a separate ETA (estimated arrival) date alongside the departure date, which has been renamed from "Date Out" to "ETD" for clarity. The job date row now shows three fields side by side: ETD, ETA, and Date Delivered.',
+    route: '/jobs',
+    routeLabel: 'Open Movement Tracker',
+  },
+  {
     id: 'remarks-selector',
     date: '2026-05-28',
     title: 'Remarks Selector in Quote Calculator',
