@@ -1,79 +1,98 @@
-# ZHL Job Movement — Operations Tool
+<div align="center">
 
-Internal freight operations tool for Zhenghe Logistics ("Motus"). It tracks jobs end to
-end, generates client-ready PDFs (quotations, delivery orders, accounts references), runs a
-financial dashboard, manages sales leads, and uses AI to parse incoming emails and documents
-into structured job data.
+# 🚢 Motus
 
-## Stack
+### The freight operations platform that runs the Zhenghe Logistics desk.
 
-- **Frontend** — React 18 + Vite, React Router, Recharts (charts), deployed on Vercel
-- **Backend** — Node/Express, exposed as a single Vercel serverless function (`api/index.js`)
-- **Database** — Supabase (PostgreSQL), accessed via `pg`
-- **Auth** — Supabase Auth (magic link / email OTP); the API verifies the Supabase JWT
-- **File storage** — Supabase Storage (`documents` bucket)
-- **AI** — Anthropic Claude (`@anthropic-ai/sdk`) for email/invoice/DO/packing-list parsing and lead email drafting
-- **FX rates** — Yahoo Finance (`yahoo-finance2`), synced daily via a Vercel cron
-- **PDF export** — jsPDF + jspdf-autotable (client-side)
+From first enquiry to final delivery — track every job, watch every margin,
+and generate every client-ready document in one place.
 
-## Features
+<br>
 
-- **Dashboard** — KPI cards, GP% trend chart, revenue-share-by-mode pie chart, and a
-  toggleable Job Status overview.
-- **Movement Tracker** (`/jobs`) — the job list: create, search, filter, and open jobs;
-  generate Quotation, Local/International Delivery Order, Release D/O, and Accounts Reference PDFs.
-- **Job Detail** (`/jobs/:id`) — costing and billing lines, documents, dimension/CBM
-  breakdown, and inventory linking/sync.
-- **Quote Calculator** (`/quote`) — build a quote with markup, pick standard remarks, and
-  export a branded Quotation PDF.
-- **Email Intake** (`/intake`) — paste or upload an email/invoice/DO/packing list and let
-  Claude extract structured fields to pre-fill a job.
-- **Leads / CRM** (`/leads`) — capture leads, claim them, draft outreach emails with AI;
-  old leads are auto-purged via a daily cron.
-- **Company Stats** (`/stats`) — per-company performance breakdowns.
-- **My Account** — set display name, job title, and a drawn/uploaded signature that is
-  embedded into exported Quotation PDFs.
-- **In-app Changelog** — a "What's New" feed sourced from `frontend/src/changelog.js`.
+`React + Vite` · `Supabase` · `Express on Vercel` · `Claude AI` · `Live FX`
 
-## Project layout
+</div>
 
-```
-api/index.js        # Vercel serverless Express app — the entire backend API
-package.json        # API dependencies (installed by Vercel)
-frontend/           # React + Vite app
-vercel.json         # Vercel build, routing, function, and cron config
-```
+---
 
-## Development workflow
+## Why Motus
 
-There is no local server — the app runs only on Vercel. To make changes:
+Freight forwarding lives in spreadsheets, inboxes, and PDF templates scattered
+across a dozen folders. Motus pulls all of it into a single, fast web app — so
+the team spends less time copy-pasting and more time moving cargo.
 
-1. Edit `api/index.js` (backend) and/or files under `frontend/src/`.
-2. Commit and push to `main`.
-3. Vercel auto-deploys; check the change on the live site.
+Paste in an enquiry email and watch Claude turn it into a structured job.
+Build a quote, see the margin live, and export a branded PDF in one click. Open
+the dashboard and know exactly where every shipment — and every dollar — stands.
 
-## Environment variables
+## ✨ Features
 
-Set these in the Vercel project settings:
+### 📊 Financial Dashboard
+KPI cards, a GP% trend line, a revenue-share-by-mode pie chart, and a live job
+status overview — your whole operation at a glance the moment you log in.
 
-- `DATABASE_URL` — Supabase Postgres connection string
-- `SUPABASE_URL` — Supabase project URL (storage)
-- `SUPABASE_SERVICE_KEY` — Supabase service role key (storage + privileged DB access)
-- `SUPABASE_JWT_SECRET` — base64 JWT secret used to verify auth tokens
-- `ANTHROPIC_API_KEY` — Claude API key for AI parsing / drafting
+### 🚚 Movement Tracker
+The command center for every job. Create, search, and filter shipments, then
+generate any document you need on the spot.
 
-The frontend needs the Supabase anon credentials (see `frontend/src/lib/supabase.js`),
-configured via Vite env vars.
+### 🤖 AI Email & Document Intake
+Paste or upload an email, invoice, delivery order, or packing list and let
+Claude extract the fields and pre-fill a new job — no more manual re-typing.
 
-## Deployment
+### 🧮 Quote Calculator
+Build line-by-line freight quotes with per-line and global markups, a GST
+toggle, and SGD/USD support. Pick from standard remarks, see the final price
+update live, and export a clean, branded quotation.
 
-Push to `main` → Vercel auto-deploys the frontend and the `api/index.js` serverless function.
+### 🧾 One-Click PDFs
+Quotations, Local & International Delivery Orders, Release D/Os, Subsidiary
+Export Certificates, and Accounts References — all branded, all client-ready,
+all generated in the browser.
 
-Scheduled jobs (Vercel cron, see `vercel.json`):
-- `GET /api/fx-rates/sync` — daily at 16:00 (refresh FX rates)
-- `GET /api/leads/purge-old` — daily at 02:00 (purge stale leads)
+### 💱 Live FX Rates
+Currency rates refresh automatically every day from Yahoo Finance, with a
+manual override when you need to lock a rate.
 
-## Changelog
+### 👥 Leads / CRM
+Capture and claim sales leads, draft outreach emails with AI, and never lose
+track of a prospect — stale leads are auto-cleaned daily.
 
-The maintained changelog lives in [`frontend/src/changelog.js`](frontend/src/changelog.js)
-and is shown in-app under "What's New". Add new entries at the top of that file.
+### 📈 Company Stats
+Per-company performance, broken down monthly or yearly by mode of transport —
+packages, weight, CBM, revenue, cost, profit, and GP%.
+
+### ✍️ Personal Signatures
+Each team member sets their own name, title, and signature (drawn or uploaded),
+embedded automatically into the quotations they send.
+
+## 🛠 Built With
+
+| Layer | Tech |
+|-------|------|
+| Frontend | React 18, Vite, React Router, Recharts |
+| Backend | Node/Express on Vercel serverless |
+| Database | Supabase (PostgreSQL) |
+| Auth & Storage | Supabase Auth + Storage |
+| AI | Anthropic Claude |
+| FX rates | Yahoo Finance |
+| PDF export | jsPDF |
+
+## 🚀 Deployment
+
+Motus runs entirely on Vercel — push to `main` and it deploys itself, frontend
+and API together. Scheduled crons keep FX rates fresh and the leads pipeline tidy.
+
+## 📓 What's New
+
+Recent updates live in the in-app **"What's New"** feed, sourced from
+[`frontend/src/changelog.js`](frontend/src/changelog.js).
+
+## 🧑‍💻 For Developers
+
+Setup, architecture, environment variables, and the deploy workflow are
+documented in **[DEVELOPMENT.md](DEVELOPMENT.md)**.
+
+<div align="center">
+<br>
+Built for <strong>Zhenghe Logistics</strong> 🇸🇬
+</div>
