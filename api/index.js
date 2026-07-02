@@ -16,6 +16,14 @@ const pool = new Pool({
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// claude-sonnet-5 runs adaptive thinking by default, so content[0] may be a
+// thinking block rather than text — find the actual text block instead of
+// assuming position.
+function getResponseText(msg) {
+  const block = msg.content.find(b => b.type === 'text');
+  return block ? block.text : '';
+}
+
 // Memory storage — no disk in serverless
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -789,7 +797,7 @@ app.post('/api/parse-email', async (req, res) => {
 }
 Email/Job Order:\n${text}` }]
     });
-    const content = msg.content[0].text;
+    const content = getResponseText(msg);
     const match = content.match(/\{[\s\S]*\}/);
     if (!match) return res.status(422).json({ error: 'Could not parse AI response' });
     res.json(JSON.parse(match[0]));
@@ -842,7 +850,7 @@ app.post('/api/parse-email-file', upload.single('file'), async (req, res) => {
 }
 Email/Job Order:\n${text.substring(0, 8000)}` }]
     });
-    const content = msg.content[0].text;
+    const content = getResponseText(msg);
     const match = content.match(/\{[\s\S]*\}/);
     if (!match) return res.status(422).json({ error: 'Could not parse AI response' });
     res.json(JSON.parse(match[0]));
@@ -906,7 +914,7 @@ Return only the JSON object.`
       max_tokens: 1500,
       messages: [{ role: 'user', content: msgContent }]
     })
-    const content = msg.content[0].text
+    const content = getResponseText(msg)
     const match = content.match(/\{[\s\S]*\}/)
     if (!match) return res.status(422).json({ error: 'Could not parse document' })
     const parsed = JSON.parse(match[0])
@@ -972,7 +980,7 @@ If no items are found return [].`
       console.error('[ZHL] POST /api/parse-packing-list: response hit max_tokens (list too long)')
       return res.status(422).json({ error: 'Packing list is too long to extract in one pass. Try splitting it or add rows manually.' })
     }
-    const content = (msg.content[0]?.text || '').replace(/```json\s*|\s*```/g, '').trim()
+    const content = getResponseText(msg).replace(/```json\s*|\s*```/g, '').trim()
     const match = content.match(/\[[\s\S]*\]/)
     if (!match) return res.status(422).json({ error: 'Could not parse packing list' })
     res.json(JSON.parse(match[0]))
@@ -1004,7 +1012,7 @@ app.post('/api/parse-invoice', upload.single('file'), async (req, res) => {
 }
 Invoice text:\n${data.text.substring(0, 4000)}` }]
     });
-    const content = msg.content[0].text;
+    const content = getResponseText(msg);
     const match = content.match(/\{[\s\S]*\}/);
     if (!match) return res.status(422).json({ error: 'Could not parse invoice' });
     res.json(JSON.parse(match[0]));
