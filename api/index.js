@@ -932,6 +932,14 @@ Each element must have these fields (use null for missing values):
   "breadth_cm": <carton width/breadth in cm as number or null>,
   "height_cm": <carton height in cm as number or null>
 }]
+
+Some packing lists are a per-box table (Box #, Length, Width, Height, Weight) with a single
+"Contents" or "Marking" line describing what's inside, rather than a per-SKU product list.
+For that format: create ONE item per distinct content description, with qty_actual set to
+the total quantity stated in the Contents line (e.g. "595 pieces"), num_packages set to the
+count of boxes for that content, and length_cm/breadth_cm/height_cm taken from the box
+dimensions (use the most common values if they vary slightly). Do not return one row per box.
+
 If no items are found return [].`
   try {
     let msgContent

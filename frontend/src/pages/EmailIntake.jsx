@@ -124,28 +124,30 @@ export default function EmailIntake() {
     setParseError('')
     try {
       const text = await extractPDFText(file)
-      let jobData, items
-      if (text.length > 100) {
-        const [doRes, plRes] = await Promise.allSettled([
-          parseDO(null, text),
-          parsePackingList(null, text)
-        ])
-        if (doRes.status === 'fulfilled') jobData = doRes.value.data
-        if (plRes.status === 'fulfilled') items = plRes.value.data
-      } else {
-        if (file.size > 4 * 1024 * 1024) {
-          setParseError('This appears to be a scanned PDF and is too large to upload (max 4 MB). Please compress it at ilovepdf.com first.')
-          return
-        }
-        const [doRes, plRes] = await Promise.allSettled([
-          parseDO(file, null),
-          parsePackingList(file, null)
-        ])
-        if (doRes.status === 'fulfilled') jobData = doRes.value.data
-        if (plRes.status === 'fulfilled') items = plRes.value.data
+      const useText = text.length > 100
+      if (!useText && file.size > 4 * 1024 * 1024) {
+        setParseError('This appears to be a scanned PDF and is too large to upload (max 4 MB). Please compress it at ilovepdf.com first.')
+        return
       }
-      if (jobData) applyParsedData(jobData)
-      if (Array.isArray(items) && items.length) setPlItems(items)
+      const [doRes, plRes] = await Promise.allSettled([
+        useText ? parseDO(null, text) : parseDO(file, null),
+        useText ? parsePackingList(null, text) : parsePackingList(file, null)
+      ])
+      if (doRes.status === 'fulfilled') applyParsedData(doRes.value.data)
+      if (plRes.status === 'fulfilled') setPlItems(Array.isArray(plRes.value.data) ? plRes.value.data : [])
+
+      // Promise.allSettled never rejects, so failures here would otherwise pass silently —
+      // surface them instead of leaving the user staring at an empty packing list.
+      const errors = []
+      if (doRes.status === 'rejected') {
+        errors.push(`job details (${doRes.reason?.response?.data?.error || doRes.reason?.message || 'failed'})`)
+      }
+      if (plRes.status === 'rejected') {
+        errors.push(`packing list items (${plRes.reason?.response?.data?.error || plRes.reason?.message || 'failed'})`)
+      } else if (Array.isArray(plRes.value?.data) && plRes.value.data.length === 0) {
+        errors.push('packing list items (none found in this document)')
+      }
+      if (errors.length) setParseError(`Could not extract: ${errors.join('; ')}.`)
     } catch (err) {
       setParseError(err.response?.data?.error || 'DO / Packing List parsing failed. Please try again.')
     } finally {
