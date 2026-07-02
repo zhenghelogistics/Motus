@@ -23,9 +23,13 @@ const NAV = [
   { to: '/leads',  icon: '⇩',  label: 'Leads Pipeline',     exact: false },
 ]
 
-// Default SGD-based rates (approximate)
-const DEFAULT_RATES = { USD: 0.745, IDR: 11900, EUR: 0.688 }
-const FX_ORDER = ['USD', 'IDR', 'EUR']
+// Default SGD-based rates (approximate; overwritten by the daily Yahoo Finance sync)
+const DEFAULT_RATES = {
+  USD: 0.745, EUR: 0.688, CNY: 5.35, MYR: 3.35, HKD: 5.8, THB: 26.5,
+  VND: 18500, IDR: 11900, INR: 63, JPY: 112, GBP: 0.58, AUD: 1.12,
+  KRW: 1010, PHP: 43, TWD: 23.5, AED: 2.74,
+}
+const FX_ORDER = ['USD', 'EUR', 'CNY', 'MYR', 'HKD', 'THB', 'VND', 'IDR', 'INR', 'JPY', 'GBP', 'AUD', 'KRW', 'PHP', 'TWD', 'AED']
 const sortedRateEntries = (rates) => FX_ORDER.filter(c => c in rates).map(c => [c, rates[c]])
 
 const SEEN_KEY = 'changelog_seen_count'

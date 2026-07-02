@@ -12,7 +12,10 @@ import {
 import DimensionBoxes from '../components/DimensionBoxes'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
-const CURRENCIES = ['SGD', 'USD', 'IDR', 'EUR']
+const CURRENCIES = [
+  'SGD', 'USD', 'EUR', 'IDR', 'CNY', 'MYR', 'HKD', 'THB',
+  'VND', 'INR', 'JPY', 'GBP', 'AUD', 'KRW', 'PHP', 'TWD', 'AED',
+]
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 const DOC_TYPES = ['CI', 'PL', 'DO', 'Invoice', 'Other']
 const navy = [4, 44, 83]
@@ -1565,7 +1568,7 @@ export default function JobDetail() {
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShowPdfCcyMenu(false)} />
                 <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 200, marginTop: 4, backgroundColor: '#ffffff', border: '1px solid var(--border-solid)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.14)', minWidth: 160 }}>
-                  {['SGD', 'USD', 'EUR', 'IDR'].map(ccy => (
+                  {CURRENCIES.map(ccy => (
                     <button key={ccy} onClick={() => { exportAccountsPDF(ccy); setShowPdfCcyMenu(false) }}
                       style={{ display: 'block', width: '100%', padding: '9px 14px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: 'var(--font)' }}
                       onMouseEnter={e => e.currentTarget.style.background = '#F0F4FB'}

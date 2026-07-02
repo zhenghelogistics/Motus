@@ -149,7 +149,10 @@ async function initDB() {
   `);
   await pool.query(`
     INSERT INTO fx_rates (currency, rate) VALUES
-      ('USD', 0.745), ('IDR', 11900), ('EUR', 0.688)
+      ('USD', 0.745), ('IDR', 11900), ('EUR', 0.688),
+      ('CNY', 5.35), ('MYR', 3.35), ('HKD', 5.8), ('THB', 26.5),
+      ('VND', 18500), ('INR', 63), ('JPY', 112), ('GBP', 0.58),
+      ('AUD', 1.12), ('KRW', 1010), ('PHP', 43), ('TWD', 23.5), ('AED', 2.74)
     ON CONFLICT (currency) DO NOTHING
   `);
   await pool.query(`
@@ -933,7 +936,7 @@ If no items are found return [].`
   try {
     let msgContent
     if (req.body.text) {
-      msgContent = [{ type: 'text', text: `${PROMPT}\n\nDocument text:\n${req.body.text.substring(0, 8000)}` }]
+      msgContent = [{ type: 'text', text: `${PROMPT}\n\nDocument text:\n${req.body.text.substring(0, 24000)}` }]
     } else if (req.file) {
       let extracted = ''
       try {
@@ -942,7 +945,7 @@ If no items are found return [].`
         if (text && text.trim().length > 50) extracted = text
       } catch (_) {}
       msgContent = extracted
-        ? [{ type: 'text', text: `${PROMPT}\n\nDocument text:\n${extracted.substring(0, 8000)}` }]
+        ? [{ type: 'text', text: `${PROMPT}\n\nDocument text:\n${extracted.substring(0, 24000)}` }]
         : [
             { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: req.file.buffer.toString('base64') } },
             { type: 'text', text: PROMPT }
@@ -950,12 +953,18 @@ If no items are found return [].`
     } else {
       return res.status(400).json({ error: 'No file or text provided' })
     }
+    // Packing lists can have many line items — give the model plenty of output
+    // headroom so the JSON array isn't truncated mid-item (which breaks parsing).
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
+      max_tokens: 8000,
       messages: [{ role: 'user', content: msgContent }]
     })
-    const content = msg.content[0].text
+    if (msg.stop_reason === 'max_tokens') {
+      console.error('[ZHL] POST /api/parse-packing-list: response hit max_tokens (list too long)')
+      return res.status(422).json({ error: 'Packing list is too long to extract in one pass. Try splitting it or add rows manually.' })
+    }
+    const content = (msg.content[0]?.text || '').replace(/```json\s*|\s*```/g, '').trim()
     const match = content.match(/\[[\s\S]*\]/)
     if (!match) return res.status(422).json({ error: 'Could not parse packing list' })
     res.json(JSON.parse(match[0]))
@@ -1116,7 +1125,12 @@ app.get('/api/dashboard', async (req, res) => {
 
 // ─── FX RATES ────────────────────────────────────────────────────────────────
 // Yahoo Finance tickers: 1 SGD = X [currency]
-const FX_YAHOO_PAIRS = { USD: 'SGDUSD=X', EUR: 'SGDEUR=X', IDR: 'SGDIDR=X' }
+const FX_YAHOO_PAIRS = {
+  USD: 'SGDUSD=X', EUR: 'SGDEUR=X', IDR: 'SGDIDR=X',
+  CNY: 'SGDCNY=X', MYR: 'SGDMYR=X', HKD: 'SGDHKD=X', THB: 'SGDTHB=X',
+  VND: 'SGDVND=X', INR: 'SGDINR=X', JPY: 'SGDJPY=X', GBP: 'SGDGBP=X',
+  AUD: 'SGDAUD=X', KRW: 'SGDKRW=X', PHP: 'SGDPHP=X', TWD: 'SGDTWD=X', AED: 'SGDAED=X',
+}
 
 // Returns the last Mon–Fri of the previous calendar month (UTC Date object)
 function lastWeekdayOfPrevMonth(now) {
