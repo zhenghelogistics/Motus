@@ -762,7 +762,7 @@ app.post('/api/parse-email', async (req, res) => {
   if (!text) return res.status(400).json({ error: 'No text provided' });
   try {
     const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       max_tokens: 1500,
       system: 'You are a freight forwarding operations assistant for Zhenghe Logistics (ZHL), Singapore. Extract job details from emails and job orders. Always return valid JSON only, no other text.',
       messages: [{ role: 'user', content: `Parse this email/job order and return a JSON object with these exact fields (null for missing):
@@ -815,7 +815,7 @@ app.post('/api/parse-email-file', upload.single('file'), async (req, res) => {
     if (!text.trim()) return res.status(422).json({ error: 'Could not extract text from file' });
 
     const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       max_tokens: 1500,
       system: 'You are a freight forwarding operations assistant for Zhenghe Logistics (ZHL), Singapore. Extract job details from emails and job orders. Always return valid JSON only, no other text.',
       messages: [{ role: 'user', content: `Parse this email/job order and return a JSON object with these exact fields (null for missing):
@@ -902,7 +902,7 @@ Return only the JSON object.`
     }
 
     const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       max_tokens: 1500,
       messages: [{ role: 'user', content: msgContent }]
     })
@@ -964,7 +964,7 @@ If no items are found return [].`
     // Packing lists can have many line items — give the model plenty of output
     // headroom so the JSON array isn't truncated mid-item (which breaks parsing).
     const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       max_tokens: 8000,
       messages: [{ role: 'user', content: msgContent }]
     })
@@ -990,7 +990,7 @@ app.post('/api/parse-invoice', upload.single('file'), async (req, res) => {
     const data = await pdfParse(req.file.buffer);
 
     const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       max_tokens: 800,
       system: 'You are a freight forwarding assistant. Extract invoice details and return valid JSON only.',
       messages: [{ role: 'user', content: `Extract cost line details from this vendor invoice and return JSON:
