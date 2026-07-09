@@ -1661,7 +1661,7 @@ app.post('/api/leads/:id/generate-email', async (req, res) => {
 function rfqCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-rfq-secret')
 }
 
 app.options('/api/rfq', (req, res) => {
@@ -1714,6 +1714,12 @@ function buildRfqNotes(b, mode, addons) {
 
 app.post('/api/rfq', async (req, res) => {
   rfqCors(res)
+  // Optional shared-secret gate. When RFQ_SHARED_SECRET is set, callers (the Zhenghe site,
+  // server-side) must send a matching x-rfq-secret header. Unset = fully public (prior behavior).
+  const rfqSecret = process.env.RFQ_SHARED_SECRET
+  if (rfqSecret && req.headers['x-rfq-secret'] !== rfqSecret) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
   try {
     const b = req.body || {}
     const str = (v) => (v == null ? '' : String(v))
