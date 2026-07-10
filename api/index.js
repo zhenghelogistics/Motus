@@ -287,7 +287,7 @@ app.use(async (req, res, next) => {
 
 // ─── AUTH GUARD (all /api/* except health checks) ───────────────────────────
 app.use('/api', (req, res, next) => {
-  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq' || req.url === '/leads/purge-old') return next()
+  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq' || req.url === '/leads/purge-old' || req.path === '/track') return next()
   requireAuth(req, res, next)
 })
 
@@ -1770,6 +1770,71 @@ app.post('/api/rfq', async (req, res) => {
     res.status(201).json({ success: true, leadId, ref })
   } catch (err) {
     console.error('[ZHL] POST /api/rfq', err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// ─── PUBLIC SHIPMENT TRACKING ────────────────────────────────────────────────
+// GET /api/track?ref=<job_number|customer_ref>[&type=] — public read for the
+// Zhenghe customer site's tracking page. Auth-exempt (see the allowlist above),
+// but requires a bearer secret when TRACKING_API_SECRET is set (the site sends
+// `Authorization: Bearer <secret>` server-side).
+//
+// PRIVACY: refs (job numbers / customer refs) are guessable, so this returns
+// ONLY non-sensitive movement milestones — status, generic events, dates, and a
+// coarse mode label. It deliberately never exposes names, addresses, commodity,
+// contacts, or any cost/billing/GP field. Voided jobs are treated as not-found.
+function fmtTrackDate(d) {
+  if (!d) return ''
+  const dt = new Date(d)
+  return isNaN(dt.getTime()) ? String(d) : dt.toISOString().slice(0, 10)
+}
+
+app.get('/api/track', async (req, res) => {
+  const trackSecret = process.env.TRACKING_API_SECRET
+  if (trackSecret && req.headers.authorization !== `Bearer ${trackSecret}`) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  const ref = (req.query.ref || '').toString().trim()
+  const type = (req.query.type || 'zhl').toString()
+  if (!ref) return res.status(400).json({ error: 'ref required' })
+
+  try {
+    const r = await pool.query(
+      `SELECT job_number, mode, status, date_out, eta, date_delivered, created_at
+         FROM jobs
+        WHERE (LOWER(job_number) = LOWER($1) OR LOWER(customer_ref) = LOWER($1))
+          AND (status IS NULL OR status <> 'Voided')
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [ref]
+    )
+    const job = r.rows[0]
+    if (!job) return res.status(404).json({ error: 'Shipment not found' })
+
+    const delivered = !!job.date_delivered || job.status === 'Completed' || job.status === 'Delivered'
+    const friendly = delivered
+      ? 'Delivered'
+      : ({ 'New': 'Booking received', 'In Progress': 'In transit', 'On Hold': 'On hold' }[job.status] || 'In progress')
+
+    const events = [{ event: 'Booking received', loc: '', date: fmtTrackDate(job.created_at), done: true }]
+    if (job.date_out) events.push({ event: 'Dispatched from origin', loc: '', date: fmtTrackDate(job.date_out), done: true })
+    events.push({
+      event: friendly,
+      loc: '',
+      date: fmtTrackDate(delivered ? (job.date_delivered || job.eta) : job.eta),
+      done: delivered,
+    })
+
+    res.json({
+      ref: job.job_number,
+      type,
+      route: job.mode || 'Shipment',
+      status: friendly,
+      events,
+    })
+  } catch (err) {
+    console.error('[ZHL] GET /api/track', err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
 })
