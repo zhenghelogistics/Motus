@@ -40,6 +40,7 @@ Set these in the Vercel project settings:
 - `SUPABASE_SERVICE_KEY` — Supabase service role key (storage + privileged DB access)
 - `SUPABASE_JWT_SECRET` — base64 JWT secret used to verify auth tokens
 - `ANTHROPIC_API_KEY` — Claude API key for AI parsing / drafting
+- `RFQ_SHARED_SECRET` — optional. When set, `POST /api/rfq` requires a matching `x-rfq-secret` header (the Zhenghe site sends it server-side). Leave unset to keep `/rfq` fully public.
 - `TRACKING_API_SECRET` — optional. When set, `GET /api/track` (public shipment tracking for the Zhenghe site) requires `Authorization: Bearer <secret>`. Leave unset to keep tracking open.
 
 The frontend needs the Supabase anon credentials (see `frontend/src/lib/supabase.js`),
