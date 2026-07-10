@@ -40,6 +40,7 @@ Set these in the Vercel project settings:
 - `SUPABASE_SERVICE_KEY` — Supabase service role key (storage + privileged DB access)
 - `SUPABASE_JWT_SECRET` — base64 JWT secret used to verify auth tokens
 - `ANTHROPIC_API_KEY` — Claude API key for AI parsing / drafting
+- `TRACKING_API_SECRET` — optional. When set, `GET /api/track` (public shipment tracking for the Zhenghe site) requires `Authorization: Bearer <secret>`. Leave unset to keep tracking open.
 
 The frontend needs the Supabase anon credentials (see `frontend/src/lib/supabase.js`),
 configured via Vite env vars.
