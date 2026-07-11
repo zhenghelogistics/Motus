@@ -287,7 +287,7 @@ app.use(async (req, res, next) => {
 
 // ─── AUTH GUARD (all /api/* except health checks) ───────────────────────────
 app.use('/api', (req, res, next) => {
-  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq' || req.url === '/leads/purge-old' || req.path === '/track') return next()
+  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq' || req.url === '/leads/purge-old' || req.path === '/track' || req.path === '/customer/documents' || req.path === '/customer/invoices') return next()
   requireAuth(req, res, next)
 })
 
@@ -1835,6 +1835,125 @@ app.get('/api/track', async (req, res) => {
     })
   } catch (err) {
     console.error('[ZHL] GET /api/track', err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// ─── CUSTOMER PORTAL FEEDS (documents + invoices) ────────────────────────────
+// GET /api/customer/documents?email= and GET /api/customer/invoices?email=
+// power the Zhenghe site's customer portal (Phase 3). Auth-exempt from the
+// Supabase-session guard above (customers aren't ZHL staff), but — unlike
+// /rfq and /track — these ALWAYS require a bearer secret: they return billing
+// amounts and document links scoped only by an email string the customer
+// typed at signup, which is too weak a boundary to leave optionally-public.
+// If CUSTOMER_API_SECRET isn't set, the endpoints refuse everything (503)
+// rather than silently going public.
+//
+// Scoping is by exact (case-insensitive) match against jobs.customer_email,
+// a free-text field ops types in — typos mean a job just won't show up for
+// that customer. Accepted limitation, not fixed here.
+//
+// Cost lines, vendor names, GP/margin figures and shipper/consignee/contact
+// details are never touched by either handler.
+function requireCustomerSecret(req, res) {
+  const secret = process.env.CUSTOMER_API_SECRET
+  if (!secret) {
+    res.status(503).json({ error: 'Customer API not configured' })
+    return false
+  }
+  if (req.headers.authorization !== `Bearer ${secret}`) {
+    res.status(401).json({ error: 'Unauthorized' })
+    return false
+  }
+  return true
+}
+
+app.get('/api/customer/documents', async (req, res) => {
+  if (!requireCustomerSecret(req, res)) return
+  const email = (req.query.email || '').toString().trim()
+  if (!email) return res.status(400).json({ error: 'email required' })
+
+  try {
+    const r = await pool.query(
+      `SELECT d.id, d.file_name, d.doc_type, d.upload_date, d.file_url, j.job_number
+         FROM documents d
+         JOIN jobs j ON j.id = d.job_id
+        WHERE LOWER(j.customer_email) = LOWER($1)
+          AND (j.status IS NULL OR j.status <> 'Voided')
+        ORDER BY d.upload_date DESC`,
+      [email]
+    )
+    res.json(r.rows.map((row) => ({
+      id: row.id,
+      fileName: row.file_name,
+      docType: row.doc_type,
+      uploadedAt: row.upload_date,
+      fileUrl: row.file_url,
+      jobNumber: row.job_number,
+    })))
+  } catch (err) {
+    console.error('[ZHL] GET /api/customer/documents', err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.get('/api/customer/invoices', async (req, res) => {
+  if (!requireCustomerSecret(req, res)) return
+  const email = (req.query.email || '').toString().trim()
+  if (!email) return res.status(400).json({ error: 'email required' })
+
+  try {
+    const jobsR = await pool.query(
+      `SELECT id, job_number, zhl_invoice_no, mode, status, date_delivered, created_at
+         FROM jobs
+        WHERE LOWER(customer_email) = LOWER($1)
+          AND (status IS NULL OR status <> 'Voided')
+        ORDER BY created_at DESC`,
+      [email]
+    )
+    if (!jobsR.rows.length) return res.json([])
+
+    const jobIds = jobsR.rows.map((j) => j.id)
+    const linesR = await pool.query(
+      `SELECT job_id, service, unit, qty, rate, rate_local, currency
+         FROM billing_lines
+        WHERE job_id = ANY($1::int[])`,
+      [jobIds]
+    )
+    const linesByJob = new Map()
+    for (const line of linesR.rows) {
+      if (!linesByJob.has(line.job_id)) linesByJob.set(line.job_id, [])
+      linesByJob.get(line.job_id).push(line)
+    }
+
+    // Only jobs with at least one billing line have anything to invoice.
+    const invoices = jobsR.rows
+      .filter((j) => linesByJob.has(j.id))
+      .map((j) => {
+        const lines = linesByJob.get(j.id)
+        return {
+          jobNumber: j.job_number,
+          invoiceNo: j.zhl_invoice_no || '',
+          invoiceDate: fmtTrackDate(j.date_delivered) || null,
+          mode: j.mode || '',
+          status: j.status || '',
+          // rate is always stored SGD-converted (see frontend JobDetail.jsx
+          // toSGD-on-save); rate_local + currency are the line's own display
+          // amount. Total is the unambiguous SGD figure; lines show what the
+          // customer actually agreed to per line.
+          totalSgd: lines.reduce((sum, l) => sum + (Number(l.rate) || 0) * (Number(l.qty) || 1), 0),
+          lines: lines.map((l) => ({
+            service: l.service || '',
+            unit: l.unit || '',
+            qty: Number(l.qty) || 1,
+            amount: Number(l.rate_local ?? l.rate) || 0,
+            currency: l.currency || 'SGD',
+          })),
+        }
+      })
+    res.json(invoices)
+  } catch (err) {
+    console.error('[ZHL] GET /api/customer/invoices', err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
 })
