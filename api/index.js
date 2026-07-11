@@ -108,6 +108,8 @@ async function initDB() {
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_note TEXT`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lost_reason TEXT`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS quote_ref TEXT`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS source_ref TEXT`);
   await pool.query(`ALTER TABLE fx_rates ADD COLUMN IF NOT EXISTS is_manual BOOLEAN DEFAULT FALSE`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_profiles (
@@ -1746,6 +1748,29 @@ app.post('/api/rfq', async (req, res) => {
     const specialHandlingNotes = str(b.specialHandlingNotes)
     const addons = Array.isArray(b.addons) ? b.addons.join(', ') : str(b.addons)
 
+    // Structured quote context (optional). Callers that don't have a quote yet
+    // (e.g. the site's plain contact form) simply omit these — quoted_price
+    // stays 0 and quote_ref/source_ref stay null, same as before this field
+    // existed. specialHandlingNotes-packing (option b) still works unchanged
+    // and is not replaced by this.
+    const quoteRef = b.quoteRef != null ? str(b.quoteRef) : null
+    const sourceRef = b.sourceRef != null ? str(b.sourceRef) : null
+    const quotedPriceNum = parseFloat(b.quotedPrice)
+    const quotedPrice = Number.isFinite(quotedPriceNum) ? quotedPriceNum : 0
+
+    // Idempotency: a retried submission carrying the same sourceRef (the site's
+    // own booking/enquiry number) must not create a second lead — return the
+    // original instead of inserting again.
+    if (sourceRef) {
+      const dupe = await pool.query(
+        `SELECT id, ref FROM leads WHERE source_ref = $1 LIMIT 1`,
+        [sourceRef]
+      )
+      if (dupe.rows[0]) {
+        return res.status(200).json({ success: true, leadId: dupe.rows[0].id, ref: dupe.rows[0].ref, deduped: true })
+      }
+    }
+
     const ref      = `ZL-${Date.now()}`
     const industry = inferIndustry(commodityName)
     const notes    = buildRfqNotes(
@@ -1758,15 +1783,15 @@ app.post('/api/rfq', async (req, res) => {
     const r = await pool.query(
       `INSERT INTO leads
          (ref, customer_name, customer_email, quoted_price, industry,
-          lead_score, status, stage, risk_level, source, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+          lead_score, status, stage, risk_level, source, notes, quote_ref, source_ref)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING id`,
-      [ref, companyName || contactPerson, emailAddress, 0, industry,
-       5, 'RFQ Received', 'RFQ Received', 'High', 'website', notes]
+      [ref, companyName || contactPerson, emailAddress, quotedPrice, industry,
+       5, 'RFQ Received', 'RFQ Received', 'High', 'website', notes, quoteRef, sourceRef]
     )
 
     const leadId = r.rows[0].id
-    console.log(`[ZHL] RFQ saved: ${ref} | ${companyName || contactPerson || '(anonymous)'} | ${industry}`)
+    console.log(`[ZHL] RFQ saved: ${ref} | ${companyName || contactPerson || '(anonymous)'} | ${industry}${quoteRef ? ` | quote ${quoteRef}` : ''}`)
     res.status(201).json({ success: true, leadId, ref })
   } catch (err) {
     console.error('[ZHL] POST /api/rfq', err.message)
