@@ -1903,11 +1903,17 @@ app.get('/api/customer/invoices', async (req, res) => {
   if (!email) return res.status(400).json({ error: 'email required' })
 
   try {
+    // Only surface jobs with an issued invoice number. billing_lines exist
+    // while ops is still building a job's charges; the customer-facing page
+    // promises FINAL invoices, so an assigned zhl_invoice_no is the gate for
+    // "this has actually been invoiced" — never show draft/unconfirmed charges.
     const jobsR = await pool.query(
       `SELECT id, job_number, zhl_invoice_no, mode, status, date_delivered, created_at
          FROM jobs
         WHERE LOWER(customer_email) = LOWER($1)
           AND (status IS NULL OR status <> 'Voided')
+          AND zhl_invoice_no IS NOT NULL
+          AND zhl_invoice_no <> ''
         ORDER BY created_at DESC`,
       [email]
     )
