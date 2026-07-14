@@ -189,6 +189,41 @@ async function initDB() {
     )
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS split_entities (
+      id SERIAL PRIMARY KEY,
+      job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT '',
+      billing_address TEXT DEFAULT '',
+      contact_name TEXT DEFAULT '',
+      contact_number TEXT DEFAULT '',
+      contact_email TEXT DEFAULT '',
+      invoice_no TEXT DEFAULT '',
+      default_share REAL DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS billing_line_splits (
+      id SERIAL PRIMARY KEY,
+      job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      billing_line_id INTEGER NOT NULL REFERENCES billing_lines(id) ON DELETE CASCADE,
+      entity_id INTEGER NOT NULL REFERENCES split_entities(id) ON DELETE CASCADE,
+      amount REAL NOT NULL DEFAULT 0,
+      UNIQUE(billing_line_id, entity_id)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cost_line_splits (
+      id SERIAL PRIMARY KEY,
+      job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      cost_line_id INTEGER NOT NULL REFERENCES cost_lines(id) ON DELETE CASCADE,
+      entity_id INTEGER NOT NULL REFERENCES split_entities(id) ON DELETE CASCADE,
+      amount REAL NOT NULL DEFAULT 0,
+      UNIQUE(cost_line_id, entity_id)
+    )
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS documents (
       id SERIAL PRIMARY KEY,
       job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -403,11 +438,19 @@ app.get('/api/jobs/:id', async (req, res) => {
     const result = await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
     const job = result.rows[0];
-    const cost_lines = (await pool.query('SELECT * FROM cost_lines WHERE job_id=$1 ORDER BY id', [job.id])).rows;
+    const cost_raw = (await pool.query('SELECT * FROM cost_lines WHERE job_id=$1 ORDER BY id', [job.id])).rows;
     const billing_raw = (await pool.query('SELECT * FROM billing_lines WHERE job_id=$1 ORDER BY id', [job.id])).rows;
-    const billing_lines = billing_raw.map(b => ({ ...b, total: parseFloat(((b.rate||0)*(b.qty||1)).toFixed(2)) }));
+    const split_entities = (await pool.query('SELECT * FROM split_entities WHERE job_id=$1 ORDER BY sort_order, id', [job.id])).rows;
+    const billing_splits = (await pool.query('SELECT * FROM billing_line_splits WHERE job_id=$1 ORDER BY id', [job.id])).rows;
+    const cost_splits = (await pool.query('SELECT * FROM cost_line_splits WHERE job_id=$1 ORDER BY id', [job.id])).rows;
+    const billing_lines = billing_raw.map(b => ({
+      ...b,
+      total: parseFloat(((b.rate||0)*(b.qty||1)).toFixed(2)),
+      splits: billing_splits.filter(s => s.billing_line_id === b.id),
+    }));
+    const cost_lines = cost_raw.map(c => ({ ...c, splits: cost_splits.filter(s => s.cost_line_id === c.id) }));
     const documents = (await pool.query('SELECT * FROM documents WHERE job_id=$1 ORDER BY upload_date DESC', [job.id])).rows;
-    res.json({ ...await enrichJob(job), cost_lines, billing_lines, documents });
+    res.json({ ...await enrichJob(job), cost_lines, billing_lines, documents, split_entities });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -696,6 +739,99 @@ app.delete('/api/jobs/:id/billing/:lid', async (req, res) => {
   try {
     await pool.query('DELETE FROM billing_lines WHERE id=$1 AND job_id=$2', [req.params.lid, req.params.id]);
     res.json({ success: true });
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ─── SPLIT INVOICING (multi-entity billing) ────────────────────────────────
+app.post('/api/jobs/:id/split-entities', async (req, res) => {
+  try {
+    const { name='', billing_address='', contact_name='', contact_number='', contact_email='', invoice_no='', default_share=1 } = req.body;
+    const countRes = await pool.query('SELECT COUNT(*) FROM split_entities WHERE job_id=$1', [req.params.id]);
+    const sortOrder = parseInt(countRes.rows[0].count, 10);
+    const r = await pool.query(
+      'INSERT INTO split_entities (job_id,name,billing_address,contact_name,contact_number,contact_email,invoice_no,default_share,sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.params.id, name, billing_address, contact_name, contact_number, contact_email, invoice_no, default_share, sortOrder]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+app.put('/api/jobs/:id/split-entities/:eid', async (req, res) => {
+  try {
+    const { name='', billing_address='', contact_name='', contact_number='', contact_email='', invoice_no='', default_share=1 } = req.body;
+    const r = await pool.query(
+      'UPDATE split_entities SET name=$1,billing_address=$2,contact_name=$3,contact_number=$4,contact_email=$5,invoice_no=$6,default_share=$7 WHERE id=$8 AND job_id=$9 RETURNING *',
+      [name, billing_address, contact_name, contact_number, contact_email, invoice_no, default_share, req.params.eid, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+app.delete('/api/jobs/:id/split-entities/:eid', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM split_entities WHERE id=$1 AND job_id=$2', [req.params.eid, req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+app.put('/api/jobs/:id/billing/:lid/splits', async (req, res) => {
+  try {
+    const splits = Array.isArray(req.body.splits) ? req.body.splits : [];
+    await pool.query('DELETE FROM billing_line_splits WHERE billing_line_id=$1', [req.params.lid]);
+    let rows = [];
+    if (splits.length) {
+      const values = [];
+      const params = [];
+      splits.forEach((s, i) => {
+        const base = i * 4;
+        values.push(`($${base+1},$${base+2},$${base+3},$${base+4})`);
+        params.push(req.params.id, req.params.lid, s.entity_id, s.amount || 0);
+      });
+      const r = await pool.query(
+        `INSERT INTO billing_line_splits (job_id,billing_line_id,entity_id,amount) VALUES ${values.join(',')} RETURNING *`,
+        params
+      );
+      rows = r.rows;
+    }
+    res.json(rows);
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+app.put('/api/jobs/:id/costs/:lid/splits', async (req, res) => {
+  try {
+    const splits = Array.isArray(req.body.splits) ? req.body.splits : [];
+    await pool.query('DELETE FROM cost_line_splits WHERE cost_line_id=$1', [req.params.lid]);
+    let rows = [];
+    if (splits.length) {
+      const values = [];
+      const params = [];
+      splits.forEach((s, i) => {
+        const base = i * 4;
+        values.push(`($${base+1},$${base+2},$${base+3},$${base+4})`);
+        params.push(req.params.id, req.params.lid, s.entity_id, s.amount || 0);
+      });
+      const r = await pool.query(
+        `INSERT INTO cost_line_splits (job_id,cost_line_id,entity_id,amount) VALUES ${values.join(',')} RETURNING *`,
+        params
+      );
+      rows = r.rows;
+    }
+    res.json(rows);
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });

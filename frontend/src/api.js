@@ -26,6 +26,12 @@ export const addBillingLine = (jobId, data) => api.post(`/jobs/${jobId}/billing`
 export const updateBillingLine = (jobId, lid, data) => api.put(`/jobs/${jobId}/billing/${lid}`, data)
 export const deleteBillingLine = (jobId, lid) => api.delete(`/jobs/${jobId}/billing/${lid}`)
 
+export const addSplitEntity = (jobId, data) => api.post(`/jobs/${jobId}/split-entities`, data)
+export const updateSplitEntity = (jobId, eid, data) => api.put(`/jobs/${jobId}/split-entities/${eid}`, data)
+export const deleteSplitEntity = (jobId, eid) => api.delete(`/jobs/${jobId}/split-entities/${eid}`)
+export const setBillingLineSplits = (jobId, lid, splits) => api.put(`/jobs/${jobId}/billing/${lid}/splits`, { splits })
+export const setCostLineSplits = (jobId, lid, splits) => api.put(`/jobs/${jobId}/costs/${lid}/splits`, { splits })
+
 export const uploadDocument = (jobId, file, doc_type) => {
   const fd = new FormData()
   fd.append('file', file)

@@ -7,6 +7,7 @@ import {
   getJob, updateJob, deleteJob,
   addCostLine, updateCostLine, deleteCostLine,
   addBillingLine, updateBillingLine, deleteBillingLine,
+  addSplitEntity, updateSplitEntity, deleteSplitEntity, setBillingLineSplits, setCostLineSplits,
   uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates, linkInventoryMovement, voidInventoryMovement, parsePackingList, syncStockLines
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
@@ -39,6 +40,29 @@ function nameFromEmail(email) {
   return prefix.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ')
 }
 
+// Splits entities are ordered by sort_order (insertion order) — the last entity
+// always absorbs the rounding remainder so the splits reconcile to the cent.
+function autoFillSplit(lineTotal, entities) {
+  const totalShare = entities.reduce((s, e) => s + (Number(e.default_share) || 0), 0)
+  if (!totalShare || !entities.length) return entities.map(e => ({ entity_id: e.id, amount: 0 }))
+  let runningSum = 0
+  const out = entities.slice(0, -1).map(e => {
+    const amt = Math.round(lineTotal * (Number(e.default_share) || 0) / totalShare * 100) / 100
+    runningSum += amt
+    return { entity_id: e.id, amount: amt }
+  })
+  const last = entities[entities.length - 1]
+  out.push({ entity_id: last.id, amount: Math.round((lineTotal - runningSum) * 100) / 100 })
+  return out
+}
+
+function computeEntityTotals(entity, job) {
+  const sale = (job.billing_lines||[]).reduce((s,l) => s + (l.splits?.find(x => x.entity_id===entity.id)?.amount || 0), 0)
+  const cost = (job.cost_lines||[]).reduce((s,l) => s + (l.splits?.find(x => x.entity_id===entity.id)?.amount || 0), 0)
+  const profit = sale - cost
+  return { sale, cost, profit, gp: sale > 0 ? (profit/sale)*100 : 0 }
+}
+
 export default function JobDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -59,6 +83,7 @@ export default function JobDetail() {
   const [doModal, setDoModal] = useState(null)
   const [subCertModal, setSubCertModal] = useState(null)
   const [releaseDOModal, setReleaseDOModal] = useState(null)
+  const [splitModal, setSplitModal] = useState(null)
   const [fxRates, setFxRates] = useState({})
   const [staffList, setStaffList] = useState([])
   const [showPdfCcyMenu, setShowPdfCcyMenu] = useState(false)
@@ -248,6 +273,8 @@ export default function JobDetail() {
     await autoMirrorToBilling(data.service, data.amount)
   }
   async function removeCost(lid) {
+    const line = job.cost_lines.find(l => l.id === lid)
+    if (line?.splits?.length && !window.confirm('This line has split-invoice amounts assigned. Deleting it will remove those splits too. Continue?')) return
     await deleteCostLine(id, lid)
     setJob(j => ({ ...j, cost_lines: j.cost_lines.filter(l => l.id !== lid) }))
     refreshTotals()
@@ -265,8 +292,38 @@ export default function JobDetail() {
     refreshTotals()
   }
   async function removeBilling(lid) {
+    const line = job.billing_lines.find(l => l.id === lid)
+    if (line?.splits?.length && !window.confirm('This line has split-invoice amounts assigned. Deleting it will remove those splits too. Continue?')) return
     await deleteBillingLine(id, lid)
     setJob(j => ({ ...j, billing_lines: j.billing_lines.filter(l => l.id !== lid) }))
+    refreshTotals()
+  }
+
+  // ── Split invoicing (multi-entity billing) ────────────────────────────────
+  async function addEntity() {
+    const existingCount = (job.split_entities || []).length
+    const suggestedInvoice = `${job.zhl_invoice_no || job.job_number}-${String.fromCharCode(65 + existingCount)}`
+    await addSplitEntity(id, { name: '', invoice_no: suggestedInvoice, default_share: 1 })
+    refreshTotals()
+  }
+  async function saveEntity(eid, data) {
+    await updateSplitEntity(id, eid, data)
+    refreshTotals()
+  }
+  async function removeEntity(eid) {
+    const hasSplits = (job.billing_lines||[]).some(l => l.splits?.some(s => s.entity_id === eid))
+      || (job.cost_lines||[]).some(l => l.splits?.some(s => s.entity_id === eid))
+    if (hasSplits && !window.confirm('This entity has split amounts assigned on one or more lines. Deleting it will remove those splits too. Continue?')) return
+    await deleteSplitEntity(id, eid)
+    refreshTotals()
+  }
+  function openSplitModal(line, lineType) {
+    setSplitModal({ line, lineType })
+  }
+  async function saveLineSplits(line, lineType, splits) {
+    if (lineType === 'billing') await setBillingLineSplits(id, line.id, splits)
+    else await setCostLineSplits(id, line.id, splits)
+    setSplitModal(null)
     refreshTotals()
   }
 
@@ -644,6 +701,190 @@ export default function JobDetail() {
       doc.text(`Page ${p} of ${totalPages}`, pw - mr, 290, { align: 'right' })
     }
     doc.save(`ZHL_${job.job_number.replace('/', '-')}_Accounts_${exportCcy}.pdf`)
+  }
+
+  // ── Split Invoicing: customer-facing invoice (sale-only, no cost/vendor) ──
+  function exportEntityInvoice(entity) {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const lw = 30, vw = 61
+
+    doc.setFillColor(...blue)
+    doc.rect(0, 0, pw, 38, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 6, 1, 28, 36)
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 38, 15)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.25)
+    doc.line(38, 20, pw - mr, 20)
+    doc.setDrawColor(0); doc.setLineWidth(0.1)
+    doc.text('rfq@zhenghe.com.sg', 38, 28)
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold')
+    doc.text('INVOICE', pw - mr, 15, { align: 'right' })
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text(`Invoice No.: ${entity.invoice_no || '—'}`, pw - mr, 28, { align: 'right' })
+
+    const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
+    const valCol   = { cellWidth: vw }
+    autoTable(doc, {
+      startY: 43,
+      body: [
+        ['Job No.',      job.job_number,          'Mode',     job.mode || '—'],
+        ['Customer Ref', job.customer_ref || '—', 'Date',     new Date().toLocaleDateString('en-SG')],
+      ],
+      columnStyles: { 0: labelCol, 1: valCol, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    let y = doc.lastAutoTable.finalY + 5
+    const bpLabel = { fontStyle: 'bold', fillColor: [4, 44, 83], textColor: [255, 255, 255], cellWidth: lw }
+    const bpVal   = { fillColor: [232, 241, 250] }
+    autoTable(doc, {
+      startY: y,
+      head: [[{ content: 'BILL TO', colSpan: 4, styles: { fillColor: navy, textColor: [255,255,255], fontStyle: 'bold', fontSize: 9, halign: 'left' } }]],
+      body: [
+        [{ content: 'Company',  styles: bpLabel }, { content: entity.name || '—', styles: { ...bpVal, fontStyle: 'bold', fontSize: 9 }, colSpan: 3 }],
+        [{ content: 'Address',  styles: bpLabel }, { content: entity.billing_address || '—', styles: bpVal, colSpan: 3 }],
+        [{ content: 'Contact',  styles: bpLabel }, { content: entity.contact_name || '—', styles: bpVal }, { content: 'Phone', styles: bpLabel }, { content: entity.contact_number || '—', styles: bpVal }],
+        [{ content: 'Email',    styles: bpLabel }, { content: entity.contact_email || '—', styles: bpVal, colSpan: 3 }],
+      ],
+      columnStyles: { 0: { cellWidth: lw }, 1: { cellWidth: vw }, 2: { cellWidth: lw }, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    y = doc.lastAutoTable.finalY + 6
+    const entityLines = job.billing_lines.filter(l => l.splits?.some(s => s.entity_id === entity.id))
+    const entityTotal = entityLines.reduce((s, l) => s + (l.splits.find(x => x.entity_id === entity.id)?.amount || 0), 0)
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Service', 'Amount (SGD)']],
+      body: entityLines.length
+        ? entityLines.map((l, i) => [i+1, l.service || '—', fmt(l.splits.find(x => x.entity_id === entity.id)?.amount || 0)])
+        : [['', 'No split lines assigned', '']],
+      foot: [['', 'Total Amount Due', fmt(entityTotal)]],
+      headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 9 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 0:{cellWidth:8}, 2:{halign:'right', fontStyle:'bold', cellWidth:40} },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    const totalPages = doc.internal.getNumberOfPages()
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+      doc.text(`Zhenghe Logistics Pte Ltd — Invoice — ${job.job_number}`, ml, 290)
+      doc.text(`Page ${p} of ${totalPages}`, pw - mr, 290, { align: 'right' })
+    }
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_${(entity.name||'Entity').replace(/\s+/g,'_')}_Invoice.pdf`)
+  }
+
+  // ── Split Invoicing: internal breakdown (billing + cost + profit for one entity) ──
+  function exportEntityBreakdown(entity) {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
+    const lw = 30, vw = 61
+
+    doc.setFillColor(...blue)
+    doc.rect(0, 0, pw, 38, 'F')
+    if (logoRef.current) doc.addImage(logoRef.current, 'PNG', 6, 1, 28, 36)
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'normal')
+    doc.text('Freight Forwarding & Logistics', 38, 15)
+    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.25)
+    doc.line(38, 20, pw - mr, 20)
+    doc.setDrawColor(0); doc.setLineWidth(0.1)
+    doc.text('rfq@zhenghe.com.sg', 38, 28)
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold')
+    doc.text('SPLIT INVOICE BREAKDOWN', pw - mr, 15, { align: 'right' })
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text(`Prepared: ${new Date().toLocaleDateString('en-SG')}`, pw - mr, 28, { align: 'right' })
+
+    const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
+    const valCol   = { cellWidth: vw }
+    autoTable(doc, {
+      startY: 43,
+      body: [
+        ['Job No.',  job.job_number, 'Entity', entity.name || '—'],
+        ['Customer', job.customer_name || job.shipper || '—', 'Share', entity.default_share ?? 1],
+      ],
+      columnStyles: { 0: labelCol, 1: valCol, 2: labelCol, 3: { cellWidth: 'auto' } },
+      styles: { fontSize: 8.5, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }, overflow: 'linebreak', valign: 'middle' },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    let y = doc.lastAutoTable.finalY + 6
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
+    doc.text(`BILLING — ${entity.name || ''}`, ml, y); y += 2
+    const entityBillingLines = job.billing_lines.filter(l => l.splits?.some(s => s.entity_id === entity.id))
+    const entitySale = entityBillingLines.reduce((s, l) => s + (l.splits.find(x => x.entity_id === entity.id)?.amount || 0), 0)
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Service', 'Amount (SGD)', 'Remarks']],
+      body: entityBillingLines.length
+        ? entityBillingLines.map((l, i) => [i+1, l.service || '—', fmt(l.splits.find(x => x.entity_id === entity.id)?.amount || 0), l.remarks || ''])
+        : [['', 'No split lines assigned', '', '']],
+      foot: [['', 'Total Sale', fmt(entitySale), '']],
+      headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 0:{cellWidth:8}, 2:{halign:'right', fontStyle:'bold', cellWidth:34} },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    y = doc.lastAutoTable.finalY + 6
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
+    doc.text(`VENDOR COSTS — ${entity.name || ''} share`, ml, y); y += 2
+    const entityCostLines = job.cost_lines.filter(l => l.splits?.some(s => s.entity_id === entity.id))
+    const entityCost = entityCostLines.reduce((s, l) => s + (l.splits.find(x => x.entity_id === entity.id)?.amount || 0), 0)
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Vendor', 'Service', 'Amount (SGD)', 'Remarks']],
+      body: entityCostLines.length
+        ? entityCostLines.map((l, i) => [i+1, l.vendor || '—', l.service || '—', fmt(l.splits.find(x => x.entity_id === entity.id)?.amount || 0), l.remarks || ''])
+        : [['', 'No split lines assigned', '', '', '']],
+      foot: [['', '', 'Total Cost', fmt(entityCost), '']],
+      headStyles: { fillColor: [55, 88, 120], fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
+      footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
+      styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
+      columnStyles: { 0:{cellWidth:8}, 3:{halign:'right', fontStyle:'bold', cellWidth:30} },
+      margin: { left: ml, right: mr },
+      tableWidth: tw,
+    })
+
+    y = doc.lastAutoTable.finalY + 6
+    const entityProfit = entitySale - entityCost
+    const entityGP = entitySale > 0 ? (entityProfit/entitySale)*100 : 0
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Total Sale (SGD)',  fmt(entitySale)],
+        ['Total Cost (SGD)',  fmt(entityCost)],
+        ['Profit (SGD)',      fmt(entityProfit)],
+        ['GP Margin',         `${entityGP.toFixed(1)}%`],
+      ],
+      styles: { fontSize: 9.5, cellPadding: 5 },
+      columnStyles: {
+        0: { fontStyle: 'bold', fillColor: navy, textColor: [255,255,255], cellWidth: 120 },
+        1: { halign: 'right', fontStyle: 'bold', fillColor: navy, textColor: [255,255,255], cellWidth: 62 },
+      },
+      margin: { left: pw - mr - 182, right: mr },
+      tableWidth: 182,
+    })
+
+    const totalPages = doc.internal.getNumberOfPages()
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p); doc.setFontSize(7); doc.setTextColor(150, 150, 150)
+      doc.text(`Zhenghe Logistics Pte Ltd — Split Invoice Breakdown (Internal) — ${job.job_number}`, ml, 290)
+      doc.text(`Page ${p} of ${totalPages}`, pw - mr, 290, { align: 'right' })
+    }
+    doc.save(`ZHL_${job.job_number.replace('/', '-')}_${(entity.name||'Entity').replace(/\s+/g,'_')}_Breakdown.pdf`)
   }
 
   // ── Internal Job Report PDF ───────────────────────────────────────────────
@@ -1406,6 +1647,17 @@ export default function JobDetail() {
         />
       )}
 
+      {/* Line Split Modal */}
+      {splitModal && (
+        <LineSplitModal
+          line={splitModal.line}
+          lineType={splitModal.lineType}
+          entities={job.split_entities||[]}
+          onClose={() => setSplitModal(null)}
+          onSave={splits => saveLineSplits(splitModal.line, splitModal.lineType, splits)}
+        />
+      )}
+
       {/* Release D/O Modal */}
       {releaseDOModal && (
         <div className="modal-overlay" onClick={() => setReleaseDOModal(null)}>
@@ -1676,7 +1928,8 @@ export default function JobDetail() {
             <button className="btn btn-outline btn-sm" onClick={addCost}>+ Add Row</button>
           </div>
         </div>
-        <CostTable lines={job.cost_lines||[]} onSave={saveCost} onDelete={removeCost} fxRates={fxRates} />
+        <CostTable lines={job.cost_lines||[]} onSave={saveCost} onDelete={removeCost} fxRates={fxRates}
+          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'cost')} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.cost_lines?.length||0} line(s)</span>
           <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Total Cost: {fmt(totalCost)}</span>
@@ -1689,11 +1942,41 @@ export default function JobDetail() {
           Billing Lines
           <button className="btn btn-outline btn-sm" onClick={addBilling}>+ Add Row</button>
         </div>
-        <BillingTable lines={job.billing_lines||[]} onSave={saveBilling} onDelete={removeBilling} fxRates={fxRates} />
+        <BillingTable lines={job.billing_lines||[]} onSave={saveBilling} onDelete={removeBilling} fxRates={fxRates}
+          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'billing')} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.billing_lines?.length||0} line(s)</span>
           <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Total Sale: {fmt(totalSale)}</span>
         </div>
+      </div>
+
+      {/* Split Invoicing (multi-entity billing) */}
+      <div className="card mb-4">
+        <div className="section-title">
+          Split Invoicing
+          <button className="btn btn-outline btn-sm" onClick={addEntity}>+ Add Entity</button>
+        </div>
+        {(job.split_entities||[]).length > 0 && (() => {
+          const allLines = [...(job.billing_lines||[]), ...(job.cost_lines||[])]
+          const unsplitCount = allLines.filter(l => !l.splits || l.splits.length === 0).length
+          return unsplitCount > 0 ? (
+            <p style={{ fontSize: 12, color: 'var(--amber, #b45309)', margin: '0 0 10px' }}>
+              ⚠ {unsplitCount} of {allLines.length} line(s) have no entity split assigned yet — they won't appear on any entity's invoice.
+            </p>
+          ) : (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+              ✓ All {allLines.length} line(s) have splits assigned.
+            </p>
+          )
+        })()}
+        <SplitEntityTable
+          entities={job.split_entities||[]}
+          job={job}
+          onSave={saveEntity}
+          onDelete={removeEntity}
+          onGenerateInvoice={exportEntityInvoice}
+          onGenerateBreakdown={exportEntityBreakdown}
+        />
       </div>
 
       {/* Totals Panel with GP Override */}
@@ -1999,7 +2282,7 @@ function InfoEdit({ form, setField, staffList = [] }) {
   )
 }
 
-function CostTable({ lines, onSave, onDelete, fxRates }) {
+function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
@@ -2027,10 +2310,16 @@ function CostTable({ lines, onSave, onDelete, fxRates }) {
 
   if (!lines.length) return <p className="text-muted" style={{ fontSize:13, padding:'8px 0' }}>No cost lines yet. Add a row or upload an invoice PDF.</p>
 
+  const hasSplitEntities = splitEntities.length > 0
+
   return (
     <table className="inline-table">
       <thead>
-        <tr><th>Vendor</th><th>Service</th><th>Invoice No.</th><th>Invoice Date</th><th style={{width:140}}>Amount</th><th style={{width:120}}>Total Payable</th><th>Remarks</th><th style={{width:80}}></th></tr>
+        <tr>
+          <th>Vendor</th><th>Service</th><th>Invoice No.</th><th>Invoice Date</th><th style={{width:140}}>Amount</th><th style={{width:120}}>Total Payable</th><th>Remarks</th>
+          {hasSplitEntities && <th style={{width:60}}>Split</th>}
+          <th style={{width:80}}></th>
+        </tr>
       </thead>
       <tbody>
         {lines.map(l => {
@@ -2076,6 +2365,13 @@ function CostTable({ lines, onSave, onDelete, fxRates }) {
                 }
               </td>
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
+              {hasSplitEntities && (
+                <td>
+                  <button className="btn btn-ghost btn-xs" onClick={() => onEditSplits(l)} title="Edit entity splits">
+                    {l.splits?.length ? `${l.splits.length}✓` : '+'}
+                  </button>
+                </td>
+              )}
               <td>
                 <div className="flex gap-2">
                   {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':'✓'}</button>
@@ -2091,7 +2387,7 @@ function CostTable({ lines, onSave, onDelete, fxRates }) {
   )
 }
 
-function BillingTable({ lines, onSave, onDelete, fxRates }) {
+function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
@@ -2118,10 +2414,16 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
 
   if (!lines.length) return <p className="text-muted" style={{ fontSize:13, padding:'8px 0' }}>No billing lines yet. Add a row or use Email Intake to pre-populate.</p>
 
+  const hasSplitEntities = splitEntities.length > 0
+
   return (
     <table className="inline-table">
       <thead>
-        <tr><th>Service</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th><th style={{width:80}}></th></tr>
+        <tr>
+          <th>Service</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th>
+          {hasSplitEntities && <th style={{width:60}}>Split</th>}
+          <th style={{width:80}}></th>
+        </tr>
       </thead>
       <tbody>
         {lines.map(l => {
@@ -2156,11 +2458,85 @@ function BillingTable({ lines, onSave, onDelete, fxRates }) {
               <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.qty||''} onChange={e => setDraft(l.id,'qty',parseFloat(e.target.value)||1)} /> : l.qty}</td>
               <td><strong style={{ fontSize: 15 }}>{fmt(isEdit ? total : l.total)}</strong></td>
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
+              {hasSplitEntities && (
+                <td>
+                  <button className="btn btn-ghost btn-xs" onClick={() => onEditSplits(l)} title="Edit entity splits">
+                    {l.splits?.length ? `${l.splits.length}✓` : '+'}
+                  </button>
+                </td>
+              )}
               <td>
                 <div className="flex gap-2">
                   {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':'✓'}</button>
                     : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)}>✎</button>}
                   <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)}>✕</button>
+                </div>
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
+function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, onGenerateBreakdown }) {
+  const [editing, setEditing] = useState({})
+  const [drafts, setDrafts] = useState({})
+  const [saving, setSaving] = useState({})
+
+  function startEdit(e) { setDrafts(d => ({ ...d, [e.id]: { ...e } })); setEditing(x => ({ ...x, [e.id]: true })) }
+  function setDraft(id, key, val) { setDrafts(d => ({ ...d, [id]: { ...d[id], [key]: val } })) }
+
+  async function save(id) {
+    setSaving(s => ({ ...s, [id]: true }))
+    await onSave(id, drafts[id])
+    setEditing(x => ({ ...x, [id]: false }))
+    setSaving(s => ({ ...s, [id]: false }))
+  }
+
+  if (!entities.length) return <p className="text-muted" style={{ fontSize:13, padding:'8px 0' }}>No entities yet. Add one to split this job's billing/cost across multiple outlets or accounts.</p>
+
+  return (
+    <table className="inline-table">
+      <thead>
+        <tr>
+          <th>Name</th><th>Contact</th><th style={{width:110}}>Invoice No.</th><th style={{width:80}}>Share</th>
+          <th style={{width:220}}>Sale / Cost / Profit / GP%</th><th style={{width:150}}></th>
+        </tr>
+      </thead>
+      <tbody>
+        {entities.map(e => {
+          const isEdit = editing[e.id]; const d = drafts[e.id]||e
+          const totals = computeEntityTotals(e, job)
+          const hasSplits = totals.sale > 0 || totals.cost > 0
+          return (
+            <tr key={e.id} onDoubleClick={() => startEdit(e)}>
+              <td>{isEdit ? <input className="form-control form-control-sm" value={d.name||''} onChange={ev => setDraft(e.id,'name',ev.target.value)} placeholder="e.g. Amandari" /> : (e.name||'—')}</td>
+              <td>
+                {isEdit ? (
+                  <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                    <input className="form-control form-control-sm" placeholder="Contact name" value={d.contact_name||''} onChange={ev => setDraft(e.id,'contact_name',ev.target.value)} />
+                    <input className="form-control form-control-sm" placeholder="Phone" value={d.contact_number||''} onChange={ev => setDraft(e.id,'contact_number',ev.target.value)} />
+                    <input className="form-control form-control-sm" placeholder="Email" value={d.contact_email||''} onChange={ev => setDraft(e.id,'contact_email',ev.target.value)} />
+                    <input className="form-control form-control-sm" placeholder="Billing address" value={d.billing_address||''} onChange={ev => setDraft(e.id,'billing_address',ev.target.value)} />
+                  </div>
+                ) : (
+                  <span style={{ fontSize:12 }}>{e.contact_name || '—'}{e.contact_number ? ` · ${e.contact_number}` : ''}</span>
+                )}
+              </td>
+              <td>{isEdit ? <input className="form-control form-control-sm" value={d.invoice_no||''} onChange={ev => setDraft(e.id,'invoice_no',ev.target.value)} /> : (e.invoice_no||'—')}</td>
+              <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.default_share ?? 1} onChange={ev => setDraft(e.id,'default_share',parseFloat(ev.target.value)||0)} /> : (e.default_share ?? 1)}</td>
+              <td style={{ fontSize:12 }}>
+                {fmt(totals.sale)} / {fmt(totals.cost)} / {fmt(totals.profit)} / {totals.gp.toFixed(1)}%
+              </td>
+              <td>
+                <div className="flex gap-2" style={{ flexWrap:'wrap' }}>
+                  {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(e.id)} disabled={saving[e.id]}>{saving[e.id]?'...':'✓'}</button>
+                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(e)}>✎</button>}
+                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(e.id)}>✕</button>
+                  <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate customer invoice' : 'No split lines assigned yet'} onClick={() => onGenerateInvoice(e)}>📄</button>
+                  <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate internal breakdown' : 'No split lines assigned yet'} onClick={() => onGenerateBreakdown(e)}>📋</button>
                 </div>
               </td>
             </tr>
@@ -2288,6 +2664,76 @@ function SubCertModal({ modal, onClose, onGenerate }) {
           <button className="btn btn-navy" onClick={() => onGenerate(fields)}>
             🛃 Generate Sub Cert PDF
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Line Split Modal ───────────────────────────────────────────────────────
+function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
+  const lineTotal = lineType === 'billing' ? (line.total ?? (line.rate||0)*(line.qty||1)) : (line.amount||0)
+  const [amounts, setAmounts] = useState(() => {
+    const init = {}
+    entities.forEach(e => {
+      const existing = line.splits?.find(s => s.entity_id === e.id)
+      init[e.id] = existing ? existing.amount : ''
+    })
+    return init
+  })
+  const [saving, setSaving] = useState(false)
+
+  const splitSum = entities.reduce((s, e) => s + (parseFloat(amounts[e.id]) || 0), 0)
+  const reconciled = Math.abs(splitSum - lineTotal) < 0.005
+
+  function autoFill() {
+    const filled = autoFillSplit(lineTotal, entities)
+    const next = {}
+    filled.forEach(f => { next[f.entity_id] = f.amount })
+    setAmounts(next)
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    const splits = entities.map(e => ({ entity_id: e.id, amount: parseFloat(amounts[e.id]) || 0 }))
+    await onSave(splits)
+    setSaving(false)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Split — {line.service || (lineType==='cost' ? line.vendor : '')}</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{ padding: '20px 24px' }}>
+          <div className="flex-between mb-3">
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Line total: {fmt(lineTotal)}</span>
+            <button className="btn btn-ghost btn-xs" onClick={autoFill}>Auto-fill by share</button>
+          </div>
+          {entities.map(e => (
+            <div key={e.id} className="form-group mb-2" style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <label className="form-label" style={{ flex:1, marginBottom:0 }}>{e.name || `Entity ${e.id}`}</label>
+              <input
+                type="number"
+                className="form-control form-control-sm"
+                style={{ width:120 }}
+                value={amounts[e.id] ?? ''}
+                onChange={ev => setAmounts(a => ({ ...a, [e.id]: ev.target.value }))}
+              />
+            </div>
+          ))}
+          <div className="flex-between" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-solid)' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Split total: {fmt(splitSum)}</span>
+            {reconciled
+              ? <span style={{ fontSize: 12, color: 'var(--green, #16a34a)' }}>✓ Reconciled</span>
+              : <span style={{ fontSize: 12, color: 'var(--amber, #b45309)' }}>⚠ Doesn't match line total</span>}
+          </div>
+        </div>
+        <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-navy" onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save Splits'}</button>
         </div>
       </div>
     </div>
