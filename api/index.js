@@ -243,8 +243,10 @@ async function ensureDB() {
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 async function enrichJob(job) {
-  const costs = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM cost_lines WHERE job_id=$1', [job.id]);
-  const billing = await pool.query('SELECT COALESCE(SUM(rate*qty),0) as total FROM billing_lines WHERE job_id=$1', [job.id]);
+  const [costs, billing] = await Promise.all([
+    pool.query('SELECT COALESCE(SUM(amount),0) as total FROM cost_lines WHERE job_id=$1', [job.id]),
+    pool.query('SELECT COALESCE(SUM(rate*qty),0) as total FROM billing_lines WHERE job_id=$1', [job.id]),
+  ]);
   const cost_sgd = parseFloat(Number(costs.rows[0].total || 0).toFixed(2));
   const sale_sgd = parseFloat(Number(billing.rows[0].total || 0).toFixed(2));
   const profit_sgd = parseFloat((sale_sgd - cost_sgd).toFixed(2));
@@ -438,19 +440,23 @@ app.get('/api/jobs/:id', async (req, res) => {
     const result = await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
     const job = result.rows[0];
-    const cost_raw = (await pool.query('SELECT * FROM cost_lines WHERE job_id=$1 ORDER BY id', [job.id])).rows;
-    const billing_raw = (await pool.query('SELECT * FROM billing_lines WHERE job_id=$1 ORDER BY id', [job.id])).rows;
-    const split_entities = (await pool.query('SELECT * FROM split_entities WHERE job_id=$1 ORDER BY sort_order, id', [job.id])).rows;
-    const billing_splits = (await pool.query('SELECT * FROM billing_line_splits WHERE job_id=$1 ORDER BY id', [job.id])).rows;
-    const cost_splits = (await pool.query('SELECT * FROM cost_line_splits WHERE job_id=$1 ORDER BY id', [job.id])).rows;
-    const billing_lines = billing_raw.map(b => ({
+    const [costRes, billingRes, entitiesRes, billingSplitsRes, costSplitsRes, docsRes] = await Promise.all([
+      pool.query('SELECT * FROM cost_lines WHERE job_id=$1 ORDER BY id', [job.id]),
+      pool.query('SELECT * FROM billing_lines WHERE job_id=$1 ORDER BY id', [job.id]),
+      pool.query('SELECT * FROM split_entities WHERE job_id=$1 ORDER BY sort_order, id', [job.id]),
+      pool.query('SELECT * FROM billing_line_splits WHERE job_id=$1 ORDER BY id', [job.id]),
+      pool.query('SELECT * FROM cost_line_splits WHERE job_id=$1 ORDER BY id', [job.id]),
+      pool.query('SELECT * FROM documents WHERE job_id=$1 ORDER BY upload_date DESC', [job.id]),
+    ]);
+    const billing_splits = billingSplitsRes.rows;
+    const cost_splits = costSplitsRes.rows;
+    const billing_lines = billingRes.rows.map(b => ({
       ...b,
       total: parseFloat(((b.rate||0)*(b.qty||1)).toFixed(2)),
       splits: billing_splits.filter(s => s.billing_line_id === b.id),
     }));
-    const cost_lines = cost_raw.map(c => ({ ...c, splits: cost_splits.filter(s => s.cost_line_id === c.id) }));
-    const documents = (await pool.query('SELECT * FROM documents WHERE job_id=$1 ORDER BY upload_date DESC', [job.id])).rows;
-    res.json({ ...await enrichJob(job), cost_lines, billing_lines, documents, split_entities });
+    const cost_lines = costRes.rows.map(c => ({ ...c, splits: cost_splits.filter(s => s.cost_line_id === c.id) }));
+    res.json({ ...await enrichJob(job), cost_lines, billing_lines, documents: docsRes.rows, split_entities: entitiesRes.rows });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });

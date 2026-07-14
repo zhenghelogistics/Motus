@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import jsPDF from 'jspdf'
@@ -1956,6 +1956,10 @@ export default function JobDetail() {
           Split Invoicing
           <button className="btn btn-outline btn-sm" onClick={addEntity}>+ Add Entity</button>
         </div>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.6 }}>
+          Divide this job's billing/cost across separate entities (e.g. different outlets of the same client), each with their own invoice.
+          {' '}<strong>①</strong> Add an entity below. <strong>②</strong> Click the <em>Split</em> button on any Cost/Billing line above to assign its amount to each entity. <strong>③</strong> Use 📄 for that entity's invoice or 📋 for an internal breakdown.
+        </p>
         {(job.split_entities||[]).length > 0 && (() => {
           const allLines = [...(job.billing_lines||[]), ...(job.cost_lines||[])]
           const unsplitCount = allLines.filter(l => !l.splits || l.splits.length === 0).length
@@ -2317,7 +2321,7 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
       <thead>
         <tr>
           <th>Vendor</th><th>Service</th><th>Invoice No.</th><th>Invoice Date</th><th style={{width:140}}>Amount</th><th style={{width:120}}>Total Payable</th><th>Remarks</th>
-          {hasSplitEntities && <th style={{width:60}}>Split</th>}
+          {hasSplitEntities && <th style={{width:100}}>Split</th>}
           <th style={{width:80}}></th>
         </tr>
       </thead>
@@ -2367,9 +2371,17 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               {hasSplitEntities && (
                 <td>
-                  <button className="btn btn-ghost btn-xs" onClick={() => onEditSplits(l)} title="Edit entity splits">
-                    {l.splits?.length ? `${l.splits.length}✓` : '+'}
-                  </button>
+                  {l.splits?.length ? (
+                    <button className="btn btn-xs" style={{ background:'#eaf6ee', color:'#16a34a', border:'1px solid #bfe6cb', whiteSpace:'nowrap' }}
+                      onClick={() => onEditSplits(l)} title="Edit how this line is split across entities">
+                      ✓ Split ({l.splits.length})
+                    </button>
+                  ) : (
+                    <button className="btn btn-outline btn-xs" style={{ whiteSpace:'nowrap' }}
+                      onClick={() => onEditSplits(l)} title="Assign this line's amount across entities">
+                      Split
+                    </button>
+                  )}
                 </td>
               )}
               <td>
@@ -2421,7 +2433,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
       <thead>
         <tr>
           <th>Service</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th>
-          {hasSplitEntities && <th style={{width:60}}>Split</th>}
+          {hasSplitEntities && <th style={{width:100}}>Split</th>}
           <th style={{width:80}}></th>
         </tr>
       </thead>
@@ -2460,9 +2472,17 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               {hasSplitEntities && (
                 <td>
-                  <button className="btn btn-ghost btn-xs" onClick={() => onEditSplits(l)} title="Edit entity splits">
-                    {l.splits?.length ? `${l.splits.length}✓` : '+'}
-                  </button>
+                  {l.splits?.length ? (
+                    <button className="btn btn-xs" style={{ background:'#eaf6ee', color:'#16a34a', border:'1px solid #bfe6cb', whiteSpace:'nowrap' }}
+                      onClick={() => onEditSplits(l)} title="Edit how this line is split across entities">
+                      ✓ Split ({l.splits.length})
+                    </button>
+                  ) : (
+                    <button className="btn btn-outline btn-xs" style={{ whiteSpace:'nowrap' }}
+                      onClick={() => onEditSplits(l)} title="Assign this line's amount across entities">
+                      Split
+                    </button>
+                  )}
                 </td>
               )}
               <td>
@@ -2484,9 +2504,11 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
+  const [expanded, setExpanded] = useState({})
 
   function startEdit(e) { setDrafts(d => ({ ...d, [e.id]: { ...e } })); setEditing(x => ({ ...x, [e.id]: true })) }
   function setDraft(id, key, val) { setDrafts(d => ({ ...d, [id]: { ...d[id], [key]: val } })) }
+  function toggleExpanded(id) { setExpanded(x => ({ ...x, [id]: !x[id] })) }
 
   async function save(id) {
     setSaving(s => ({ ...s, [id]: true }))
@@ -2501,8 +2523,10 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
     <table className="inline-table">
       <thead>
         <tr>
-          <th>Name</th><th>Contact</th><th style={{width:110}}>Invoice No.</th><th style={{width:80}}>Share</th>
-          <th style={{width:220}}>Sale / Cost / Profit / GP%</th><th style={{width:150}}></th>
+          <th style={{width:24}}></th>
+          <th>Name</th><th>Contact</th><th style={{width:110}}>Invoice No.</th>
+          <th style={{width:90}} title="Relative weight used only by the 'Auto-fill by share' button when splitting a line — e.g. 8 vs 5 means this entity gets 8/13 when you click auto-fill.">Default Share ⓘ</th>
+          <th style={{width:230}}>Totals</th><th style={{width:150}}></th>
         </tr>
       </thead>
       <tbody>
@@ -2510,36 +2534,87 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
           const isEdit = editing[e.id]; const d = drafts[e.id]||e
           const totals = computeEntityTotals(e, job)
           const hasSplits = totals.sale > 0 || totals.cost > 0
+          const isExpanded = expanded[e.id]
+          const entityBillingLines = (job.billing_lines||[]).filter(l => l.splits?.some(s => s.entity_id === e.id))
+          const entityCostLines = (job.cost_lines||[]).filter(l => l.splits?.some(s => s.entity_id === e.id))
           return (
-            <tr key={e.id} onDoubleClick={() => startEdit(e)}>
-              <td>{isEdit ? <input className="form-control form-control-sm" value={d.name||''} onChange={ev => setDraft(e.id,'name',ev.target.value)} placeholder="e.g. Amandari" /> : (e.name||'—')}</td>
-              <td>
-                {isEdit ? (
-                  <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-                    <input className="form-control form-control-sm" placeholder="Contact name" value={d.contact_name||''} onChange={ev => setDraft(e.id,'contact_name',ev.target.value)} />
-                    <input className="form-control form-control-sm" placeholder="Phone" value={d.contact_number||''} onChange={ev => setDraft(e.id,'contact_number',ev.target.value)} />
-                    <input className="form-control form-control-sm" placeholder="Email" value={d.contact_email||''} onChange={ev => setDraft(e.id,'contact_email',ev.target.value)} />
-                    <input className="form-control form-control-sm" placeholder="Billing address" value={d.billing_address||''} onChange={ev => setDraft(e.id,'billing_address',ev.target.value)} />
+            <Fragment key={e.id}>
+              <tr onDoubleClick={() => startEdit(e)}>
+                <td>
+                  {hasSplits && (
+                    <button className="btn btn-ghost btn-xs" onClick={() => toggleExpanded(e.id)} title="Show line breakdown">
+                      {isExpanded ? '▾' : '▸'}
+                    </button>
+                  )}
+                </td>
+                <td>{isEdit ? <input className="form-control form-control-sm" value={d.name||''} onChange={ev => setDraft(e.id,'name',ev.target.value)} placeholder="e.g. Amandari" /> : (e.name||'—')}</td>
+                <td>
+                  {isEdit ? (
+                    <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                      <input className="form-control form-control-sm" placeholder="Contact name" value={d.contact_name||''} onChange={ev => setDraft(e.id,'contact_name',ev.target.value)} />
+                      <input className="form-control form-control-sm" placeholder="Phone" value={d.contact_number||''} onChange={ev => setDraft(e.id,'contact_number',ev.target.value)} />
+                      <input className="form-control form-control-sm" placeholder="Email" value={d.contact_email||''} onChange={ev => setDraft(e.id,'contact_email',ev.target.value)} />
+                      <input className="form-control form-control-sm" placeholder="Billing address" value={d.billing_address||''} onChange={ev => setDraft(e.id,'billing_address',ev.target.value)} />
+                    </div>
+                  ) : (
+                    <span style={{ fontSize:12 }}>{e.contact_name || '—'}{e.contact_number ? ` · ${e.contact_number}` : ''}</span>
+                  )}
+                </td>
+                <td>{isEdit ? <input className="form-control form-control-sm" value={d.invoice_no||''} onChange={ev => setDraft(e.id,'invoice_no',ev.target.value)} /> : (e.invoice_no||'—')}</td>
+                <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.default_share ?? 1} onChange={ev => setDraft(e.id,'default_share',parseFloat(ev.target.value)||0)} /> : (e.default_share ?? 1)}</td>
+                <td style={{ fontSize:11 }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'2px 10px' }}>
+                    <span>Sale: <strong>{fmt(totals.sale)}</strong></span>
+                    <span>Cost: <strong>{fmt(totals.cost)}</strong></span>
+                    <span>Profit: <strong>{fmt(totals.profit)}</strong></span>
+                    <span>GP: <strong>{totals.gp.toFixed(1)}%</strong></span>
                   </div>
-                ) : (
-                  <span style={{ fontSize:12 }}>{e.contact_name || '—'}{e.contact_number ? ` · ${e.contact_number}` : ''}</span>
-                )}
-              </td>
-              <td>{isEdit ? <input className="form-control form-control-sm" value={d.invoice_no||''} onChange={ev => setDraft(e.id,'invoice_no',ev.target.value)} /> : (e.invoice_no||'—')}</td>
-              <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.default_share ?? 1} onChange={ev => setDraft(e.id,'default_share',parseFloat(ev.target.value)||0)} /> : (e.default_share ?? 1)}</td>
-              <td style={{ fontSize:12 }}>
-                {fmt(totals.sale)} / {fmt(totals.cost)} / {fmt(totals.profit)} / {totals.gp.toFixed(1)}%
-              </td>
-              <td>
-                <div className="flex gap-2" style={{ flexWrap:'wrap' }}>
-                  {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(e.id)} disabled={saving[e.id]}>{saving[e.id]?'...':'✓'}</button>
-                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(e)}>✎</button>}
-                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(e.id)}>✕</button>
-                  <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate customer invoice' : 'No split lines assigned yet'} onClick={() => onGenerateInvoice(e)}>📄</button>
-                  <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate internal breakdown' : 'No split lines assigned yet'} onClick={() => onGenerateBreakdown(e)}>📋</button>
-                </div>
-              </td>
-            </tr>
+                </td>
+                <td>
+                  <div className="flex gap-2" style={{ flexWrap:'wrap' }}>
+                    {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(e.id)} disabled={saving[e.id]}>{saving[e.id]?'...':'✓'}</button>
+                      : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(e)}>✎</button>}
+                    <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(e.id)}>✕</button>
+                    <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate customer invoice' : 'No split lines assigned yet'} onClick={() => onGenerateInvoice(e)}>📄</button>
+                    <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate internal breakdown' : 'No split lines assigned yet'} onClick={() => onGenerateBreakdown(e)}>📋</button>
+                  </div>
+                </td>
+              </tr>
+              {isExpanded && (
+                <tr>
+                  <td></td>
+                  <td colSpan={6} style={{ padding: '4px 8px 14px' }}>
+                    <div style={{ background: 'var(--bg-subtle, #f7f9fc)', border: '1px solid var(--border-solid)', borderRadius: 6, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--navy)', marginBottom: 4 }}>BILLING</div>
+                      {entityBillingLines.length ? entityBillingLines.map(l => (
+                        <div key={l.id} className="flex-between" style={{ fontSize: 12, padding: '2px 0' }}>
+                          <span>{l.service || '—'}</span>
+                          <span>{fmt(l.splits.find(s => s.entity_id === e.id)?.amount || 0)}</span>
+                        </div>
+                      )) : <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No billing lines split to this entity.</div>}
+                      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, borderTop: '1px solid var(--border-solid)', marginTop: 4, paddingTop: 4 }}>
+                        <span>Total Sale</span><span>{fmt(totals.sale)}</span>
+                      </div>
+
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--navy)', margin: '10px 0 4px' }}>COST</div>
+                      {entityCostLines.length ? entityCostLines.map(l => (
+                        <div key={l.id} className="flex-between" style={{ fontSize: 12, padding: '2px 0' }}>
+                          <span>{l.vendor ? `${l.vendor} — ` : ''}{l.service || '—'}</span>
+                          <span>{fmt(l.splits.find(s => s.entity_id === e.id)?.amount || 0)}</span>
+                        </div>
+                      )) : <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No cost lines split to this entity.</div>}
+                      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, borderTop: '1px solid var(--border-solid)', marginTop: 4, paddingTop: 4 }}>
+                        <span>Total Cost</span><span>{fmt(totals.cost)}</span>
+                      </div>
+
+                      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, marginTop: 10, color: 'var(--navy)' }}>
+                        <span>Profit / GP</span><span>{fmt(totals.profit)} / {totals.gp.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           )
         })}
       </tbody>
