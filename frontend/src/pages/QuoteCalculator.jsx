@@ -38,6 +38,20 @@ const PRESET_REMARKS = [
   { label: 'Payment terms (30 days)',       text: 'Payment term is 30 days upon receiving our invoice.' },
   { label: 'Contact for other destinations', text: 'For other destinations, cities or countries, please contact us.' },
   { label: 'Cargo packaging (IATA)',        text: 'Please ensure cargo is packed in good condition in accordance with IATA requirements. Additional charges will apply if repacking is needed.' },
+  { label: 'Space & equipment availability', text: 'Subject to space and equipment availability.' },
+  { label: 'Empty repositioning cost',      text: 'Subject to empty repositioning cost, if any.' },
+  { label: 'Heavy weight surcharge',        text: 'Subject to Heavy Weight Surcharge, if applicable.' },
+  { label: 'ISOCC monthly review',          text: 'ISOCC is subject to monthly review.' },
+  { label: 'Prepaid charges not shown',     text: 'Standard prepaid charges are not shown.' },
+  { label: 'Dry boxes only',                text: 'Above rates are for Dry Boxes only, Non-DG / Waste / Scrap.' },
+  { label: 'POL local charges',             text: 'Container seal fee, documentation fees and other POL local charges are payable by either the POL shipper or POD consignee.' },
+  { label: 'Ocean freight payable in SG',   text: 'TOS: Ocean Freight payable in Singapore only.' },
+  { label: 'New surcharges post-quotation', text: 'Subject to other surcharges if implemented after this quotation or upon booking.' },
+  { label: 'Monthly surcharge fluctuation', text: 'Surcharges are subject to monthly fluctuation.' },
+  { label: 'Surcharges w/o prior notice',   text: 'Surcharges are subject to changes without prior notice.' },
+  { label: 'DG cargo approval required',    text: 'DG cargoes are subject to approval at POL & POD agent.' },
+  { label: 'Quote void after 7 days',       text: 'Above quotation will be null & void after 7 days of not receiving your confirmation.' },
+  { label: 'Confirm before validity expires', text: 'Please advise acceptance of quotes before validity expires.' },
 ]
 const DEFAULT_REMARKS = new Set([0, 1, 7, 9, 16])
 
