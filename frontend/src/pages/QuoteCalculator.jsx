@@ -52,6 +52,7 @@ const PRESET_REMARKS = [
   { label: 'DG cargo approval required',    text: 'DG cargoes are subject to approval at POL & POD agent.' },
   { label: 'Quote void after 7 days',       text: 'Above quotation will be null & void after 7 days of not receiving your confirmation.' },
   { label: 'Confirm before validity expires', text: 'Please advise acceptance of quotes before validity expires.' },
+  { label: 'Rates subject to change (short)', text: 'Rate subject to changes without prior notice.' },
 ]
 const DEFAULT_REMARKS = new Set([0, 1, 7, 9, 16])
 
