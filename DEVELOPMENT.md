@@ -31,6 +31,27 @@ There is no local server — the app runs only on Vercel. To make changes:
 2. Commit and push to `main`.
 3. Vercel auto-deploys; check the change on the live site.
 
+## Testing
+
+Unit tests live next to the code they cover, as `*.test.js` files (e.g.
+[`frontend/src/utils/splitInvoicing.test.js`](frontend/src/utils/splitInvoicing.test.js)),
+using [Vitest](https://vitest.dev). Run them from `frontend/`:
+
+```bash
+cd frontend
+npm test
+```
+
+Coverage today is deliberately narrow: pure calculation logic that would cause
+a silent billing bug if it broke (e.g. the split-invoicing rounding math),
+extracted into `frontend/src/utils/` specifically so it can be tested without
+rendering a component or hitting the database. There's no component/UI test
+layer yet, and no backend tests — add both as separate follow-ups if the
+pattern proves useful, rather than trying to cover everything at once.
+
+A GitHub Actions workflow ([`.github/workflows/test.yml`](.github/workflows/test.yml))
+runs `npm test` in `frontend/` on every push and pull request against `main`.
+
 ## Environment variables
 
 Set these in the Vercel project settings:
