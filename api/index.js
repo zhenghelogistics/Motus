@@ -4,6 +4,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
+const { mapLeadToJobFields } = require('./leadConversion');
 const app = express();
 
 const pool = new Pool({
@@ -110,6 +111,30 @@ async function initDB() {
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lost_reason TEXT`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS quote_ref TEXT`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS source_ref TEXT`);
+  // Structured RFQ fields — captured from the estimator webhook as separate columns
+  // instead of only being baked into the free-text `notes` blob, so a lead can later
+  // be converted into a job without a human having to re-type or re-parse anything.
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_person TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone_number TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS simple_mode TEXT DEFAULT ''`); // 'SEA' or 'AIR'
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS load_type TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS origin TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS destination TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS service_type TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS incoterm TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS container_size TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_dimensions TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS commodity_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS hs_code TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_quantity TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_weight TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS packaging_type TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS pickup_address TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS delivery_address TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS special_handling_notes TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS addons TEXT DEFAULT ''`);
+  // Set once this lead has been turned into a real job — blocks converting twice.
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS converted_job_id INTEGER REFERENCES jobs(id)`);
   await pool.query(`ALTER TABLE fx_rates ADD COLUMN IF NOT EXISTS is_manual BOOLEAN DEFAULT FALSE`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_profiles (
@@ -404,8 +429,9 @@ app.post('/api/jobs', async (req, res) => {
       INSERT INTO jobs (job_number, year, sequence, shipper, consignee, weight, packages,
         dimensions, cbm, pickup_address, pickup_contact_name, pickup_contact_number,
         delivery_address, delivery_contact_name, delivery_contact_number,
-        date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes, created_by, packing_list_items)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+        date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes, created_by, packing_list_items,
+        customer_name, customer_contact_name, customer_contact_number, customer_email)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
       RETURNING *
     `, [
       job_number, year, sequence,
@@ -417,7 +443,8 @@ app.post('/api/jobs', async (req, res) => {
       f.agent||'', f.mode||'Local Delivery', f.status||'New',
       f.customer_ref||'', f.deadline_date||null, f.commodity||'', f.notes||'',
       req.user?.email || '',
-      JSON.stringify(f.packing_list_items || [])
+      JSON.stringify(f.packing_list_items || []),
+      f.customer_name||'', f.customer_contact_name||'', f.customer_contact_number||'', f.customer_email||''
     ]);
     const job = result.rows[0];
     if (f.billing_lines && Array.isArray(f.billing_lines)) {
@@ -1657,7 +1684,7 @@ app.get('/api/leads', async (req, res) => {
     const r = await pool.query(
       `SELECT id, ref, customer_name, customer_email, quoted_price, industry, lead_score,
               status, stage, risk_level, source, notes, created_at, next_follow_up, is_archived,
-              claimed_by, claimed_at, follow_up_note, lost_reason
+              claimed_by, claimed_at, follow_up_note, lost_reason, simple_mode, converted_job_id
        FROM leads ${where} ORDER BY created_at DESC`
     )
     res.json(r.rows)
@@ -1740,6 +1767,51 @@ app.put('/api/leads/:id/claim', async (req, res) => {
       [claimedBy, req.params.id]
     )
     res.json(r.rows[0])
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// Turns a Won lead into a real job. Shipper/consignee are deliberately left
+// blank (the RFQ form only has one company + one pickup/delivery address, not
+// a clean shipper-vs-consignee split) — staff fill those in on the job itself.
+// quoted_price is never turned into a billing line; it's an unreviewed
+// estimate, so it only ever appears as a reference note on the job.
+// Blocked both here and by hiding the button once converted_job_id is set,
+// so double-clicking can't create two jobs from the same lead.
+app.post('/api/leads/:id/convert-to-job', async (req, res) => {
+  try {
+    const mode = (req.body?.mode || '').trim()
+    if (!mode) return res.status(400).json({ error: 'A mode must be selected before converting.' })
+
+    const lead = (await pool.query('SELECT * FROM leads WHERE id=$1', [req.params.id])).rows[0]
+    if (!lead) return res.status(404).json({ error: 'Lead not found' })
+    if (lead.converted_job_id) {
+      return res.status(409).json({ error: 'Already converted', jobId: lead.converted_job_id })
+    }
+
+    const { job_number, year, sequence } = await generateJobNumber()
+    const f = mapLeadToJobFields(lead, mode)
+
+    const result = await pool.query(`
+      INSERT INTO jobs (job_number, year, sequence, mode, status, notes, created_by,
+        customer_name, customer_contact_name, customer_contact_number, customer_email,
+        pickup_address, delivery_address, commodity, dimensions, weight, packages, customer_ref)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      RETURNING *
+    `, [
+      job_number, year, sequence, f.mode, f.status, f.notes, req.user?.email || '',
+      f.customer_name, f.customer_contact_name, f.customer_contact_number, f.customer_email,
+      f.pickup_address, f.delivery_address, f.commodity, f.dimensions, f.weight, f.packages,
+      f.customer_ref
+    ])
+
+    const job = result.rows[0]
+    await pool.query('UPDATE leads SET converted_job_id=$1 WHERE id=$2', [job.id, lead.id])
+
+    console.log(`[ZHL] Converted lead ${lead.ref} -> job ${job.job_number}`)
+    res.status(201).json({ success: true, jobId: job.id, job_number: job.job_number })
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
@@ -1925,11 +1997,20 @@ app.post('/api/rfq', async (req, res) => {
     const r = await pool.query(
       `INSERT INTO leads
          (ref, customer_name, customer_email, quoted_price, industry,
-          lead_score, status, stage, risk_level, source, notes, quote_ref, source_ref)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          lead_score, status, stage, risk_level, source, notes, quote_ref, source_ref,
+          contact_person, phone_number, simple_mode, load_type, origin, destination,
+          service_type, incoterm, container_size, lead_dimensions, commodity_name, hs_code,
+          lead_quantity, lead_weight, packaging_type, pickup_address, delivery_address,
+          special_handling_notes, addons)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+               $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
        RETURNING id`,
       [ref, companyName || contactPerson, emailAddress, quotedPrice, industry,
-       5, 'RFQ Received', 'RFQ Received', 'High', 'website', notes, quoteRef, sourceRef]
+       5, 'RFQ Received', 'RFQ Received', 'High', 'website', notes, quoteRef, sourceRef,
+       contactPerson, phoneNumber, mode, loadType, origin, destination,
+       serviceType, incoterm, containerSize, dimensions, commodityName, hsCode,
+       quantity, weight, packagingType, pickupAddress, deliveryAddress,
+       specialHandlingNotes, addons]
     )
 
     const leadId = r.rows[0].id

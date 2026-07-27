@@ -33,24 +33,48 @@ There is no local server — the app runs only on Vercel. To make changes:
 
 ## Testing
 
-Unit tests live next to the code they cover, as `*.test.js` files (e.g.
-[`frontend/src/utils/splitInvoicing.test.js`](frontend/src/utils/splitInvoicing.test.js)),
-using [Vitest](https://vitest.dev). Run them from `frontend/`:
+Unit tests live next to the code they cover, as `*.test.js` files.
+
+**Frontend** ([`frontend/src/utils/splitInvoicing.test.js`](frontend/src/utils/splitInvoicing.test.js)),
+using [Vitest](https://vitest.dev):
 
 ```bash
-cd frontend
-npm test
+cd frontend && npm test
 ```
 
-Coverage today is deliberately narrow: pure calculation logic that would cause
-a silent billing bug if it broke (e.g. the split-invoicing rounding math),
-extracted into `frontend/src/utils/` specifically so it can be tested without
-rendering a component or hitting the database. There's no component/UI test
-layer yet, and no backend tests — add both as separate follow-ups if the
+**Backend** ([`api/leadConversion.test.js`](api/leadConversion.test.js)),
+using Node's built-in test runner (`node:test` — no extra dependency):
+
+```bash
+npm test   # from the repo root; runs api/*.test.js
+```
+
+Coverage on both sides is deliberately narrow: pure calculation/mapping logic
+that would cause a silent data or billing bug if it broke (split-invoicing
+rounding, lead-to-job field mapping), extracted into its own module
+specifically so it's testable without rendering a component or hitting the
+database. There's no component/UI test layer and no test coverage for routes
+that touch Postgres directly — add both as separate follow-ups if the
 pattern proves useful, rather than trying to cover everything at once.
 
+## Linting
+
+`eslint.config.js` at the repo root covers both `api/**/*.js` (Node rules) and
+`frontend/src/**/*.{js,jsx}` (React + Hooks rules) from one config:
+
+```bash
+npm run lint   # from the repo root
+```
+
+`no-empty` is configured with `allowEmptyCatch: true` — this codebase uses
+`catch (_) {}` deliberately in several places for optional/best-effort steps,
+that's not a mistake to flag.
+
+## CI
+
 A GitHub Actions workflow ([`.github/workflows/test.yml`](.github/workflows/test.yml))
-runs `npm test` in `frontend/` on every push and pull request against `main`.
+runs the frontend test suite, the backend test suite, and the linter — each
+as a separate job — on every push and pull request against `main`.
 
 ## Environment variables
 

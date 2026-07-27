@@ -82,6 +82,7 @@ export const updateLead = (id, data) => api.put(`/leads/${id}`, data)
 export const getLeadStats = () => api.get('/leads/stats')
 export const claimLead = (id) => api.put(`/leads/${id}/claim`)
 export const generateEmail = (id, data) => api.post(`/leads/${id}/generate-email`, data)
+export const convertLeadToJob = (id, mode) => api.post(`/leads/${id}/convert-to-job`, { mode })
 
 export const unlockFxRate = (currency) => api.put(`/fx-rates/${currency}/unlock`)
 

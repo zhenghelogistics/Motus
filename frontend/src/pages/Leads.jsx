@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getLeads, createLead, updateLead, getLeadStats, claimLead, generateEmail, getMarketingContacts, deleteMarketingContact } from '../api'
+import { useNavigate } from 'react-router-dom'
+import { getLeads, createLead, updateLead, getLeadStats, claimLead, generateEmail, convertLeadToJob, getMarketingContacts, deleteMarketingContact } from '../api'
 import { supabase } from '../lib/supabase'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -223,6 +224,7 @@ function TagButton({ label, active, onClick }) {
 // ── Lead Modal ────────────────────────────────────────────────────────────────
 
 function LeadModal({ lead, onClose, onSave, onClaim }) {
+  const navigate = useNavigate()
   const isNew = !lead.id
 
   // parse existing next_follow_up into date + time
@@ -266,6 +268,25 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
   const [quoteIn, setQuoteIn]         = useState(String(lead.quoted_price || ''))
   const [showLostIn, setShowLostIn]   = useState(false)
   const [lostIn, setLostIn]           = useState(lead.lost_reason || '')
+
+  // ── convert to job ──
+  const [convertMode, setConvertMode] = useState('')
+  const [converting, setConverting]   = useState(false)
+  const [convertErr, setConvertErr]   = useState('')
+  const modePills = lead.simple_mode === 'AIR' ? ['Air Express', 'Air Freight']
+    : lead.simple_mode === 'SEA' ? ['Sea FCL', 'Sea LCL']
+    : ['Sea FCL', 'Sea LCL', 'Air Express', 'Air Freight'] // unknown mode (e.g. manually created lead) — show all
+  async function handleConvertToJob() {
+    if (!convertMode) return
+    setConverting(true); setConvertErr('')
+    try {
+      const { data } = await convertLeadToJob(lead.id, convertMode)
+      navigate(`/jobs/${data.jobId}`)
+    } catch (e) {
+      setConvertErr(e?.response?.data?.error || 'Convert failed')
+      setConverting(false)
+    }
+  }
 
   // ── email generator ──
   const [emailType, setEmailType]         = useState('followup')
@@ -510,6 +531,44 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                 </div>
               )}
             </SectionBox>
+
+            {/* ── Convert to Job (Won leads only) ── */}
+            {!isNew && form.stage === 'Won' && (
+              <SectionBox>
+                <SectionHead>Convert to Job</SectionHead>
+                {lead.converted_job_id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, color: '#15803D', fontWeight: 700 }}>✓ Converted</span>
+                    <button className="btn btn-primary btn-sm" onClick={() => navigate(`/jobs/${lead.converted_job_id}`)}>
+                      View Job →
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+                      Pick the exact mode for this job — shipper, consignee, and billing are left blank for you to fill in on the job itself.
+                    </p>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                      {modePills.map(m => (
+                        <button key={m} onClick={() => setConvertMode(m)}
+                          style={{
+                            padding: '5px 14px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                            border: '1.5px solid var(--blue)',
+                            background: convertMode === m ? 'var(--blue)' : 'transparent',
+                            color: convertMode === m ? '#fff' : 'var(--blue)',
+                            transition: 'all 0.12s',
+                          }}
+                        >{m}</button>
+                      ))}
+                    </div>
+                    {convertErr && <div className="alert alert-error" style={{ marginBottom: 10 }}>{convertErr}</div>}
+                    <button className="btn btn-primary btn-sm" onClick={handleConvertToJob} disabled={!convertMode || converting}>
+                      {converting ? 'Converting…' : 'Convert to Job'}
+                    </button>
+                  </>
+                )}
+              </SectionBox>
+            )}
 
             {/* ── Follow-Up Scheduler ── */}
             <SectionBox>
