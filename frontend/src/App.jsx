@@ -68,7 +68,7 @@ function WhatsNewModal({ onClose }) {
               marginLeft: 4,
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
-                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)', flex: 1 }}>{entry.title}</span>
+                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--heading)', flex: 1 }}>{entry.title}</span>
                 <span style={{
                   fontSize: 10, fontWeight: 700, color: i === 0 ? '#006EFF' : '#6B7E93',
                   background: i === 0 ? '#E8F1FA' : 'var(--bg-hover)',
@@ -79,7 +79,7 @@ function WhatsNewModal({ onClose }) {
               {entry.route && (
                 <button
                   className="btn btn-sm"
-                  style={{ fontSize: 12, padding: '4px 12px', border: '1.5px solid var(--navy)', color: 'var(--navy)', background: 'transparent', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font)' }}
+                  style={{ fontSize: 12, padding: '4px 12px', border: '1.5px solid var(--navy)', color: 'var(--heading)', background: 'transparent', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font)' }}
                   onClick={() => go(entry.route)}
                 >
                   {entry.routeLabel} →
@@ -238,7 +238,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
                   const val = c === 'SGD' ? sgdAmount : sgdAmount * (rates[c] || 1)
                   return (
                     <div key={c} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
-                      <span style={{ fontWeight: 700, fontSize: 13, width: 48, color: 'var(--navy)' }}>{c}</span>
+                      <span style={{ fontWeight: 700, fontSize: 13, width: 48, color: 'var(--heading)' }}>{c}</span>
                       <span style={{ flex: 1, fontSize: 18, fontWeight: 700 }}>
                         {val.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
@@ -262,7 +262,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
                   <div key={c} style={{ borderBottom: '1px solid var(--border-solid)', background: '#ffffff' }}>
                     {/* Currency label + lock badge */}
                     <div style={{ display: 'flex', alignItems: 'center', padding: '8px 14px 4px', gap: 8 }}>
-                      <span style={{ fontWeight: 800, fontSize: 13, color: 'var(--navy)', width: 36 }}>{c}</span>
+                      <span style={{ fontWeight: 800, fontSize: 13, color: 'var(--heading)', width: 36 }}>{c}</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {isManual[c] ? (
                           <button onClick={() => handleUnlock(c)} disabled={unlocking[c]}

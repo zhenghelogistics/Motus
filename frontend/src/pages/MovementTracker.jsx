@@ -372,7 +372,7 @@ export default function MovementTracker() {
                     return (
                       <tr key={job.id} className="tr-link" onClick={() => navigate(`/jobs/${job.id}`)}
                         style={isVoided ? { opacity: 0.45, background: '#fafafa' } : {}}>
-                        <td style={{ fontWeight: 700, color: 'var(--navy)', whiteSpace: 'nowrap', textDecoration: isVoided ? 'line-through' : 'none' }}>{job.job_number}</td>
+                        <td style={{ fontWeight: 700, color: 'var(--heading)', whiteSpace: 'nowrap', textDecoration: isVoided ? 'line-through' : 'none' }}>{job.job_number}</td>
                         <td style={{ color: 'var(--blue)', fontWeight: 600 }}>{job.customer_ref || '—'}</td>
                         <td>{job.shipper || '—'}</td>
                         <td>{job.consignee || '—'}</td>

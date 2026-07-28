@@ -68,7 +68,7 @@ export default function Login() {
             width: 56, height: 56, borderRadius: 14, background: 'var(--navy)',
             fontSize: 20, fontWeight: 900, color: '#fff', letterSpacing: '-1px', marginBottom: 12,
           }}>ZHL</div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--navy)' }}>Zhenghe Logistics</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--heading)' }}>Zhenghe Logistics</div>
           <div style={{ fontSize: 12, color: '#6B7E93', marginTop: 2 }}>Operations Portal</div>
         </div>
 
@@ -96,7 +96,7 @@ export default function Login() {
         {mode === 'success' ? (
           <div style={{ textAlign: 'center', padding: '12px 0 8px' }}>
             <div style={{ marginBottom: 16 }}><CheckCircle size={40} color="var(--green)" /></div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--navy)', marginBottom: 8 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--heading)', marginBottom: 8 }}>
               Account created!
             </div>
             <div style={{ fontSize: 13, color: '#6B7E93', marginBottom: 24, lineHeight: 1.6 }}>

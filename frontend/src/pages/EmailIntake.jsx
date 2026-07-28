@@ -331,7 +331,7 @@ export default function EmailIntake() {
                           onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
                           onMouseLeave={e => e.currentTarget.style.background = ''}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontWeight: 700, color: 'var(--navy)', fontSize: 13 }}>{j.job_number}</span>
+                            <span style={{ fontWeight: 700, color: 'var(--heading)', fontSize: 13 }}>{j.job_number}</span>
                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{j.mode}</span>
                           </div>
                           <div style={{ fontSize: 12, marginTop: 3, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -482,7 +482,7 @@ export default function EmailIntake() {
 
           {/* Customer (billing party) */}
           <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 10 }}>Customer (Billing Party)</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--heading)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 10 }}>Customer (Billing Party)</div>
             <div className="form-grid-2 mb-2">
               <div className="form-group" style={{ position: 'relative' }}>
                 <label className="form-label">Customer Name</label>
@@ -504,7 +504,7 @@ export default function EmailIntake() {
                         style={{ padding: '9px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)', fontSize: 13 }}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
                         onMouseLeave={e => e.currentTarget.style.background = ''}>
-                        <div style={{ fontWeight: 700, color: 'var(--navy)' }}>{c.display_name}</div>
+                        <div style={{ fontWeight: 700, color: 'var(--heading)' }}>{c.display_name}</div>
                         {c.customer_email && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.customer_email}</div>}
                         {c.customer_contact_name && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.customer_contact_name} {c.customer_contact_number}</div>}
                       </div>
@@ -597,7 +597,7 @@ export default function EmailIntake() {
           </div>
 
           <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--heading)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 12 }}>
               Dimensions <span style={{ fontWeight: 400, fontSize: 11, textTransform: 'none', color: 'var(--text-muted)' }}>— L × W × H (cm) per box</span>
             </div>
             <DimensionBoxes

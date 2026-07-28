@@ -242,13 +242,13 @@ export default function ProfileModal({ onClose }) {
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Yours sincerely</div>
                   <img src={signature} alt="signature" style={{ maxHeight: 50, display: 'block', marginBottom: 6, opacity: 0.9 }} />
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--heading)' }}>
                     {displayName || user?.email?.split('@')[0] || '—'}
                   </div>
                   {designation && (
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{designation}</div>
                   )}
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--navy)' }}>Zhenghe Logistics Pte Ltd</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--heading)' }}>Zhenghe Logistics Pte Ltd</div>
                 </div>
               )}
             </>

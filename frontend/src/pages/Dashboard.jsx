@@ -147,7 +147,7 @@ export default function Dashboard() {
               <tbody>
                 {upcoming_deadlines.map(j => (
                   <tr key={j.id} className="tr-link" onClick={() => navigate(`/jobs/${j.id}`)}>
-                    <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--navy)', fontSize: 13 }}>{j.job_number}</td>
+                    <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--heading)', fontSize: 13 }}>{j.job_number}</td>
                     <td style={{ padding: '7px 8px', fontSize: 13 }}>{j.shipper || '—'}</td>
                     <td style={{ padding: '7px 8px' }}>
                       <span className={deadlineClass(j.deadline_date)} style={{ fontSize: 13 }}>{j.deadline_date || '—'}</span>
@@ -178,7 +178,7 @@ export default function Dashboard() {
               <tbody>
                 {flagged_jobs.map(j => (
                   <tr key={j.id} className="tr-link" onClick={() => navigate(`/jobs/${j.id}`)}>
-                    <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--navy)', fontSize: 13 }}>{j.job_number}</td>
+                    <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--heading)', fontSize: 13 }}>{j.job_number}</td>
                     <td style={{ padding: '7px 8px', fontSize: 13 }}>{j.shipper || '—'}</td>
                     <td style={{ padding: '7px 8px' }}><StatusPill status={j.status} /></td>
                   </tr>
@@ -318,7 +318,7 @@ function JobStatusWidget({ statusCounts, missingCount, flaggedJobs, navigate }) 
                         className="tr-link"
                         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 6px', borderBottom: '1px solid var(--border)', borderRadius: 6 }}>
                         <div style={{ minWidth: 0 }}>
-                          <span style={{ fontWeight: 700, color: 'var(--navy)', fontSize: 13, marginRight: 8 }}>{j.job_number}</span>
+                          <span style={{ fontWeight: 700, color: 'var(--heading)', fontSize: 13, marginRight: 8 }}>{j.job_number}</span>
                           {j.customer_ref && <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 600, marginRight: 8 }}>{j.customer_ref}</span>}
                           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                             {j.shipper || '—'} <ArrowRight size={12} style={{ verticalAlign: 'middle' }} /> {j.consignee || '—'}

@@ -1693,7 +1693,7 @@ export default function JobDetail() {
             </div>
             <div className="modal-body" style={{ textAlign: 'center', padding: '32px 24px' }}>
               <div style={{ marginBottom: 12 }}><ClipboardList size={40} color="var(--navy)" /></div>
-              <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--navy)', marginBottom: 8 }}>
+              <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--heading)', marginBottom: 8 }}>
                 Vendor invoice extracted successfully.
               </p>
               <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>
@@ -1777,7 +1777,7 @@ export default function JobDetail() {
       <div className="flex-between mb-4" style={{ flexWrap: 'wrap', gap: 12 }}>
         <div className="flex-center gap-2">
           <button className="btn btn-ghost btn-sm" onClick={() => navigate('/jobs')}><ArrowLeft size={14} /> Back</button>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--navy)', letterSpacing: '-0.5px' }}>{job.job_number}</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--heading)', letterSpacing: '-0.5px' }}>{job.job_number}</h1>
           {job.customer_ref && (
             <span style={{ background: 'var(--blue-light)', color: 'var(--blue)', padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>
               {job.customer_ref}
@@ -1914,7 +1914,7 @@ export default function JobDetail() {
           splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'cost')} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.cost_lines?.length||0} line(s)</span>
-          <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Total Cost: {fmt(totalCost)}</span>
+          <span style={{ fontWeight: 700, color: 'var(--heading)' }}>Total Cost: {fmt(totalCost)}</span>
         </div>
       </div>
 
@@ -1928,7 +1928,7 @@ export default function JobDetail() {
           splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'billing')} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.billing_lines?.length||0} line(s)</span>
-          <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Total Sale: {fmt(totalSale)}</span>
+          <span style={{ fontWeight: 700, color: 'var(--heading)' }}>Total Sale: {fmt(totalSale)}</span>
         </div>
       </div>
 
@@ -2110,7 +2110,7 @@ function InfoEdit({ form, setField, staffList = [] }) {
 
       {/* Customer (billing party) */}
       <div style={{ background:'var(--bg)', borderRadius:8, padding:14, marginBottom:14 }}>
-        <div style={{ fontSize:12, fontWeight:700, color:'var(--navy)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:10 }}>Customer (Billing Party)</div>
+        <div style={{ fontSize:12, fontWeight:700, color:'var(--heading)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:10 }}>Customer (Billing Party)</div>
         <div className="form-grid-4" style={{ gap:10 }}>
           {inp('customer_name','Customer Name','text','If different from shipper')}
           {inp('customer_email','Email','email')}
@@ -2130,7 +2130,7 @@ function InfoEdit({ form, setField, staffList = [] }) {
 
       {/* Per-box dimensions */}
       <div style={{ background:'var(--bg)', borderRadius:8, padding:14, marginBottom:14 }}>
-        <div style={{ fontSize:12, fontWeight:700, color:'var(--navy)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:12 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:'var(--heading)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:12 }}>
           Dimensions <span style={{ fontWeight:400, fontSize:11, textTransform:'none', color:'var(--text-muted)' }}>— L × W × H (cm) per box</span>
         </div>
         <DimensionBoxes
@@ -2262,7 +2262,7 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
                   ? <input type="number" className="form-control form-control-sm" placeholder="—"
                       value={d.total_payable ?? ''} onChange={e => setDraft(l.id,'total_payable',e.target.value)} />
                   : l.total_payable != null
-                    ? <strong style={{ color:'var(--navy)' }}>{fmt(l.total_payable)}</strong>
+                    ? <strong style={{ color:'var(--heading)' }}>{fmt(l.total_payable)}</strong>
                     : <span style={{ color:'var(--text-muted)', fontSize:12 }}>—</span>
                 }
               </td>
@@ -2483,7 +2483,7 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                   <td></td>
                   <td colSpan={6} style={{ padding: '4px 8px 14px' }}>
                     <div style={{ background: 'var(--bg-subtle, #f7f9fc)', border: '1px solid var(--border-solid)', borderRadius: 6, padding: '10px 14px' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--navy)', marginBottom: 4 }}>BILLING</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--heading)', marginBottom: 4 }}>BILLING</div>
                       {entityBillingLines.length ? entityBillingLines.map(l => (
                         <div key={l.id} className="flex-between" style={{ fontSize: 12, padding: '2px 0' }}>
                           <span>{l.service || '—'}</span>
@@ -2494,7 +2494,7 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                         <span>Total Sale</span><span>{fmt(totals.sale)}</span>
                       </div>
 
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--navy)', margin: '10px 0 4px' }}>COST</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--heading)', margin: '10px 0 4px' }}>COST</div>
                       {entityCostLines.length ? entityCostLines.map(l => (
                         <div key={l.id} className="flex-between" style={{ fontSize: 12, padding: '2px 0' }}>
                           <span>{l.vendor ? `${l.vendor} — ` : ''}{l.service || '—'}</span>
@@ -2505,7 +2505,7 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                         <span>Total Cost</span><span>{fmt(totals.cost)}</span>
                       </div>
 
-                      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, marginTop: 10, color: 'var(--navy)' }}>
+                      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, marginTop: 10, color: 'var(--heading)' }}>
                         <span>Profit / GP</span><span>{fmt(totals.profit)} / {totals.gp.toFixed(1)}%</span>
                       </div>
                     </div>

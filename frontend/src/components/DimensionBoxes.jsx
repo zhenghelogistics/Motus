@@ -118,8 +118,8 @@ export default function DimensionBoxes({ packages, dimensions, onChange, syncKey
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--navy)', textTransform: 'uppercase', letterSpacing: '0.4px', whiteSpace: 'nowrap' }}>Packages</label>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>{total}</span>
+        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--heading)', textTransform: 'uppercase', letterSpacing: '0.4px', whiteSpace: 'nowrap' }}>Packages</label>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--heading)' }}>{total}</span>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>— L × W × H (cm) per box:</span>
       </div>
 
@@ -127,7 +127,7 @@ export default function DimensionBoxes({ packages, dimensions, onChange, syncKey
         <div>
           {boxes.map((box, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--navy)', minWidth: 44 }}>Box {i + 1}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--heading)', minWidth: 44 }}>Box {i + 1}</span>
               <input type="number" className="form-control form-control-sm" placeholder="L" value={box.l}
                 onChange={e => updateBox(i, 'l', e.target.value)} style={{ flex: 1, minWidth: 50 }} />
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>×</span>
@@ -153,7 +153,7 @@ export default function DimensionBoxes({ packages, dimensions, onChange, syncKey
         </div>
 
         <div style={{ background: 'var(--bg-hover,#EEF3F8)', borderRadius: 8, padding: 12 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--navy)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.4px' }}>CBM Breakdown</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--heading)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.4px' }}>CBM Breakdown</div>
           {boxes.map((box, i) => {
             const lv = parseFloat(box.l), wv = parseFloat(box.w), hv = parseFloat(box.h)
             const q = parseInt(box.qty) || 1
@@ -168,7 +168,7 @@ export default function DimensionBoxes({ packages, dimensions, onChange, syncKey
           })}
           <div style={{ borderTop: '1px solid var(--border-solid,#D1DCE8)', marginTop: 6, paddingTop: 6, fontSize: 12, fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
             <span>Total CBM</span>
-            <span style={{ color: 'var(--navy)' }}>{totalCBM != null ? totalCBM.toFixed(4) : '—'} m³</span>
+            <span style={{ color: 'var(--heading)' }}>{totalCBM != null ? totalCBM.toFixed(4) : '—'} m³</span>
           </div>
           {volWeight != null && (
             <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 4, fontWeight: 600, textAlign: 'right' }}>Vol Wt: {volWeight} kg</div>
