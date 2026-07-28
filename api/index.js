@@ -1690,7 +1690,11 @@ app.get('/api/leads', async (req, res) => {
     const r = await pool.query(
       `SELECT id, ref, customer_name, customer_email, quoted_price, industry, lead_score,
               status, stage, risk_level, source, notes, created_at, next_follow_up, is_archived,
-              claimed_by, claimed_at, follow_up_note, lost_reason, simple_mode, converted_job_id
+              claimed_by, claimed_at, follow_up_note, lost_reason, simple_mode, converted_job_id,
+              contact_person, phone_number, load_type, origin, destination, service_type,
+              incoterm, container_size, lead_dimensions, commodity_name, hs_code, lead_quantity,
+              lead_weight, packaging_type, pickup_address, delivery_address,
+              special_handling_notes, addons
        FROM leads ${where} ORDER BY created_at DESC`
     )
     res.json(r.rows)
@@ -1725,7 +1729,11 @@ app.put('/api/leads/:id', async (req, res) => {
   try {
     const allowed = ['customer_name','customer_email','quoted_price','industry',
                      'status','stage','risk_level','source','notes','next_follow_up','is_archived',
-                     'follow_up_note','lost_reason','claimed_by']
+                     'follow_up_note','lost_reason','claimed_by',
+                     'contact_person','phone_number','load_type','origin','destination',
+                     'service_type','incoterm','container_size','lead_dimensions','commodity_name',
+                     'hs_code','lead_quantity','lead_weight','packaging_type','pickup_address',
+                     'delivery_address','special_handling_notes','addons']
     const updates = {}
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
     if (Object.keys(updates).length) {

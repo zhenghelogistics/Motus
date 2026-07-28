@@ -238,6 +238,8 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
   const [form, setForm] = useState({
     customer_name:  lead.customer_name  || '',
     customer_email: lead.customer_email || '',
+    contact_person: lead.contact_person || '',
+    phone_number:   lead.phone_number   || '',
     quoted_price:   lead.quoted_price   || '',
     industry:       lead.industry       || 'General',
     stage:          lead.stage          || 'New Lead',
@@ -249,6 +251,23 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
     follow_up_time: initTime,
     follow_up_note: lead.follow_up_note || '',
     lost_reason:    lead.lost_reason    || '',
+    // shipment details — captured from the RFQ form, editable/fillable here too
+    load_type:              lead.load_type              || '',
+    origin:                 lead.origin                 || '',
+    destination:            lead.destination            || '',
+    service_type:           lead.service_type           || '',
+    incoterm:               lead.incoterm               || '',
+    container_size:         lead.container_size         || '',
+    lead_dimensions:        lead.lead_dimensions        || '',
+    commodity_name:         lead.commodity_name         || '',
+    hs_code:                lead.hs_code                || '',
+    lead_quantity:          lead.lead_quantity          || '',
+    lead_weight:             lead.lead_weight            || '',
+    packaging_type:          lead.packaging_type         || '',
+    pickup_address:          lead.pickup_address         || '',
+    delivery_address:        lead.delivery_address       || '',
+    special_handling_notes:  lead.special_handling_notes || '',
+    addons:                  lead.addons                 || '',
   })
   const [claimedBy, setClaimedBy] = useState(lead.claimed_by || null)
   const [saving, setSaving]   = useState(false)
@@ -313,6 +332,8 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
       const payload = {
         customer_name:  form.customer_name,
         customer_email: form.customer_email,
+        contact_person: form.contact_person,
+        phone_number:   form.phone_number,
         quoted_price:   form.quoted_price ? parseFloat(form.quoted_price) : 0,
         industry:       form.industry,
         stage:          form.stage,
@@ -325,6 +346,23 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
           : null,
         follow_up_note: form.follow_up_note || null,
         lost_reason:    form.lost_reason    || null,
+        // shipment details
+        load_type:              form.load_type,
+        origin:                 form.origin,
+        destination:            form.destination,
+        service_type:           form.service_type,
+        incoterm:               form.incoterm,
+        container_size:         form.container_size,
+        lead_dimensions:        form.lead_dimensions,
+        commodity_name:         form.commodity_name,
+        hs_code:                form.hs_code,
+        lead_quantity:          form.lead_quantity,
+        lead_weight:            form.lead_weight,
+        packaging_type:         form.packaging_type,
+        pickup_address:         form.pickup_address,
+        delivery_address:       form.delivery_address,
+        special_handling_notes: form.special_handling_notes,
+        addons:                 form.addons,
       }
       isNew ? await createLead(payload) : await updateLead(lead.id, payload)
       onSave()
@@ -393,7 +431,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 660, width: '95vw' }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 900, width: '95vw' }} onClick={e => e.stopPropagation()}>
 
         {/* ── Header ── */}
         <div className="modal-header">
@@ -424,6 +462,27 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
           <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
         </div>
 
+        {/* ── Route Banner ── */}
+        {!isNew && (form.origin || form.destination) && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            flexWrap: 'wrap', padding: '10px 24px', background: 'var(--sub-box-bg)',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 16, fontWeight: 800, color: 'var(--heading)' }}>
+              <span>{form.origin || '—'}</span>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>→</span>
+              <span>{form.destination || '—'}</span>
+            </div>
+            {(form.load_type || lead.simple_mode) && (
+              <span style={{
+                fontSize: 11, fontWeight: 700, color: 'var(--blue)', border: '1.5px solid var(--blue)',
+                borderRadius: 20, padding: '2px 12px',
+              }}>{form.load_type || lead.simple_mode}</span>
+            )}
+          </div>
+        )}
+
         {/* ══════════════════ DETAILS TAB ══════════════════ */}
         <div style={{ display: isNew || tab === 'details' ? 'block' : 'none' }}>
           <div className="modal-body" style={{ padding: '16px 24px', maxHeight: '75vh', overflowY: 'auto' }}>
@@ -436,6 +495,12 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
               )}
               {fieldRow('Email',
                 <input {...inp} type="email" value={form.customer_email} onChange={e => set('customer_email', e.target.value)} placeholder="contact@acme.com" />
+              )}
+              {fieldRow('Contact Person',
+                <input {...inp} value={form.contact_person} onChange={e => set('contact_person', e.target.value)} placeholder="Name of contact" />
+              )}
+              {fieldRow('Phone Number',
+                <input {...inp} value={form.phone_number} onChange={e => set('phone_number', e.target.value)} placeholder="+65 xxxx xxxx" />
               )}
               {fieldRow('Quoted Price (SGD)',
                 <input {...inp} type="number" value={form.quoted_price} onChange={e => set('quoted_price', e.target.value)} placeholder="0" />
@@ -459,6 +524,61 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                 <input {...inp} value={form.source} onChange={e => set('source', e.target.value)} placeholder="Website, Referral, Cold Call..." />
               )}
             </div>
+
+            {/* ── Shipment Details ── */}
+            <SectionBox>
+              <SectionHead>Shipment Details</SectionHead>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
+                {fieldRow('Origin',
+                  <input {...inp} value={form.origin} onChange={e => set('origin', e.target.value)} placeholder="Port / city of origin" />
+                )}
+                {fieldRow('Destination',
+                  <input {...inp} value={form.destination} onChange={e => set('destination', e.target.value)} placeholder="Port / city of destination" />
+                )}
+                {fieldRow('Load Type',
+                  <input {...inp} value={form.load_type} onChange={e => set('load_type', e.target.value)} placeholder="FCL, LCL, Air Express..." />
+                )}
+                {fieldRow('Service Type',
+                  <input {...inp} value={form.service_type} onChange={e => set('service_type', e.target.value)} placeholder="Door-to-door, Port-to-port..." />
+                )}
+                {fieldRow('Incoterm',
+                  <input {...inp} value={form.incoterm} onChange={e => set('incoterm', e.target.value)} placeholder="FOB, CIF, EXW..." />
+                )}
+                {fieldRow('Container Size',
+                  <input {...inp} value={form.container_size} onChange={e => set('container_size', e.target.value)} placeholder="20ft, 40ft, 40HC..." />
+                )}
+                {fieldRow('Commodity',
+                  <input {...inp} value={form.commodity_name} onChange={e => set('commodity_name', e.target.value)} placeholder="What's being shipped" />
+                )}
+                {fieldRow('HS Code',
+                  <input {...inp} value={form.hs_code} onChange={e => set('hs_code', e.target.value)} />
+                )}
+                {fieldRow('Quantity',
+                  <input {...inp} value={form.lead_quantity} onChange={e => set('lead_quantity', e.target.value)} />
+                )}
+                {fieldRow('Weight',
+                  <input {...inp} value={form.lead_weight} onChange={e => set('lead_weight', e.target.value)} />
+                )}
+                {fieldRow('Dimensions',
+                  <input {...inp} value={form.lead_dimensions} onChange={e => set('lead_dimensions', e.target.value)} />
+                )}
+                {fieldRow('Packaging Type',
+                  <input {...inp} value={form.packaging_type} onChange={e => set('packaging_type', e.target.value)} placeholder="Pallets, cartons, drums..." />
+                )}
+              </div>
+              {fieldRow('Pickup Address',
+                <textarea {...inp} rows={2} value={form.pickup_address} onChange={e => set('pickup_address', e.target.value)} style={{ ...inp.style, resize: 'vertical' }} />
+              )}
+              {fieldRow('Delivery Address',
+                <textarea {...inp} rows={2} value={form.delivery_address} onChange={e => set('delivery_address', e.target.value)} style={{ ...inp.style, resize: 'vertical' }} />
+              )}
+              {fieldRow('Special Handling Notes',
+                <textarea {...inp} rows={2} value={form.special_handling_notes} onChange={e => set('special_handling_notes', e.target.value)} style={{ ...inp.style, resize: 'vertical' }} />
+              )}
+              {fieldRow('Add-ons',
+                <input {...inp} value={form.addons} onChange={e => set('addons', e.target.value)} />
+              )}
+            </SectionBox>
 
             {fieldRow('Notes',
               <textarea {...inp} rows={4} value={form.notes} onChange={e => set('notes', e.target.value)}
