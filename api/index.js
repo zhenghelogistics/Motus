@@ -135,6 +135,12 @@ async function initDB() {
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS addons TEXT DEFAULT ''`);
   // Set once this lead has been turned into a real job — blocks converting twice.
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS converted_job_id INTEGER REFERENCES jobs(id)`);
+  // Indexes for leads — the app had zero indexes anywhere, so GET /api/leads (filters on
+  // is_archived, sorts by created_at) and the RFQ dedup check (filters on source_ref) were
+  // both doing a full sequential scan on every call, which gets slower as the table grows.
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_leads_active_created ON leads (created_at DESC) WHERE (is_archived IS NULL OR is_archived = FALSE)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_leads_status ON leads (status)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_leads_source_ref ON leads (source_ref) WHERE source_ref IS NOT NULL`);
   await pool.query(`ALTER TABLE fx_rates ADD COLUMN IF NOT EXISTS is_manual BOOLEAN DEFAULT FALSE`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_profiles (
