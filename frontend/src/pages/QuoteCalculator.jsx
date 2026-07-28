@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { Check, X } from 'lucide-react'
 import { getProfile } from '../api'
 
 const PRESET_DESCRIPTIONS = [
@@ -157,8 +158,8 @@ export default function QuoteCalculator() {
   function generateQuotePDF() {
     setGeneratingPdf(true)
     try {
-      const navy = [4, 44, 83]
-      const blue = [24, 95, 165]
+      const navy = [0, 48, 135]
+      const blue = [0, 97, 224]
       const doc = new jsPDF('p', 'mm', 'a4')
       const pw = 210, ml = 18, mr = 18, tw = pw - ml - mr
 
@@ -567,13 +568,14 @@ export default function QuoteCalculator() {
                             style={{
                               background: 'none', border: 'none', padding: '3px 6px',
                               cursor: lines.length === 1 ? 'not-allowed' : 'pointer',
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                               color: 'var(--red)', opacity: lines.length === 1 ? 0.2 : 0.6,
-                              fontSize: 14, transition: 'opacity 0.15s',
+                              transition: 'opacity 0.15s',
                               fontFamily: 'var(--font)',
                             }}
                             onMouseEnter={e => { if (lines.length > 1) e.currentTarget.style.opacity = '1' }}
                             onMouseLeave={e => { if (lines.length > 1) e.currentTarget.style.opacity = '0.6' }}
-                          >✕</button>
+                          ><X size={14} /></button>
                         </td>
                       </tr>
                     )
@@ -618,7 +620,7 @@ export default function QuoteCalculator() {
                       <button key={p} className="btn btn-ghost btn-xs" onClick={() => setGlobalMarkup(p)} style={{
                         background: globalMarkup === p ? 'var(--blue-light)' : undefined,
                         color: globalMarkup === p ? 'var(--link)' : undefined,
-                        border: globalMarkup === p ? '1px solid rgba(24,95,165,0.3)' : undefined,
+                        border: globalMarkup === p ? '1px solid rgba(0,110,255,0.3)' : undefined,
                       }}>{p}%</button>
                     ))}
                   </div>
@@ -639,7 +641,7 @@ export default function QuoteCalculator() {
                     transition: 'all 0.15s',
                   }}
                 >
-                  {gstActive ? '✓' : '+'} GST 9%
+                  {gstActive ? <Check size={14} /> : '+'} GST 9%
                   {gstActive && gstAmt > 0 && (
                     <span style={{ fontWeight: 500, fontSize: 12, opacity: 0.85 }}>({fmtM(gstAmt)})</span>
                   )}
@@ -656,7 +658,7 @@ export default function QuoteCalculator() {
             <div style={{
               position: 'absolute', bottom: -30, left: -30,
               width: 120, height: 120,
-              background: 'rgba(24,95,165,0.15)', borderRadius: '50%', pointerEvents: 'none',
+              background: 'rgba(0,110,255,0.15)', borderRadius: '50%', pointerEvents: 'none',
             }} />
 
             <div className="total-item-label" style={{ marginBottom: 10 }}>Final Quoted Price</div>
@@ -706,7 +708,7 @@ export default function QuoteCalculator() {
                 transition: 'all 0.2s',
               }}
             >
-              {copiedPrice ? '✓ Copied!' : 'Copy Price'}
+              {copiedPrice ? <><Check size={14} /> Copied!</> : 'Copy Price'}
             </button>
           </div>
         </div>
@@ -755,7 +757,7 @@ export default function QuoteCalculator() {
             {customRemarks.map((r, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 10px', background: 'var(--sub-box-bg)', borderRadius: 6, border: '1px solid var(--sub-box-border)' }}>
                 <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, lineHeight: 1.5 }}>{r}</span>
-                <button onClick={() => setCustomRemarks(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 14, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}>✕</button>
+                <button onClick={() => setCustomRemarks(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: '0 2px', lineHeight: 1, flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}><X size={14} /></button>
               </div>
             ))}
           </div>
@@ -790,7 +792,7 @@ export default function QuoteCalculator() {
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-outline btn-sm" onClick={copyQuote}>
-                {copiedQuote ? '✓ Copied!' : 'Copy Quote'}
+                {copiedQuote ? <><Check size={14} /> Copied!</> : 'Copy Quote'}
               </button>
               <button className="btn btn-primary btn-sm" onClick={openPdfModal}>
                 Generate Quotation PDF
@@ -821,7 +823,7 @@ export default function QuoteCalculator() {
           <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Generate Quotation PDF</h2>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowPdfModal(false)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowPdfModal(false)}><X size={14} /></button>
             </div>
 
             <div className="modal-body" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>

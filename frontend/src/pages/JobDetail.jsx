@@ -12,6 +12,10 @@ import {
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
 import { autoFillSplit, computeEntityTotals } from '../utils/splitInvoicing'
+import {
+  X, ClipboardList, FileText, Ban, ArrowLeft, Download, Truck, Package, Stamp,
+  ChevronDown, ChevronRight, Check, Upload, AlertTriangle, Pencil, RotateCcw, Paperclip, Info
+} from 'lucide-react'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
 const CURRENCIES = [
@@ -20,8 +24,8 @@ const CURRENCIES = [
 ]
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 const DOC_TYPES = ['CI', 'PL', 'DO', 'Invoice', 'Other']
-const navy = [4, 44, 83]
-const blue = [24, 95, 165]
+const navy = [0, 48, 135]   // #003087
+const blue = [0, 110, 255]  // #006EFF
 
 const fmt = (n) => `$${Number(n||0).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -569,7 +573,7 @@ export default function JobDetail() {
     const billingPartyContact = job.customer_contact_name  || '—'
     const billingPartyPhone   = job.customer_contact_number || '—'
     const billingPartyEmail   = job.customer_email   || '—'
-    const bpLabel = { fontStyle: 'bold', fillColor: [4, 44, 83], textColor: [255, 255, 255], cellWidth: lw }
+    const bpLabel = { fontStyle: 'bold', fillColor: [0, 48, 135], textColor: [255, 255, 255], cellWidth: lw }
     const bpVal   = { fillColor: [232, 241, 250] }
     autoTable(doc, {
       startY: y,
@@ -717,7 +721,7 @@ export default function JobDetail() {
     })
 
     let y = doc.lastAutoTable.finalY + 5
-    const bpLabel = { fontStyle: 'bold', fillColor: [4, 44, 83], textColor: [255, 255, 255], cellWidth: lw }
+    const bpLabel = { fontStyle: 'bold', fillColor: [0, 48, 135], textColor: [255, 255, 255], cellWidth: lw }
     const bpVal   = { fillColor: [232, 241, 250] }
     autoTable(doc, {
       startY: y,
@@ -1401,7 +1405,7 @@ export default function JobDetail() {
   function exportReleaseDO(fields) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
-    const navy = [4, 44, 83]
+    const navy = [0, 48, 135]   // #003087
     const lw = 38
 
     // Header
@@ -1642,7 +1646,7 @@ export default function JobDetail() {
           <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Release D/O</h2>
-              <button className="btn btn-ghost btn-sm" onClick={() => setReleaseDOModal(null)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setReleaseDOModal(null)}><X size={14} /></button>
             </div>
             <div className="modal-body" style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div className="form-group">
@@ -1685,10 +1689,10 @@ export default function JobDetail() {
           <div className="modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Invoice Extracted</h2>
-              <button className="btn btn-ghost btn-sm" onClick={() => setSendToAccountsModal(false)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setSendToAccountsModal(false)}><X size={14} /></button>
             </div>
             <div className="modal-body" style={{ textAlign: 'center', padding: '32px 24px' }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+              <div style={{ marginBottom: 12 }}><ClipboardList size={40} color="var(--navy)" /></div>
               <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--navy)', marginBottom: 8 }}>
                 Vendor invoice extracted successfully.
               </p>
@@ -1701,7 +1705,7 @@ export default function JobDetail() {
                   Dismiss
                 </button>
                 <button className="btn btn-navy" onClick={() => { exportAccountsPDF(); setSendToAccountsModal(false) }}>
-                  📄 Download Accounts PDF
+                  <FileText size={14} /> Download Accounts PDF
                 </button>
               </div>
             </div>
@@ -1715,7 +1719,7 @@ export default function JobDetail() {
           <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Void {job.job_number}?</h2>
-              <button className="btn btn-ghost btn-sm" onClick={() => setVoidModal(false)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setVoidModal(false)}><X size={14} /></button>
             </div>
             <div className="modal-body" style={{ padding: '20px 24px' }}>
               <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
@@ -1723,9 +1727,9 @@ export default function JobDetail() {
                 The job record is kept for audit purposes.
               </p>
               {job.inventory_movement_id && (
-                <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
-                  <div style={{ fontWeight: 600, color: '#92400E', marginBottom: 6 }}>Linked Inventory movement #{job.inventory_movement_id}</div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#78350F' }}>
+                <div style={{ background: 'var(--amber-light)', border: '1px solid rgba(180,83,9,0.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+                  <div style={{ fontWeight: 600, color: 'var(--amber)', marginBottom: 6 }}>Linked Inventory movement #{job.inventory_movement_id}</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--amber)' }}>
                     <input
                       type="checkbox"
                       checked={voidLinkedInventory}
@@ -1759,12 +1763,12 @@ export default function JobDetail() {
 
       {/* Voided banner */}
       {job.status === 'Voided' && (
-        <div style={{ background: '#FEF2F2', border: '1.5px solid #FECACA', borderRadius: 10, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <span style={{ fontSize: 20 }}>🚫</span>
+        <div style={{ background: 'var(--red-light)', border: '1.5px solid rgba(192,57,43,0.3)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <Ban size={20} color="var(--red)" />
           <div>
-            <div style={{ fontWeight: 700, color: '#991B1B', fontSize: 14 }}>This job has been voided</div>
-            {job.void_reason && <div style={{ fontSize: 13, color: '#7F1D1D', marginTop: 3 }}>Reason: {job.void_reason}</div>}
-            <div style={{ fontSize: 12, color: '#B91C1C', marginTop: 4 }}>Job number {job.job_number} is permanently reserved and will not be reused.</div>
+            <div style={{ fontWeight: 700, color: 'var(--red)', fontSize: 14 }}>This job has been voided</div>
+            {job.void_reason && <div style={{ fontSize: 13, color: 'var(--red)', marginTop: 3 }}>Reason: {job.void_reason}</div>}
+            <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 4 }}>Job number {job.job_number} is permanently reserved and will not be reused.</div>
           </div>
         </div>
       )}
@@ -1772,7 +1776,7 @@ export default function JobDetail() {
       {/* Header */}
       <div className="flex-between mb-4" style={{ flexWrap: 'wrap', gap: 12 }}>
         <div className="flex-center gap-2">
-          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/jobs')}>← Back</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/jobs')}><ArrowLeft size={14} /> Back</button>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--navy)', letterSpacing: '-0.5px' }}>{job.job_number}</h1>
           {job.customer_ref && (
             <span style={{ background: 'var(--blue-light)', color: 'var(--blue)', padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>
@@ -1782,17 +1786,17 @@ export default function JobDetail() {
           <StatusDropdown status={job.status} onChange={changeStatus} />
         </div>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost btn-sm" onClick={exportJobReport}>📋 Job Report</button>
-          <button className="btn btn-ghost btn-sm" onClick={exportPDF}>↓ Costing PDF</button>
-          <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}>🚛 Pickup Order</button>
-          <button className="btn btn-ghost btn-sm" onClick={openDOModal}>📦 Delivery Order</button>
-          <button className="btn btn-ghost btn-sm" onClick={openReleaseDOModal}>📋 Release D/O</button>
-          <button className="btn btn-ghost btn-sm" onClick={openSubCertModal}>🛃 Sub Cert</button>
+          <button className="btn btn-ghost btn-sm" onClick={exportJobReport}><ClipboardList size={14} /> Job Report</button>
+          <button className="btn btn-ghost btn-sm" onClick={exportPDF}><Download size={14} /> Costing PDF</button>
+          <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}><Truck size={14} /> Pickup Order</button>
+          <button className="btn btn-ghost btn-sm" onClick={openDOModal}><Package size={14} /> Delivery Order</button>
+          <button className="btn btn-ghost btn-sm" onClick={openReleaseDOModal}><ClipboardList size={14} /> Release D/O</button>
+          <button className="btn btn-ghost btn-sm" onClick={openSubCertModal}><Stamp size={14} /> Sub Cert</button>
           <div style={{ position: 'relative' }}>
             <div style={{ display: 'flex', borderRadius: 6, overflow: 'visible', border: '1.5px solid var(--border-solid)' }}>
-              <button className="btn btn-ghost btn-sm" style={{ borderRadius: '4px 0 0 4px', border: 'none' }} onClick={() => exportAccountsPDF('SGD')}>📄 Accounts PDF</button>
+              <button className="btn btn-ghost btn-sm" style={{ borderRadius: '4px 0 0 4px', border: 'none' }} onClick={() => exportAccountsPDF('SGD')}><FileText size={14} /> Accounts PDF</button>
               <button className="btn btn-ghost btn-sm" style={{ borderRadius: '0 4px 4px 0', border: 'none', borderLeft: '1px solid var(--border-solid)', padding: '0 8px' }}
-                onClick={() => setShowPdfCcyMenu(v => !v)}>▾</button>
+                onClick={() => setShowPdfCcyMenu(v => !v)}><ChevronDown size={14} /></button>
             </div>
             {showPdfCcyMenu && (
               <>
@@ -1800,11 +1804,11 @@ export default function JobDetail() {
                 <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 200, marginTop: 4, backgroundColor: '#ffffff', border: '1px solid var(--border-solid)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.14)', minWidth: 160 }}>
                   {CURRENCIES.map(ccy => (
                     <button key={ccy} onClick={() => { exportAccountsPDF(ccy); setShowPdfCcyMenu(false) }}
-                      style={{ display: 'block', width: '100%', padding: '9px 14px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: 'var(--font)' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '9px 14px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: 'var(--font)' }}
                       onMouseEnter={e => e.currentTarget.style.background = '#F0F4FB'}
                       onMouseLeave={e => e.currentTarget.style.background = 'none'}
                     >
-                      📄 Export in {ccy}
+                      <FileText size={14} /> Export in {ccy}
                     </button>
                   ))}
                 </div>
@@ -1812,7 +1816,7 @@ export default function JobDetail() {
             )}
           </div>
           <button className="btn btn-primary btn-sm" onClick={saveInfo} disabled={saving || job.status === 'Voided'}>
-            {saving ? <><span className="spinner"></span> Saving...</> : '✓ Save Changes'}
+            {saving ? <><span className="spinner"></span> Saving...</> : <><Check size={14} /> Save Changes</>}
           </button>
           {job.status !== 'Voided'
             ? <button className="btn btn-danger btn-sm" onClick={() => { setVoidReason(''); setVoidLinkedInventory(true); setVoidModal(true) }}>Void Job</button>
@@ -1834,7 +1838,7 @@ export default function JobDetail() {
             Packing List
             <div className="flex gap-2">
               <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
-                {plParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : '⬆ Parse PDF'}
+                {plParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : <><Upload size={14} /> Parse PDF</>}
                 <input ref={plFileRef} type="file" accept=".pdf" style={{ display: 'none' }}
                   onChange={e => handlePLParse(e.target.files[0])} />
               </label>
@@ -1879,7 +1883,7 @@ export default function JobDetail() {
                         </td>
                       ))}
                       <td style={{ padding: '3px 4px' }}>
-                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removePLItem(i)}>✕</button>
+                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removePLItem(i)}><X size={14} /></button>
                       </td>
                     </tr>
                   ))}
@@ -1899,7 +1903,7 @@ export default function JobDetail() {
           Cost Lines
           <div className="flex gap-2">
             <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
-              {invoiceParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : '⬆ Invoice PDF → AI'}
+              {invoiceParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : <><Upload size={14} /> Invoice PDF → AI</>}
               <input ref={invoiceRef} type="file" accept=".pdf" style={{ display: 'none' }}
                 onChange={e => handleInvoiceUpload(e.target.files[0])} />
             </label>
@@ -1936,18 +1940,18 @@ export default function JobDetail() {
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.6 }}>
           Divide this job's billing/cost across separate entities (e.g. different outlets of the same client), each with their own invoice.
-          {' '}<strong>①</strong> Add an entity below. <strong>②</strong> Click the <em>Split</em> button on any Cost/Billing line above to assign its amount to each entity. <strong>③</strong> Use 📄 for that entity's invoice or 📋 for an internal breakdown.
+          {' '}<strong>①</strong> Add an entity below. <strong>②</strong> Click the <em>Split</em> button on any Cost/Billing line above to assign its amount to each entity. <strong>③</strong> Use <FileText size={12} style={{ verticalAlign: 'text-bottom' }} /> for that entity's invoice or <ClipboardList size={12} style={{ verticalAlign: 'text-bottom' }} /> for an internal breakdown.
         </p>
         {(job.split_entities||[]).length > 0 && (() => {
           const allLines = [...(job.billing_lines||[]), ...(job.cost_lines||[])]
           const unsplitCount = allLines.filter(l => !l.splits || l.splits.length === 0).length
           return unsplitCount > 0 ? (
-            <p style={{ fontSize: 12, color: 'var(--amber, #b45309)', margin: '0 0 10px' }}>
-              ⚠ {unsplitCount} of {allLines.length} line(s) have no entity split assigned yet — they won't appear on any entity's invoice.
+            <p style={{ fontSize: 12, color: 'var(--amber, #b45309)', margin: '0 0 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <AlertTriangle size={14} /> {unsplitCount} of {allLines.length} line(s) have no entity split assigned yet — they won't appear on any entity's invoice.
             </p>
           ) : (
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
-              ✓ All {allLines.length} line(s) have splits assigned.
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Check size={14} /> All {allLines.length} line(s) have splits assigned.
             </p>
           )
         })()}
@@ -1993,17 +1997,17 @@ export default function JobDetail() {
                 autoFocus
               />
               <span style={{ color: 'white', fontWeight: 700 }}>%</span>
-              <button onClick={saveGpOverride} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', borderRadius: 5, padding: '3px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>✓</button>
-              <button onClick={() => setGpEditing(false)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: 12 }}>✕</button>
+              <button onClick={saveGpOverride} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', borderRadius: 5, padding: '3px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 12, display: 'flex', alignItems: 'center' }}><Check size={13} /></button>
+              <button onClick={() => setGpEditing(false)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center' }}><X size={13} /></button>
             </div>
           ) : (
             <div className="flex-center gap-2" style={{ marginTop: 4 }}>
               <div className={`total-item-value ${displayGP >= 20 ? 'green' : displayGP >= 10 ? '' : 'red'}`} style={{ marginTop: 0 }}>
                 {totalSale > 0 || job.gp_override != null ? `${displayGP.toFixed(1)}%` : '—'}
               </div>
-              <button onClick={startGpEdit} title="Override GP%" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: 'rgba(255,255,255,0.7)', borderRadius: 5, padding: '3px 7px', cursor: 'pointer', fontSize: 11 }}>✎</button>
+              <button onClick={startGpEdit} title="Override GP%" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: 'rgba(255,255,255,0.7)', borderRadius: 5, padding: '3px 7px', cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center' }}><Pencil size={12} /></button>
               {job.gp_override != null && (
-                <button onClick={clearGpOverride} title="Reset to calculated" style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 11 }}>↺</button>
+                <button onClick={clearGpOverride} title="Reset to calculated" style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center' }}><RotateCcw size={12} /></button>
               )}
             </div>
           )}
@@ -2030,13 +2034,13 @@ export default function JobDetail() {
             {job.documents.map(d => (
               <li key={d.id} className="doc-item">
                 <div className="flex-center gap-2">
-                  <span style={{ fontSize: 18 }}>📎</span>
+                  <Paperclip size={18} color="var(--text-muted)" />
                   <a href={d.file_url} target="_blank" rel="noopener noreferrer"
                     style={{ color: 'var(--blue)', fontWeight: 600, fontSize: 13 }}>{d.file_name}</a>
                   <span className="doc-type-badge">{d.doc_type}</span>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{d.upload_date?.split('T')[0]}</span>
                 </div>
-                <button className="btn btn-ghost btn-xs" style={{ color: 'var(--red)' }} onClick={() => removeDoc(d.id)}>✕</button>
+                <button className="btn btn-ghost btn-xs" style={{ color: 'var(--red)' }} onClick={() => removeDoc(d.id)}><X size={13} /></button>
               </li>
             ))}
           </ul>
@@ -2167,7 +2171,7 @@ function InfoEdit({ form, setField, staffList = [] }) {
         <div className="form-group" style={{ marginTop: 10 }}>
           <label className="form-label">Inventory Movement</label>
           {form.inventory_movement_id
-            ? <div style={{ padding: '8px 12px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, fontSize: 13, fontWeight: 700, color: '#1D4ED8' }}>
+            ? <div style={{ padding: '8px 12px', background: 'var(--blue-light)', border: '1px solid rgba(0,110,255,0.25)', borderRadius: 6, fontSize: 13, fontWeight: 700, color: 'var(--link)' }}>
                 {form.inventory_movement_no ? `${form.inventory_movement_no}` : `#${form.inventory_movement_id}`} — linked
               </div>
             : <div style={{ padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--border-solid)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
@@ -2266,9 +2270,9 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
               {hasSplitEntities && (
                 <td>
                   {l.splits?.length ? (
-                    <button className="btn btn-xs" style={{ background:'#eaf6ee', color:'#16a34a', border:'1px solid #bfe6cb', whiteSpace:'nowrap' }}
+                    <button className="btn btn-xs" style={{ background:'var(--green-light)', color:'var(--green)', border:'1px solid rgba(20,128,74,0.3)', whiteSpace:'nowrap', display:'inline-flex', alignItems:'center', gap:4 }}
                       onClick={() => onEditSplits(l)} title="Edit how this line is split across entities">
-                      ✓ Split ({l.splits.length})
+                      <Check size={12} /> Split ({l.splits.length})
                     </button>
                   ) : (
                     <button className="btn btn-outline btn-xs" style={{ whiteSpace:'nowrap' }}
@@ -2280,9 +2284,9 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
               )}
               <td>
                 <div className="flex gap-2">
-                  {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':'✓'}</button>
-                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)}>✎</button>}
-                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)}>✕</button>
+                  {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':<Check size={13} />}</button>
+                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)}><Pencil size={13} /></button>}
+                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)}><X size={13} /></button>
                 </div>
               </td>
             </tr>
@@ -2367,9 +2371,9 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
               {hasSplitEntities && (
                 <td>
                   {l.splits?.length ? (
-                    <button className="btn btn-xs" style={{ background:'#eaf6ee', color:'#16a34a', border:'1px solid #bfe6cb', whiteSpace:'nowrap' }}
+                    <button className="btn btn-xs" style={{ background:'var(--green-light)', color:'var(--green)', border:'1px solid rgba(20,128,74,0.3)', whiteSpace:'nowrap', display:'inline-flex', alignItems:'center', gap:4 }}
                       onClick={() => onEditSplits(l)} title="Edit how this line is split across entities">
-                      ✓ Split ({l.splits.length})
+                      <Check size={12} /> Split ({l.splits.length})
                     </button>
                   ) : (
                     <button className="btn btn-outline btn-xs" style={{ whiteSpace:'nowrap' }}
@@ -2381,9 +2385,9 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
               )}
               <td>
                 <div className="flex gap-2">
-                  {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':'✓'}</button>
-                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)}>✎</button>}
-                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)}>✕</button>
+                  {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':<Check size={13} />}</button>
+                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)}><Pencil size={13} /></button>}
+                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)}><X size={13} /></button>
                 </div>
               </td>
             </tr>
@@ -2419,7 +2423,7 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
         <tr>
           <th style={{width:24}}></th>
           <th>Name</th><th>Contact</th><th style={{width:110}}>Invoice No.</th>
-          <th style={{width:90}} title="Relative weight used only by the 'Auto-fill by share' button when splitting a line — e.g. 8 vs 5 means this entity gets 8/13 when you click auto-fill.">Default Share ⓘ</th>
+          <th style={{width:90}} title="Relative weight used only by the 'Auto-fill by share' button when splitting a line — e.g. 8 vs 5 means this entity gets 8/13 when you click auto-fill.">Default Share <Info size={12} style={{ verticalAlign: 'text-bottom' }} /></th>
           <th style={{width:230}}>Totals</th><th style={{width:150}}></th>
         </tr>
       </thead>
@@ -2437,7 +2441,7 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                 <td>
                   {hasSplits && (
                     <button className="btn btn-ghost btn-xs" onClick={() => toggleExpanded(e.id)} title="Show line breakdown">
-                      {isExpanded ? '▾' : '▸'}
+                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                     </button>
                   )}
                 </td>
@@ -2466,11 +2470,11 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                 </td>
                 <td>
                   <div className="flex gap-2" style={{ flexWrap:'wrap' }}>
-                    {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(e.id)} disabled={saving[e.id]}>{saving[e.id]?'...':'✓'}</button>
-                      : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(e)}>✎</button>}
-                    <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(e.id)}>✕</button>
-                    <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate customer invoice' : 'No split lines assigned yet'} onClick={() => onGenerateInvoice(e)}>📄</button>
-                    <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate internal breakdown' : 'No split lines assigned yet'} onClick={() => onGenerateBreakdown(e)}>📋</button>
+                    {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(e.id)} disabled={saving[e.id]}>{saving[e.id]?'...':<Check size={13} />}</button>
+                      : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(e)}><Pencil size={13} /></button>}
+                    <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(e.id)}><X size={13} /></button>
+                    <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate customer invoice' : 'No split lines assigned yet'} onClick={() => onGenerateInvoice(e)}><FileText size={13} /></button>
+                    <button className="btn btn-outline btn-xs" disabled={!hasSplits} title={hasSplits ? 'Generate internal breakdown' : 'No split lines assigned yet'} onClick={() => onGenerateBreakdown(e)}><ClipboardList size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -2525,7 +2529,7 @@ function DocUploadButton({ onUpload, disabled }) {
         {DOC_TYPES.map(t => <option key={t}>{t}</option>)}
       </select>
       <label className={`btn btn-outline btn-sm${disabled ? ' disabled' : ''}`} style={{ cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1 }}>
-        {disabled ? 'Uploading...' : '⬆ Upload'}
+        {disabled ? 'Uploading...' : <><Upload size={14} /> Upload</>}
         <input ref={ref} type="file" style={{ display:'none' }} disabled={disabled}
           onChange={e => { if (!disabled) { onUpload(e.target.files[0], docType); ref.current.value='' } }} />
       </label>
@@ -2572,7 +2576,7 @@ function SubCertModal({ modal, onClose, onGenerate }) {
       <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Subsidiary Export Certificate</h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="modal-body" style={{ padding: '20px 24px' }}>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.6 }}>
@@ -2631,7 +2635,7 @@ function SubCertModal({ modal, onClose, onGenerate }) {
         <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-navy" onClick={() => onGenerate(fields)}>
-            🛃 Generate Sub Cert PDF
+            <Stamp size={14} /> Generate Sub Cert PDF
           </button>
         </div>
       </div>
@@ -2674,7 +2678,7 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
       <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Split — {line.service || (lineType==='cost' ? line.vendor : '')}</h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="modal-body" style={{ padding: '20px 24px' }}>
           <div className="flex-between mb-3">
@@ -2696,8 +2700,8 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
           <div className="flex-between" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-solid)' }}>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Split total: {fmt(splitSum)}</span>
             {reconciled
-              ? <span style={{ fontSize: 12, color: 'var(--green, #16a34a)' }}>✓ Reconciled</span>
-              : <span style={{ fontSize: 12, color: 'var(--amber, #b45309)' }}>⚠ Doesn't match line total</span>}
+              ? <span style={{ fontSize: 12, color: 'var(--green, #16a34a)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Check size={13} /> Reconciled</span>
+              : <span style={{ fontSize: 12, color: 'var(--amber, #b45309)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertTriangle size={13} /> Doesn't match line total</span>}
           </div>
         </div>
         <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
@@ -2727,7 +2731,7 @@ function DOModal({ modal, onClose, onGenerate }) {
       <div className="modal" style={{ maxWidth: 620 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Delivery Order</h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="modal-body" style={{ padding: '20px 24px', maxHeight: '72vh', overflowY: 'auto' }}>
 
@@ -2783,7 +2787,7 @@ function DOModal({ modal, onClose, onGenerate }) {
         <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-navy" onClick={() => onGenerate(type, fields)}>
-            📄 Generate PDF{type === 'both' ? 's' : ''}
+            <FileText size={14} /> Generate PDF{type === 'both' ? 's' : ''}
           </button>
         </div>
       </div>

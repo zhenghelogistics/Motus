@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { X, Check } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { getProfile, updateProfile } from '../api'
 
@@ -178,7 +179,7 @@ export default function ProfileModal({ onClose }) {
       <div className="modal" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>My Account</h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
 
         <div className="modal-body" style={{ padding: '20px 24px' }}>
@@ -259,7 +260,7 @@ export default function ProfileModal({ onClose }) {
           <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
             {saving
               ? <><span className="spinner"></span> Saving...</>
-              : saved ? '✓ Saved!' : 'Save Changes'}
+              : saved ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Saved!</> : 'Save Changes'}
           </button>
         </div>
       </div>

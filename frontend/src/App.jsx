@@ -1,5 +1,9 @@
 import { BrowserRouter, Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect, lazy, Suspense } from 'react'
+import {
+  LayoutDashboard, Route as RouteIcon, PlusCircle, BarChart3, Calculator, Inbox,
+  Sparkles, DollarSign, UserCircle, LogOut, X, ArrowRightLeft, AlertTriangle, Sun, Moon, Check,
+} from 'lucide-react'
 const ProfileModal = lazy(() => import('./components/ProfileModal'))
 import Dashboard from './pages/Dashboard'
 import MovementTracker from './pages/MovementTracker'
@@ -15,12 +19,12 @@ import { CHANGELOG } from './changelog'
 import { getFxRates, updateFxRates, unlockFxRate, getNewLeadsCount } from './api'
 
 const NAV = [
-  { to: '/',       icon: '▦',  label: 'Dashboard',         exact: true },
-  { to: '/jobs',   icon: '≡',  label: 'Movement Tracker',  exact: false },
-  { to: '/intake', icon: '+',  label: 'New Job',           exact: false },
-  { to: '/stats',  icon: '◈',  label: 'Company Stats',     exact: false },
-  { to: '/quote',  icon: '⊟',  label: 'Quote Calculator',  exact: false },
-  { to: '/leads',  icon: '⇩',  label: 'Leads Pipeline',     exact: false },
+  { to: '/',       icon: LayoutDashboard, label: 'Dashboard',         exact: true },
+  { to: '/jobs',   icon: RouteIcon,       label: 'Movement Tracker',  exact: false },
+  { to: '/intake', icon: PlusCircle,      label: 'New Job',           exact: false },
+  { to: '/stats',  icon: BarChart3,       label: 'Company Stats',     exact: false },
+  { to: '/quote',  icon: Calculator,      label: 'Quote Calculator',  exact: false },
+  { to: '/leads',  icon: Inbox,           label: 'Leads Pipeline',     exact: false },
 ]
 
 // Default SGD-based rates (approximate; overwritten by the daily Yahoo Finance sync)
@@ -51,12 +55,12 @@ function WhatsNewModal({ onClose }) {
       <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2 style={{ fontSize: 16 }}>What's New</h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="modal-body" style={{ padding: '4px 20px 20px', maxHeight: '70vh', overflowY: 'auto' }}>
           {CHANGELOG.map((entry, i) => (
             <div key={entry.id} style={{
-              borderLeft: `3px solid ${i === 0 ? '#185FA5' : '#D1DCE8'}`,
+              borderLeft: `3px solid ${i === 0 ? '#006EFF' : '#D1DCE8'}`,
               paddingLeft: 16,
               paddingTop: 14,
               paddingBottom: 14,
@@ -66,7 +70,7 @@ function WhatsNewModal({ onClose }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
                 <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)', flex: 1 }}>{entry.title}</span>
                 <span style={{
-                  fontSize: 10, fontWeight: 700, color: i === 0 ? '#185FA5' : '#6B7E93',
+                  fontSize: 10, fontWeight: 700, color: i === 0 ? '#006EFF' : '#6B7E93',
                   background: i === 0 ? '#E8F1FA' : 'var(--bg-hover)',
                   borderRadius: 6, padding: '2px 7px', flexShrink: 0, whiteSpace: 'nowrap',
                 }}>{entry.date}</span>
@@ -201,7 +205,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
       <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2 style={{ fontSize: 16 }}>FX Rates & Converter</h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
 
         {/* Tabs */}
@@ -284,7 +288,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
                         </div>
                       </div>
                       {/* Divider */}
-                      <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', color: 'var(--text-muted)', fontSize: 16, paddingTop: 16 }}>⇄</div>
+                      <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', color: 'var(--text-muted)', paddingTop: 16 }}><ArrowRightLeft size={15} /></div>
                       {/* Foreign → SGD */}
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
                         <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>1 {c} =</span>
@@ -304,7 +308,7 @@ function CurrencyConverter({ onClose, onRatesSaved }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{lastUpdatedLabel}</span>
                 <button className="btn btn-primary btn-sm" onClick={saveRates} disabled={saving}>
-                  {saving ? 'Saving...' : saved ? '✓ Saved!' : 'Save Rates'}
+                  {saving ? 'Saving...' : saved ? <><Check size={13} /> Saved!</> : 'Save Rates'}
                 </button>
               </div>
             </>
@@ -338,7 +342,7 @@ function FxReminderBanner({ updatedAt, onOpenRates }) {
       background: '#FEF3C7', borderBottom: '1px solid #F59E0B',
       padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13,
     }}>
-      <span>⚠</span>
+      <AlertTriangle size={15} />
       <span style={{ flex: 1, color: '#92400E', fontWeight: 500 }}>
         {msg}{lastSet ? ` Last set: ${lastSet}.` : ''}
       </span>
@@ -350,7 +354,7 @@ function FxReminderBanner({ updatedAt, onOpenRates }) {
   )
 }
 
-function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount, newLeadsCount }) {
+function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount, newLeadsCount, theme, onToggleTheme }) {
   const { user, signOut } = useAuth()
 
   return (
@@ -369,7 +373,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount
       <div className="sidebar-section-label">Main Menu</div>
 
       <nav className="sidebar-nav">
-        {NAV.map(({ to, icon, label, exact }) => (
+        {NAV.map(({ to, icon: Icon, label, exact }) => (
           <NavLink
             key={to}
             to={to}
@@ -377,7 +381,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount
             className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
             style={{ position: 'relative' }}
           >
-            <span className="sidebar-icon">{icon}</span>
+            <span className="sidebar-icon"><Icon size={17} strokeWidth={2} /></span>
             {label}
             {to === '/leads' && newLeadsCount > 0 && (
               <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', display: 'inline-block' }}>
@@ -402,7 +406,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount
           onClick={onWhatsNewClick}
           style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', marginBottom: 4, position: 'relative' }}
         >
-          <span className="sidebar-icon">★</span>
+          <span className="sidebar-icon"><Sparkles size={17} strokeWidth={2} /></span>
           What's New
           {unreadCount > 0 && (
             <span style={{
@@ -416,10 +420,15 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount
         <button
           className="sidebar-link"
           onClick={onCurrencyClick}
-          style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', marginBottom: 8 }}
+          style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', marginBottom: 4 }}
         >
-          <span className="sidebar-icon">$</span>
+          <span className="sidebar-icon"><DollarSign size={17} strokeWidth={2} /></span>
           Currency Converter
+        </button>
+
+        <button className="theme-toggle" onClick={onToggleTheme}>
+          {theme === 'dark' ? <Sun size={16} strokeWidth={2} /> : <Moon size={16} strokeWidth={2} />}
+          <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
         </button>
 
         {/* Logged-in user + account + sign out */}
@@ -432,7 +441,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount
             onClick={onProfileClick}
             style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', marginBottom: 2 }}
           >
-            <span className="sidebar-icon">⊙</span>
+            <span className="sidebar-icon"><UserCircle size={17} strokeWidth={2} /></span>
             My Account
           </button>
           <button
@@ -440,7 +449,7 @@ function Sidebar({ onCurrencyClick, onWhatsNewClick, onProfileClick, unreadCount
             onClick={signOut}
             style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 13 }}
           >
-            <span className="sidebar-icon" style={{ opacity: 0.6 }}>⏻</span>
+            <span className="sidebar-icon" style={{ opacity: 0.6 }}><LogOut size={17} strokeWidth={2} /></span>
             Sign Out
           </button>
         </div>
@@ -460,7 +469,7 @@ function HashErrorBanner() {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'linear-gradient(135deg, #042C53 0%, #185FA5 100%)',
+      background: 'linear-gradient(135deg, #003087 0%, #006EFF 100%)',
     }}>
       <div style={{
         background: '#fff', borderRadius: 16, padding: '40px 36px', width: '100%', maxWidth: 380,
@@ -468,11 +477,11 @@ function HashErrorBanner() {
       }}>
         <div style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 56, height: 56, borderRadius: 14, background: '#042C53',
+          width: 56, height: 56, borderRadius: 14, background: '#003087',
           fontSize: 20, fontWeight: 900, color: '#fff', letterSpacing: '-1px', marginBottom: 16,
         }}>ZHL</div>
-        <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
-        <div style={{ fontSize: 16, fontWeight: 800, color: '#042C53', marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', color: '#003087', marginBottom: 12 }}><AlertTriangle size={32} /></div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#003087', marginBottom: 8 }}>
           {code === 'otp_expired' ? 'Link expired' : 'Verification failed'}
         </div>
         <div style={{ fontSize: 13, color: '#6B7E93', marginBottom: 8, lineHeight: 1.6 }}>
@@ -493,6 +502,7 @@ function HashErrorBanner() {
 }
 
 const LEADS_SEEN_KEY = (email) => `leads_seen_at_${email}`
+const THEME_KEY = 'motus_theme'
 
 function AppShell() {
   const { user, loading } = useAuth()
@@ -502,8 +512,18 @@ function AppShell() {
   const [showProfile, setShowProfile] = useState(false)
   const [fxUpdatedAt, setFxUpdatedAt] = useState(null)
   const [newLeadsCount, setNewLeadsCount] = useState(0)
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'light')
   const seen = parseInt(localStorage.getItem(SEEN_KEY) || '0', 10)
   const unreadCount = Math.max(0, CHANGELOG.length - seen)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem(THEME_KEY, theme)
+  }, [theme])
+
+  function toggleTheme() {
+    setTheme(t => (t === 'dark' ? 'light' : 'dark'))
+  }
 
   useEffect(() => {
     getFxRates().then(r => setFxUpdatedAt(r.data.updated_at)).catch(() => {})
@@ -540,7 +560,7 @@ function AppShell() {
 
   // Show nothing while we check if the user is already logged in
   if (loading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#042C53' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#003087' }}>
       <span className="spinner" style={{ width: 32, height: 32, borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }}></span>
     </div>
   )
@@ -557,6 +577,8 @@ function AppShell() {
         onProfileClick={() => setShowProfile(true)}
         unreadCount={unreadCount}
         newLeadsCount={newLeadsCount}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
       <main className="main-content">
         <FxReminderBanner updatedAt={fxUpdatedAt} onOpenRates={() => setShowCurrency(true)} />

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CheckCircle } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 
 const ALLOWED_DOMAIN = '@zhenghe.com.sg'
@@ -53,7 +54,7 @@ export default function Login() {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'linear-gradient(135deg, #042C53 0%, #185FA5 100%)',
+      background: 'linear-gradient(135deg, var(--navy) 0%, var(--blue) 100%)',
     }}>
       <div style={{
         background: '#fff', borderRadius: 16, padding: '40px 36px', width: '100%', maxWidth: 400,
@@ -64,10 +65,10 @@ export default function Login() {
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 56, height: 56, borderRadius: 14, background: '#042C53',
+            width: 56, height: 56, borderRadius: 14, background: 'var(--navy)',
             fontSize: 20, fontWeight: 900, color: '#fff', letterSpacing: '-1px', marginBottom: 12,
           }}>ZHL</div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#042C53' }}>Zhenghe Logistics</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--navy)' }}>Zhenghe Logistics</div>
           <div style={{ fontSize: 12, color: '#6B7E93', marginTop: 2 }}>Operations Portal</div>
         </div>
 
@@ -81,7 +82,7 @@ export default function Login() {
                 flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
                 fontWeight: 700, fontSize: 13, fontFamily: 'var(--font)',
                 background: mode === m ? '#fff' : 'transparent',
-                color: mode === m ? '#042C53' : '#6B7E93',
+                color: mode === m ? 'var(--navy)' : '#6B7E93',
                 boxShadow: mode === m ? '0 1px 4px rgba(0,0,0,0.12)' : 'none',
                 transition: 'all 0.15s',
               }}>
@@ -94,8 +95,8 @@ export default function Login() {
         {/* Success state */}
         {mode === 'success' ? (
           <div style={{ textAlign: 'center', padding: '12px 0 8px' }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: '#042C53', marginBottom: 8 }}>
+            <div style={{ marginBottom: 16 }}><CheckCircle size={40} color="var(--green)" /></div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--navy)', marginBottom: 8 }}>
               Account created!
             </div>
             <div style={{ fontSize: 13, color: '#6B7E93', marginBottom: 24, lineHeight: 1.6 }}>

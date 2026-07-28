@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { AlertTriangle, ArrowRight } from 'lucide-react'
 import { getDashboard, getJobs } from '../api'
 
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -122,7 +123,7 @@ export default function Dashboard() {
               <XAxis dataKey="month" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} unit="%" />
               <Tooltip formatter={(v) => `${v}%`} />
-              <Line type="monotone" dataKey="gp_percent" name="GP%" stroke="#042C53" strokeWidth={2.5} dot={{ fill: '#042C53', r: 4 }} />
+              <Line type="monotone" dataKey="gp_percent" name="GP%" stroke="#003087" strokeWidth={2.5} dot={{ fill: '#003087', r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -146,7 +147,7 @@ export default function Dashboard() {
               <tbody>
                 {upcoming_deadlines.map(j => (
                   <tr key={j.id} className="tr-link" onClick={() => navigate(`/jobs/${j.id}`)}>
-                    <td style={{ padding: '7px 8px', fontWeight: 700, color: '#042C53', fontSize: 13 }}>{j.job_number}</td>
+                    <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--navy)', fontSize: 13 }}>{j.job_number}</td>
                     <td style={{ padding: '7px 8px', fontSize: 13 }}>{j.shipper || '—'}</td>
                     <td style={{ padding: '7px 8px' }}>
                       <span className={deadlineClass(j.deadline_date)} style={{ fontSize: 13 }}>{j.deadline_date || '—'}</span>
@@ -177,7 +178,7 @@ export default function Dashboard() {
               <tbody>
                 {flagged_jobs.map(j => (
                   <tr key={j.id} className="tr-link" onClick={() => navigate(`/jobs/${j.id}`)}>
-                    <td style={{ padding: '7px 8px', fontWeight: 700, color: '#042C53', fontSize: 13 }}>{j.job_number}</td>
+                    <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--navy)', fontSize: 13 }}>{j.job_number}</td>
                     <td style={{ padding: '7px 8px', fontSize: 13 }}>{j.shipper || '—'}</td>
                     <td style={{ padding: '7px 8px' }}><StatusPill status={j.status} /></td>
                   </tr>
@@ -193,7 +194,7 @@ export default function Dashboard() {
 
 // ── Job Status Overview widget ────────────────────────────────────────────────
 const STATUS_META = [
-  { key: 'New',        label: 'New',         color: '#185FA5', bg: '#E8F1FA' },
+  { key: 'New',        label: 'New',         color: '#006EFF', bg: '#E8F1FA' },
   { key: 'In Progress',label: 'In Progress',  color: '#92400E', bg: '#FEF3C7' },
   { key: 'On Hold',    label: 'On Hold',      color: '#6B7E93', bg: '#F1F4F7' },
   { key: 'Completed',  label: 'Completed',    color: '#065F46', bg: '#D1FAE5' },
@@ -282,7 +283,7 @@ function JobStatusWidget({ statusCounts, missingCount, flaggedJobs, navigate }) 
               transition: 'all 0.15s',
               outline: 'none',
             }}>
-            ⚠ Missing Costing
+            <AlertTriangle size={14} /> Missing Costing
             <span style={{
               background: active === 'missing' ? 'rgba(255,255,255,0.28)' : '#991B1B',
               color: 'white',
@@ -320,7 +321,7 @@ function JobStatusWidget({ statusCounts, missingCount, flaggedJobs, navigate }) 
                           <span style={{ fontWeight: 700, color: 'var(--navy)', fontSize: 13, marginRight: 8 }}>{j.job_number}</span>
                           {j.customer_ref && <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 600, marginRight: 8 }}>{j.customer_ref}</span>}
                           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                            {j.shipper || '—'} → {j.consignee || '—'}
+                            {j.shipper || '—'} <ArrowRight size={12} style={{ verticalAlign: 'middle' }} /> {j.consignee || '—'}
                           </span>
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12, fontSize: 11 }}>

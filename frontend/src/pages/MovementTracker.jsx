@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { ChevronUp, ChevronDown, Download, FileText, ClipboardList, ArrowRight } from 'lucide-react'
 import { getJobs } from '../api'
 
 const MODES = ['', 'Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
@@ -61,8 +62,8 @@ function shortName(email) {
   return prefix.charAt(0).toUpperCase() + prefix.slice(1)
 }
 
-const navy = [4, 44, 83]
-const blue = [24, 95, 165]
+const navy = [0, 48, 135]
+const blue = [0, 110, 255]
 
 export default function MovementTracker() {
   const [jobs, setJobs] = useState([])
@@ -277,7 +278,9 @@ export default function MovementTracker() {
     doc.save(`ZHL_MovementReport${filePart}_${new Date().toISOString().split('T')[0]}.pdf`)
   }
 
-  const sortIcon = (key) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  const sortIcon = (key) => sortKey !== key ? null : (sortDir === 'asc'
+    ? <ChevronUp size={12} style={{ verticalAlign: 'middle', marginLeft: 2 }} />
+    : <ChevronDown size={12} style={{ verticalAlign: 'middle', marginLeft: 2 }} />)
 
   return (
     <div>
@@ -287,8 +290,8 @@ export default function MovementTracker() {
           <p>{jobs.length} job{jobs.length !== 1 ? 's' : ''} found</p>
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-ghost btn-sm" onClick={exportExcel}>↓ Export Excel</button>
-          <button className="btn btn-ghost btn-sm" onClick={exportPDFReport}>📋 PDF Report</button>
+          <button className="btn btn-ghost btn-sm" onClick={exportExcel}><Download size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />Export Excel</button>
+          <button className="btn btn-ghost btn-sm" onClick={exportPDFReport}><FileText size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />PDF Report</button>
           <button className="btn btn-primary" onClick={() => navigate('/intake')}>+ New Job</button>
         </div>
       </div>
@@ -351,7 +354,7 @@ export default function MovementTracker() {
         {loading
           ? <div style={{ padding: 40, textAlign: 'center' }}><span className="spinner spinner-dark" style={{width:28,height:28}}></span></div>
           : jobs.length === 0
-            ? <div className="empty-state"><div className="empty-state-icon">📋</div><h3>No jobs found</h3><p>Create a new job to get started.</p></div>
+            ? <div className="empty-state"><div className="empty-state-icon"><ClipboardList size={36} style={{ color: 'var(--text-muted)' }} /></div><h3>No jobs found</h3><p>Create a new job to get started.</p></div>
             : <table className="spreadsheet">
                 <thead>
                   <tr>
@@ -408,7 +411,7 @@ export default function MovementTracker() {
                 <StatusPill status={job.status} />
               </div>
               <div className="job-card-names">
-                <strong>{job.shipper || '—'}</strong> → {job.consignee || '—'}
+                <strong>{job.shipper || '—'}</strong> <ArrowRight size={12} style={{ verticalAlign: 'middle' }} /> {job.consignee || '—'}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.mode}{job.created_by ? ` · ${shortName(job.created_by)} (Sales)` : ''}</div>
               <div className="job-card-footer">

@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ChevronDown, Circle, Mail, X, ArrowRight, Check, AlertTriangle, Sparkles, Inbox, ClipboardList } from 'lucide-react'
 import { getLeads, createLead, updateLead, getLeadStats, claimLead, generateEmail, convertLeadToJob, getMarketingContacts, deleteMarketingContact } from '../api'
 import { supabase } from '../lib/supabase'
+import { SectionHead, SectionBox } from '../components/SectionBox'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,23 +41,23 @@ const PIPELINE_STAGES = [
 ]
 
 const STAGE_COLOR = {
-  'RFQ Received': { bg: 'rgba(24,95,165,0.08)',   border: 'rgba(24,95,165,0.25)',  dot: '#185FA5' },
+  'RFQ Received': { bg: 'var(--blue-light)',      border: 'rgba(0,110,255,0.25)',  dot: 'var(--blue)' },
   'New Lead':     { bg: 'rgba(147,51,234,0.08)',  border: 'rgba(147,51,234,0.25)', dot: '#7C3AED' },
   'Follow-Up':    { bg: 'rgba(234,179,8,0.08)',   border: 'rgba(234,179,8,0.30)',  dot: '#B45309' },
   'Quote Sent':   { bg: 'rgba(14,165,233,0.08)',  border: 'rgba(14,165,233,0.25)', dot: '#0369A1' },
   'Responded':    { bg: 'rgba(20,184,166,0.08)',  border: 'rgba(20,184,166,0.25)', dot: '#0F766E' },
-  'Won':          { bg: 'rgba(34,197,94,0.08)',   border: 'rgba(34,197,94,0.25)',  dot: '#15803D' },
-  'Lost':         { bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.25)', dot: '#DC2626' },
+  'Won':          { bg: 'var(--green-light)',     border: 'rgba(20,128,74,0.25)',  dot: 'var(--green)' },
+  'Lost':         { bg: 'var(--red-light)',       border: 'rgba(192,57,43,0.25)',  dot: 'var(--red)' },
 }
 
 const RISK_COLOR = {
-  High:   { bg: 'rgba(239,68,68,0.10)',  color: '#DC2626' },
-  Medium: { bg: 'rgba(234,179,8,0.10)',  color: '#B45309' },
-  Low:    { bg: 'rgba(34,197,94,0.10)',  color: '#15803D' },
+  High:   { bg: 'var(--red-light)',   color: 'var(--red)' },
+  Medium: { bg: 'var(--amber-light)', color: 'var(--amber)' },
+  Low:    { bg: 'var(--green-light)', color: 'var(--green)' },
 }
 
 const INDUSTRY_COLOR = {
-  Tech:            { bg: 'rgba(24,95,165,0.1)',    color: '#185FA5' },
+  Tech:            { bg: 'var(--blue-light)',      color: 'var(--blue)' },
   Pharmaceuticals: { bg: 'rgba(20,128,74,0.1)',    color: '#14804A' },
   Manufacturing:   { bg: 'rgba(180,83,9,0.1)',     color: '#B45309' },
   Commodities:     { bg: 'rgba(107,114,128,0.12)', color: '#4B5563' },
@@ -124,9 +126,9 @@ const STAGE_STATUS_MAP = {
 }
 
 const STATUS_STYLE = {
-  'New':         { bg: '#EFF6FF', color: '#1D4ED8', border: '#BFDBFE' },
-  'In Progress': { bg: '#FFFBEB', color: '#B45309', border: '#FDE68A' },
-  'Quoted':      { bg: '#F0FDF4', color: '#15803D', border: '#BBF7D0' },
+  'New':         { bg: 'var(--blue-light)',  color: 'var(--link)',  border: 'rgba(0,110,255,0.2)' },
+  'In Progress': { bg: 'var(--amber-light)', color: 'var(--amber)', border: 'rgba(180,83,9,0.3)' },
+  'Quoted':      { bg: 'var(--green-light)', color: 'var(--green)', border: 'rgba(20,128,74,0.3)' },
 }
 
 function StatusDropdown({ lead, onChange }) {
@@ -145,7 +147,7 @@ function StatusDropdown({ lead, onChange }) {
           fontFamily: 'var(--font)', whiteSpace: 'nowrap',
         }}
       >
-        {current || lead.stage || '—'} ▾
+        {current || lead.stage || '—'} <ChevronDown size={12} />
       </button>
       {open && (
         <>
@@ -186,27 +188,6 @@ function StatCard({ label, value, sub }) {
   )
 }
 
-// ── section heading helper ────────────────────────────────────────────────────
-
-function SectionHead({ children }) {
-  return (
-    <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
-      {children}
-    </div>
-  )
-}
-
-function SectionBox({ children, style }) {
-  return (
-    <div style={{
-      background: 'var(--sub-box-bg)', border: '1px solid var(--sub-box-border)',
-      borderRadius: 10, padding: '14px 16px', marginBottom: 14, ...style,
-    }}>
-      {children}
-    </div>
-  )
-}
-
 // ── tag toggle helper ─────────────────────────────────────────────────────────
 
 function TagButton({ label, active, onClick }) {
@@ -214,7 +195,7 @@ function TagButton({ label, active, onClick }) {
     <button onClick={onClick} style={{
       padding: '4px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 600,
       border: '1.5px solid var(--border)',
-      background: active ? 'rgba(24,95,165,0.15)' : 'transparent',
+      background: active ? 'rgba(0,110,255,0.15)' : 'transparent',
       color: active ? 'var(--blue)' : 'var(--text-muted)',
       transition: 'all 0.12s',
     }}>{label}</button>
@@ -443,8 +424,8 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span>{lead.ref} · received {fmtDate(lead.created_at)}</span>
                 {claimedBy
-                  ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(21,128,61,0.10)', border: '1px solid rgba(21,128,61,0.25)', borderRadius: 20, padding: '1px 8px', color: '#15803D', fontWeight: 700, fontSize: 10 }}>● {claimedBy.split('@')[0]}</span>
-                  : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(180,83,9,0.10)', border: '1px solid rgba(180,83,9,0.25)', borderRadius: 20, padding: '1px 8px', color: '#B45309', fontWeight: 700, fontSize: 10 }}>Unclaimed</span>
+                  ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--green-light)', border: '1px solid rgba(20,128,74,0.25)', borderRadius: 20, padding: '1px 8px', color: 'var(--green)', fontWeight: 700, fontSize: 10 }}><Circle size={6} fill="currentColor" stroke="none" />{claimedBy.split('@')[0]}</span>
+                  : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--amber-light)', border: '1px solid rgba(180,83,9,0.25)', borderRadius: 20, padding: '1px 8px', color: 'var(--amber)', fontWeight: 700, fontSize: 10 }}>Unclaimed</span>
                 }
               </div>
             )}
@@ -455,11 +436,11 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                 <button key={t} onClick={() => setTab(t)}
                   className={tab === t ? 'btn btn-primary btn-xs' : 'btn btn-ghost btn-xs'}
                   style={{ textTransform: 'capitalize' }}
-                >{t === 'email' ? '✉ Email' : 'Details'}</button>
+                >{t === 'email' ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mail size={13} />Email</span> : 'Details'}</button>
               ))}
             </div>
           )}
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={16} /></button>
         </div>
 
         {/* ── Route Banner ── */}
@@ -471,7 +452,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 16, fontWeight: 800, color: 'var(--heading)' }}>
               <span>{form.origin || '—'}</span>
-              <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>→</span>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 400, display: 'inline-flex', alignItems: 'center' }}><ArrowRight size={16} /></span>
               <span>{form.destination || '—'}</span>
             </div>
             {(form.load_type || lead.simple_mode) && (
@@ -593,9 +574,9 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {[
                   { label: 'Responded',  target: 'Responded',  color: '#0369A1' },
-                  { label: 'Send Quote', target: 'Quote Sent', color: '#185FA5', special: 'quote' },
-                  { label: 'Won',        target: 'Won',        color: '#15803D' },
-                  { label: 'Lost',       target: 'Lost',       color: '#DC2626', special: 'lost' },
+                  { label: 'Send Quote', target: 'Quote Sent', color: 'var(--blue)', special: 'quote' },
+                  { label: 'Won',        target: 'Won',        color: 'var(--green)' },
+                  { label: 'Lost',       target: 'Lost',       color: 'var(--red)', special: 'lost' },
                 ].map(a => (
                   <button key={a.label}
                     onClick={() => {
@@ -614,7 +595,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                 ))}
                 {form.stage === 'Lost' && (
                   <button onClick={() => { set('stage', 'Follow-Up'); set('lost_reason', '') }}
-                    style={{ padding: '5px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, border: '1.5px solid #B45309', background: 'transparent', color: '#B45309' }}
+                    style={{ padding: '5px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, border: '1.5px solid var(--amber)', background: 'transparent', color: 'var(--amber)' }}
                   >Recover</button>
                 )}
               </div>
@@ -629,7 +610,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                     if (quoteIn) set('quoted_price', quoteIn)
                     setShowQuoteIn(false)
                   }}>Confirm</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setShowQuoteIn(false)}>✕</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setShowQuoteIn(false)}><X size={14} /></button>
                 </div>
               )}
 
@@ -641,12 +622,12 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                   <button className="btn btn-danger btn-sm" onClick={() => {
                     set('stage', 'Lost'); set('lost_reason', lostIn); setShowLostIn(false)
                   }}>Mark Lost</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setShowLostIn(false)}>✕</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setShowLostIn(false)}><X size={14} /></button>
                 </div>
               )}
 
               {form.lost_reason && (
-                <div style={{ marginTop: 8, fontSize: 11, color: '#DC2626' }}>
+                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--red)' }}>
                   Lost reason: {form.lost_reason}
                 </div>
               )}
@@ -658,9 +639,10 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                 <SectionHead>Convert to Job</SectionHead>
                 {lead.converted_job_id ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, color: '#15803D', fontWeight: 700 }}>✓ Converted</span>
-                    <button className="btn btn-primary btn-sm" onClick={() => navigate(`/jobs/${lead.converted_job_id}`)}>
-                      View Job →
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--green)', fontWeight: 700 }}><Check size={13} />Converted</span>
+                    <button className="btn btn-primary btn-sm" onClick={() => navigate(`/jobs/${lead.converted_job_id}`)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      View Job <ArrowRight size={13} />
                     </button>
                   </div>
                 ) : (
@@ -697,11 +679,12 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
               {followUpDt && (
                 <div style={{
                   marginBottom: 10, padding: '8px 12px', borderRadius: 8,
-                  background: followUpOverdue ? 'rgba(220,38,38,0.08)' : 'rgba(24,95,165,0.08)',
-                  border: `1px solid ${followUpOverdue ? 'rgba(220,38,38,0.25)' : 'rgba(24,95,165,0.20)'}`,
+                  background: followUpOverdue ? 'var(--red-light)' : 'var(--blue-light)',
+                  border: `1px solid ${followUpOverdue ? 'rgba(192,57,43,0.25)' : 'rgba(0,110,255,0.20)'}`,
                 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: followUpOverdue ? '#DC2626' : 'var(--blue)' }}>
-                    {followUpOverdue ? '⚠ Overdue: ' : '✓ Scheduled: '}{fmtDatetime(`${form.follow_up_date}T${form.follow_up_time}`)}
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 700, color: followUpOverdue ? 'var(--red)' : 'var(--blue)' }}>
+                    {followUpOverdue ? <AlertTriangle size={13} /> : <Check size={13} />}
+                    {followUpOverdue ? 'Overdue: ' : 'Scheduled: '}{fmtDatetime(`${form.follow_up_date}T${form.follow_up_time}`)}
                   </div>
                   {form.follow_up_note && (
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{form.follow_up_note}</div>
@@ -736,7 +719,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center' }}>
               {!isNew && (
                 <button className="btn btn-ghost btn-sm" onClick={handleDelete} disabled={deleting}
-                  style={{ color: '#DC2626', marginRight: 'auto' }}>
+                  style={{ color: 'var(--red)', marginRight: 'auto' }}>
                   {deleting ? 'Deleting…' : 'Delete Lead'}
                 </button>
               )}
@@ -874,7 +857,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                 ? 'Generating…'
                 : emailType === 'followup'
                 ? 'Generate from Template'
-                : '✦ Generate with AI'}
+                : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}><Sparkles size={14} />Generate with AI</span>}
             </button>
 
             {/* ── Email result ── */}
@@ -884,7 +867,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                     <SectionHead>Subject</SectionHead>
                     <button className="btn btn-ghost btn-xs" onClick={() => copyText(emailResult.subject, 'subject')}>
-                      {copied === 'subject' ? '✓ Copied' : 'Copy'}
+                      {copied === 'subject' ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Check size={12} />Copied</span> : 'Copy'}
                     </button>
                   </div>
                   <input className="form-control" style={{ width: '100%', fontWeight: 600 }}
@@ -895,7 +878,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                     <SectionHead>Body</SectionHead>
                     <button className="btn btn-ghost btn-xs" onClick={() => copyText(emailResult.body, 'body')}>
-                      {copied === 'body' ? '✓ Copied' : 'Copy'}
+                      {copied === 'body' ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Check size={12} />Copied</span> : 'Copy'}
                     </button>
                   </div>
                   <textarea className="form-control"
@@ -940,10 +923,10 @@ function AttentionBanner({ leads, onClaimed }) {
 
   return (
     <div style={{
-      background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.40)',
+      background: 'var(--amber-light)', border: '1px solid rgba(180,83,9,0.40)',
       borderRadius: 10, padding: '14px 18px', marginBottom: 20,
     }}>
-      <div style={{ fontSize: 14, fontWeight: 800, color: '#92400E', marginBottom: 10 }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--amber)', marginBottom: 10 }}>
         {unclaimed.length} lead{unclaimed.length > 1 ? 's' : ''} need{unclaimed.length === 1 ? 's' : ''} attention
         <span style={{ fontSize: 11, opacity: 0.7, fontWeight: 400, marginLeft: 8 }}>— unclaimed for 2+ weeks</span>
       </div>
@@ -959,12 +942,12 @@ function AttentionBanner({ leads, onClaimed }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {results[lead.id] && (
-              <span style={{ fontSize: 11, color: results[lead.id].ok ? '#15803D' : '#DC2626', fontWeight: 600 }}>
+              <span style={{ fontSize: 11, color: results[lead.id].ok ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
                 {results[lead.id].msg}
               </span>
             )}
             <button className="btn btn-sm" disabled={claiming === lead.id}
-              style={{ background: '#B45309', color: '#fff', border: 'none' }}
+              style={{ background: 'var(--amber)', color: '#fff', border: 'none' }}
               onClick={() => handleClaim(lead)}
             >{claiming === lead.id ? 'Claiming…' : "I'll handle this"}</button>
           </div>
@@ -1008,8 +991,8 @@ function PipelineCard({ lead, onClick }) {
           {fmtPrice(lead.quoted_price)}
         </span>
         {followUpDt ? (
-          <span style={{ fontSize: 10, color: followUpOverdue ? '#DC2626' : 'var(--text-muted)', fontWeight: followUpOverdue ? 700 : 400 }}>
-            {followUpOverdue ? '⚠ ' : ''}{fmtDate(lead.next_follow_up)}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: followUpOverdue ? 'var(--red)' : 'var(--text-muted)', fontWeight: followUpOverdue ? 700 : 400 }}>
+            {followUpOverdue && <AlertTriangle size={10} />}{fmtDate(lead.next_follow_up)}
           </span>
         ) : (
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{timeAgo(lead.created_at)}</span>
@@ -1023,8 +1006,8 @@ function PipelineCard({ lead, onClick }) {
       )}
 
       {lead.claimed_by && (
-        <div style={{ marginTop: 5, fontSize: 10, color: '#15803D', fontWeight: 700 }}>
-          ✓ {lead.claimed_by.split('@')[0]}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 5, fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>
+          <Check size={10} />{lead.claimed_by.split('@')[0]}
         </div>
       )}
     </div>
@@ -1106,10 +1089,12 @@ function ListView({ leads, onRowClick, onStatusChange }) {
                 <td><div style={{ display: 'flex', alignItems: 'center' }}><StageDot stage={lead.stage} /><span style={{ fontSize: 11 }}>{lead.stage}</span></div></td>
                 <td><RiskBadge risk={lead.risk_level} /></td>
                 <td style={{ fontWeight: 600, color: 'var(--blue)' }}>{fmtPrice(lead.quoted_price)}</td>
-                <td style={{ fontSize: 11, color: fuOverdue ? '#DC2626' : 'var(--text-muted)', fontWeight: fuOverdue ? 700 : 400 }}>
-                  {fuOverdue ? '⚠ ' : ''}{fmtDate(lead.next_follow_up)}
+                <td style={{ fontSize: 11, color: fuOverdue ? 'var(--red)' : 'var(--text-muted)', fontWeight: fuOverdue ? 700 : 400 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    {fuOverdue && <AlertTriangle size={11} />}{fmtDate(lead.next_follow_up)}
+                  </span>
                 </td>
-                <td style={{ fontSize: 11, color: lead.claimed_by ? '#15803D' : 'var(--text-muted)' }}>
+                <td style={{ fontSize: 11, color: lead.claimed_by ? 'var(--green)' : 'var(--text-muted)' }}>
                   {lead.claimed_by ? lead.claimed_by.split('@')[0] : '—'}
                 </td>
                 <td style={{ color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>{timeAgo(lead.created_at)}</td>
@@ -1195,7 +1180,7 @@ function ContactsView() {
 
       {!loading && !error && filtered.length === 0 && (
         <div className="empty-state">
-          <div className="empty-state-icon" style={{ fontSize: 36 }}>📬</div>
+          <div className="empty-state-icon" style={{ fontSize: 36, display: 'flex', justifyContent: 'center', color: 'var(--text-muted)' }}><Inbox size={36} /></div>
           <h3>{search ? 'No contacts match your search' : 'No archived contacts yet'}</h3>
           <p style={{ fontSize: 13, marginTop: 4 }}>
             {search ? 'Try a different search term' : 'Emails are archived here automatically when a lead record is purged after 30 days'}
@@ -1227,7 +1212,7 @@ function ContactsView() {
                   <td style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>{c.lead_ref || '—'}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{c.archived_at ? new Date(c.archived_at).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
                   <td>
-                    <button className="btn btn-ghost btn-xs" style={{ color: '#DC2626' }}
+                    <button className="btn btn-ghost btn-xs" style={{ color: 'var(--red)' }}
                       disabled={deleting === c.id} onClick={() => handleDelete(c.id)}>
                       Remove
                     </button>
@@ -1239,7 +1224,7 @@ function ContactsView() {
         </div>
       )}
 
-      <div style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(24,95,165,0.05)', borderRadius: 8, border: '1px solid rgba(24,95,165,0.15)', fontSize: 12, color: 'var(--text-muted)' }}>
+      <div style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(0,110,255,0.05)', borderRadius: 8, border: '1px solid rgba(0,110,255,0.15)', fontSize: 12, color: 'var(--text-muted)' }}>
         Emails are automatically archived here when a lead older than 30 days is purged from the pipeline. Use "Export CSV" to download the list for rate-sharing campaigns.
       </div>
     </div>
@@ -1367,7 +1352,7 @@ export default function Leads() {
 
       {view !== 'contacts' && !loading && !error && filtered.length === 0 && (
         <div className="empty-state">
-          <div className="empty-state-icon" style={{ fontSize: 36 }}>📋</div>
+          <div className="empty-state-icon" style={{ fontSize: 36, display: 'flex', justifyContent: 'center', color: 'var(--text-muted)' }}><ClipboardList size={36} /></div>
           <h3>{search ? 'No leads match your search' : 'No leads yet'}</h3>
           <p style={{ fontSize: 13, marginTop: 4 }}>
             {search ? 'Try a different search term' : 'Add a lead manually or submit an RFQ via your website'}

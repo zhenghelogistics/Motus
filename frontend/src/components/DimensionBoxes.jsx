@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { X } from 'lucide-react'
 
 const MAX_BOXES = 20
 
@@ -141,7 +142,7 @@ export default function DimensionBoxes({ packages, dimensions, onChange, syncKey
                 onChange={e => updateBox(i, 'qty', e.target.value)} style={{ width: 52 }} title="Number of packages with this dimension" />
               {boxes.length > 1 && (
                 <button type="button" onClick={() => removeBox(i)} title="Remove box"
-                  style={{ marginLeft: 2, background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
+                  style={{ marginLeft: 2, background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', display: 'inline-flex', alignItems: 'center', padding: '0 2px' }}><X size={14} /></button>
               )}
             </div>
           ))}

@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { X, ArrowRight, Paperclip, Package, Zap, Copy, Check, Upload } from 'lucide-react'
 import { parseEmail, parseEmailFile, parseDO, parsePackingList, createJob, getJobs, getCustomers } from '../api'
 import { useAuth } from '../lib/AuthContext'
 import DimensionBoxes from '../components/DimensionBoxes'
@@ -313,7 +314,7 @@ export default function EmailIntake() {
           <div className="modal" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Copy from Previous Job</h2>
-              <button className="btn btn-ghost btn-sm" onClick={() => setCopyModal(false)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setCopyModal(false)}><X size={16} /></button>
             </div>
             <div className="modal-body" style={{ padding: '16px 20px' }}>
               <input className="form-control mb-3" placeholder="Search by job no., shipper, consignee, ref..."
@@ -333,8 +334,8 @@ export default function EmailIntake() {
                             <span style={{ fontWeight: 700, color: 'var(--navy)', fontSize: 13 }}>{j.job_number}</span>
                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{j.mode}</span>
                           </div>
-                          <div style={{ fontSize: 12, marginTop: 3, color: 'var(--text)' }}>
-                            {j.shipper || '—'} → {j.consignee || '—'}
+                          <div style={{ fontSize: 12, marginTop: 3, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {j.shipper || '—'} <ArrowRight size={12} color="var(--text-muted)" /> {j.consignee || '—'}
                           </div>
                           {j.customer_ref && <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 2 }}>Ref: {j.customer_ref}</div>}
                         </div>
@@ -377,7 +378,7 @@ export default function EmailIntake() {
               transition: 'all 0.15s'
             }}
           >
-            <div style={{ fontSize: 24, marginBottom: 4 }}>📎</div>
+            <div style={{ marginBottom: 4 }}><Paperclip size={24} color="var(--text-muted)" /></div>
             <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
               {parsing ? 'Extracting...' : 'Email / Quote'}
             </div>
@@ -408,7 +409,7 @@ export default function EmailIntake() {
               transition: 'all 0.15s'
             }}
           >
-            <div style={{ fontSize: 24, marginBottom: 4 }}>📦</div>
+            <div style={{ marginBottom: 4 }}><Package size={24} color="var(--text-muted)" /></div>
             <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
               {doParsing ? 'Parsing DO...' : 'Delivery Order / Packing List'}
             </div>
@@ -441,10 +442,10 @@ export default function EmailIntake() {
         {parseError && <div className="alert alert-error mt-4">{parseError}</div>}
         <div className="flex gap-2 mt-4">
           <button className="btn btn-primary" onClick={handleParse} disabled={parsing || !emailText.trim()}>
-            {parsing ? <><span className="spinner"></span> Extracting...</> : '⚡ Extract with AI'}
+            {parsing ? <><span className="spinner"></span> Extracting...</> : <><Zap size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Extract with AI</>}
           </button>
           <button className="btn btn-ghost" onClick={handleManual}>Create Manually</button>
-          <button className="btn btn-ghost" onClick={openCopyModal}>⎘ Copy from Previous Job</button>
+          <button className="btn btn-ghost" onClick={openCopyModal}><Copy size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Copy from Previous Job</button>
         </div>
       </div>
 
@@ -462,7 +463,7 @@ export default function EmailIntake() {
               <button className="btn btn-primary" onClick={handleCreate}
                 disabled={saving || (form.mode === 'Warehousing' && !plItems.length)}
                 title={form.mode === 'Warehousing' && !plItems.length ? 'Add a packing list before creating a Warehousing job' : ''}>
-                {saving ? <><span className="spinner"></span> Saving...</> : '✓ Create Job'}
+                {saving ? <><span className="spinner"></span> Saving...</> : <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Create Job</>}
               </button>
             </div>
           </div>
@@ -645,7 +646,7 @@ export default function EmailIntake() {
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
-                    {plParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : '⬆ Upload PDF'}
+                    {plParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : <><Upload size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Upload PDF</>}
                     <input type="file" accept=".pdf" style={{ display: 'none' }}
                       onChange={e => { handlePLParse(e.target.files[0]); e.target.value = '' }} />
                   </label>
@@ -690,7 +691,7 @@ export default function EmailIntake() {
                             </td>
                           ))}
                           <td style={{ padding: '3px 4px' }}>
-                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removePLItem(i)}>✕</button>
+                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removePLItem(i)}><X size={14} /></button>
                           </td>
                         </tr>
                       ))}
@@ -726,7 +727,7 @@ export default function EmailIntake() {
                       <td><input type="number" className="form-control form-control-sm" value={bl.qty || ''} onChange={e => setBillingLine(i, 'qty', e.target.value)} /></td>
                       <td className="text-right font-bold">${total.toFixed(2)}</td>
                       <td><input className="form-control form-control-sm" value={bl.remarks || ''} onChange={e => setBillingLine(i, 'remarks', e.target.value)} /></td>
-                      <td><button className="btn btn-ghost btn-xs" onClick={() => removeBillingLine(i)} style={{ color: 'var(--red)' }}>✕</button></td>
+                      <td><button className="btn btn-ghost btn-xs" onClick={() => removeBillingLine(i)} style={{ color: 'var(--red)' }}><X size={14} /></button></td>
                     </tr>
                   )
                 })}
@@ -749,7 +750,7 @@ export default function EmailIntake() {
                   ? <><span className="spinner"></span> Creating...</>
                   : form.mode === 'Warehousing' && !plItems.length
                     ? 'Add Packing List First'
-                    : '✓ Create Job'}
+                    : <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Create Job</>}
               </button>
             </div>
           </div>

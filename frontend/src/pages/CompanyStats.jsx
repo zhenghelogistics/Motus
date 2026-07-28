@@ -3,6 +3,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
+import { ChevronDown } from 'lucide-react'
 import { getCompanyStats, getCompanyList } from '../api'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -15,10 +16,10 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 const CURRENT_YEAR = new Date().getFullYear()
 const YEARS = [CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2, CURRENT_YEAR - 3]
 
-const MODE_COLORS = ['#185FA5','#0F766E','#B45309','#7C3AED','#DC2626','#0369A1','#15803D']
+const MODE_COLORS = ['var(--blue)','#0F766E','#B45309','#7C3AED','#DC2626','#0369A1','#15803D']
 
 function gpColor(gp) {
-  return gp >= 20 ? '#15803D' : gp >= 0 ? '#B45309' : '#DC2626'
+  return gp >= 20 ? 'var(--green)' : gp >= 0 ? 'var(--amber)' : 'var(--red)'
 }
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
@@ -179,7 +180,7 @@ export default function CompanyStats() {
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
               {selectedLabel}
             </span>
-            <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 11 }}>▼</span>
+            <ChevronDown size={12} color="var(--text-muted)" style={{ marginLeft: 6 }} />
           </div>
 
           {showDropdown && (
@@ -211,13 +212,13 @@ export default function CompanyStats() {
                   onClick={() => { setCompany(c.name); setShowDropdown(false); setCompanySearch('') }}
                   style={{
                     padding: '8px 12px', cursor: 'pointer', fontSize: 13,
-                    backgroundColor: company === c.name ? 'rgba(24,95,165,0.08)' : '#ffffff',
+                    backgroundColor: company === c.name ? 'var(--blue-light)' : '#ffffff',
                     fontWeight: company === c.name ? 700 : 400,
                     color: 'var(--text)',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   }}
                   onMouseEnter={e => e.currentTarget.style.backgroundColor = '#F0F4FB'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = company === c.name ? 'rgba(24,95,165,0.08)' : '#ffffff'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = company === c.name ? 'var(--blue-light)' : '#ffffff'}
                 >
                   <span>{c.name === '__all__' ? 'All Companies' : c.name}</span>
                   <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>{c.jobs} jobs</span>
@@ -293,7 +294,7 @@ export default function CompanyStats() {
             <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>— {periodLabel}</span>
             {mode !== '__all__' && (
               <span style={{
-                fontSize: 10, fontWeight: 800, color: '#185FA5', background: 'rgba(24,95,165,0.1)',
+                fontSize: 10, fontWeight: 800, color: 'var(--link)', background: 'var(--blue-light)',
                 borderRadius: 20, padding: '2px 10px', textTransform: 'uppercase',
               }}>{mode}</span>
             )}
@@ -305,7 +306,7 @@ export default function CompanyStats() {
             <SummaryCard label="Revenue"    value={fmtFull(stats.summary.revenue)} />
             <SummaryCard label="Cost"       value={fmtFull(stats.summary.cost)} />
             <SummaryCard label="Profit"     value={fmtFull(stats.summary.profit)}
-              color={stats.summary.profit >= 0 ? '#15803D' : '#DC2626'} />
+              color={stats.summary.profit >= 0 ? 'var(--green)' : 'var(--red)'} />
             <SummaryCard label="GP Margin"  value={`${stats.summary.gp_percent}%`}
               color={gpColor(stats.summary.gp_percent)} />
             <SummaryCard label="Packages"   value={fmtN(stats.summary.packages, 0)} />
@@ -330,8 +331,8 @@ export default function CompanyStats() {
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
                       <Tooltip content={<ChartTooltip />} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="Revenue" fill="#185FA5" radius={[3,3,0,0]} />
-                      <Bar dataKey="Profit"  fill="#15803D" radius={[3,3,0,0]} />
+                      <Bar dataKey="Revenue" fill="var(--blue)" radius={[3,3,0,0]} />
+                      <Bar dataKey="Profit"  fill="var(--green)" radius={[3,3,0,0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -349,7 +350,7 @@ export default function CompanyStats() {
                       <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 10 }} unit="%" />
                       <Tooltip content={<ChartTooltip />} />
-                      <Line dataKey="GP%" stroke="#B45309" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line dataKey="GP%" stroke="var(--amber)" strokeWidth={2} dot={{ r: 3 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -368,8 +369,8 @@ export default function CompanyStats() {
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
                       <Tooltip content={<ChartTooltip />} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="Revenue" fill="#185FA5" radius={[3,3,0,0]} />
-                      <Bar dataKey="Cost"    fill="#DC2626" radius={[3,3,0,0]} />
+                      <Bar dataKey="Revenue" fill="var(--blue)" radius={[3,3,0,0]} />
+                      <Bar dataKey="Cost"    fill="var(--red)" radius={[3,3,0,0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -433,7 +434,7 @@ export default function CompanyStats() {
                         <td style={{ textAlign: 'right' }}>{fmtN(r.cbm)}</td>
                         <td style={{ textAlign: 'right' }}>{fmtFull(r.revenue)}</td>
                         <td style={{ textAlign: 'right' }}>{fmtFull(r.cost)}</td>
-                        <td style={{ textAlign: 'right', color: r.profit >= 0 ? '#15803D' : '#DC2626', fontWeight: 600 }}>{fmtFull(r.profit)}</td>
+                        <td style={{ textAlign: 'right', color: r.profit >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>{fmtFull(r.profit)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 800, color: gpColor(r.gp_percent) }}>{r.gp_percent}%</td>
                       </tr>
                     ))}
@@ -472,7 +473,7 @@ export default function CompanyStats() {
                         <td style={{ textAlign: 'right' }}>{r.jobs}</td>
                         <td style={{ textAlign: 'right' }}>{fmtFull(r.revenue)}</td>
                         <td style={{ textAlign: 'right' }}>{fmtFull(r.cost)}</td>
-                        <td style={{ textAlign: 'right', color: r.profit >= 0 ? '#15803D' : '#DC2626', fontWeight: 600 }}>{fmtFull(r.profit)}</td>
+                        <td style={{ textAlign: 'right', color: r.profit >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>{fmtFull(r.profit)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 800, color: gpColor(r.gp_percent) }}>{r.gp_percent}%</td>
                       </tr>
                     ))}
