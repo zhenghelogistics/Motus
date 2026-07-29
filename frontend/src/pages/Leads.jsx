@@ -561,6 +561,37 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
               )}
             </SectionBox>
 
+            {/* ── Cargo Lines (multi-cargo-type quotes only, e.g. LCL + a container + a reefer in one booking) ── */}
+            {Array.isArray(lead.cargo_lines) && lead.cargo_lines.length > 1 && (
+              <SectionBox>
+                <SectionHead>Cargo Lines ({lead.cargo_lines.length})</SectionHead>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        <th style={{ padding: '0 8px 6px 0' }}>Type</th>
+                        <th style={{ padding: '0 8px 6px' }}>Qty</th>
+                        <th style={{ padding: '0 8px 6px' }}>Weight</th>
+                        <th style={{ padding: '0 8px 6px' }}>Commodity</th>
+                        <th style={{ padding: '0 8px 6px' }}>HS Code</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lead.cargo_lines.map((c, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid var(--border-solid)' }}>
+                          <td style={{ padding: '6px 8px 6px 0', fontWeight: 700, color: 'var(--heading)', whiteSpace: 'nowrap' }}>{c.cargoType || '—'}</td>
+                          <td style={{ padding: '6px 8px' }}>{c.qty || '—'}</td>
+                          <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>{c.weightKg ? `${c.weightKg} kg` : '—'}</td>
+                          <td style={{ padding: '6px 8px' }}>{c.commodity || '—'}</td>
+                          <td style={{ padding: '6px 8px' }}>{c.hsCode || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SectionBox>
+            )}
+
             {fieldRow('Notes',
               <textarea {...inp} rows={4} value={form.notes} onChange={e => set('notes', e.target.value)}
                 style={{ ...inp.style, resize: 'vertical', fontFamily: 'ui-monospace, "Courier New", monospace', fontSize: 12, lineHeight: 1.65 }}

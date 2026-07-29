@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
 const { mapLeadToJobFields } = require('./leadConversion');
+const { extractCargoLines } = require('./cargoLines');
 const app = express();
 
 const pool = new Pool({
@@ -133,6 +134,9 @@ async function initDB() {
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS delivery_address TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS special_handling_notes TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS addons TEXT DEFAULT ''`);
+  // Itemized cargo lines for multi-cargo-type quotes (e.g. LCL + a container + a reefer
+  // in one booking) — see extractCargoLines(). Empty array for single-cargo leads.
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS cargo_lines JSONB DEFAULT '[]'::jsonb`);
   // Set once this lead has been turned into a real job — blocks converting twice.
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS converted_job_id INTEGER REFERENCES jobs(id)`);
   // Indexes for leads — the app had zero indexes anywhere, so GET /api/leads (filters on
@@ -1694,7 +1698,7 @@ app.get('/api/leads', async (req, res) => {
               contact_person, phone_number, load_type, origin, destination, service_type,
               incoterm, container_size, lead_dimensions, commodity_name, hs_code, lead_quantity,
               lead_weight, packaging_type, pickup_address, delivery_address,
-              special_handling_notes, addons
+              special_handling_notes, addons, cargo_lines
        FROM leads ${where} ORDER BY created_at DESC`
     )
     res.json(r.rows)
@@ -2007,6 +2011,7 @@ app.post('/api/rfq', async (req, res) => {
         hsCode, quantity, weight, packagingType, pickupAddress, deliveryAddress, specialHandlingNotes },
       mode, addons
     )
+    const cargoLines = extractCargoLines(b, specialHandlingNotes)
 
     const r = await pool.query(
       `INSERT INTO leads
@@ -2015,16 +2020,16 @@ app.post('/api/rfq', async (req, res) => {
           contact_person, phone_number, simple_mode, load_type, origin, destination,
           service_type, incoterm, container_size, lead_dimensions, commodity_name, hs_code,
           lead_quantity, lead_weight, packaging_type, pickup_address, delivery_address,
-          special_handling_notes, addons)
+          special_handling_notes, addons, cargo_lines)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-               $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+               $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
        RETURNING id`,
       [ref, companyName || contactPerson, emailAddress, quotedPrice, industry,
        5, 'RFQ Received', 'RFQ Received', 'High', 'website', notes, quoteRef, sourceRef,
        contactPerson, phoneNumber, mode, loadType, origin, destination,
        serviceType, incoterm, containerSize, dimensions, commodityName, hsCode,
        quantity, weight, packagingType, pickupAddress, deliveryAddress,
-       specialHandlingNotes, addons]
+       specialHandlingNotes, addons, JSON.stringify(cargoLines)]
     )
 
     const leadId = r.rows[0].id
