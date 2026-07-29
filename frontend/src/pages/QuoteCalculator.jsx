@@ -384,19 +384,25 @@ export default function QuoteCalculator() {
       const gap = W - left.length - right.length
       return `  ${left}${gap > 0 ? ' '.repeat(gap) : '  '}${right}`
     }
+    // Scale each line by the same global-markup factor the PDF export uses, so the
+    // line items shown here sum to preGst — matching the GST/Total below instead of
+    // silently omitting the global markup (which made the totals look wrong to anyone
+    // adding up the breakdown themselves).
+    const globalFactor = subtotal > 0 ? preGst / subtotal : 1
     let out = `FREIGHT QUOTATION — ${refId}\n`
     if (route) out += `Route: ${route}\n`
     out += `Mode:  ${mode}\n\n`
     out += `BREAKDOWN\n${sep}\n`
     lines.forEach(l => {
       const qty = parseFloat(l.qty)
-      const rate = parseFloat(l.rate) || 0
       const { total } = calcLine(l)
+      const adjustedTotal = total * globalFactor
+      const unitRate = (!isNaN(qty) && qty > 0) ? adjustedTotal / qty : adjustedTotal
       const desc = l.description || '(item)'
       const detail = !isNaN(qty) && qty > 0
-        ? `${desc} (${qty} ${l.unit || 'unit'} × ${sym}${rate.toFixed(2)})`
+        ? `${desc} (${qty} ${l.unit || 'unit'} × ${sym}${unitRate.toFixed(2)})`
         : desc
-      out += padRow(detail, fmtM(total)) + '\n'
+      out += padRow(detail, fmtM(adjustedTotal)) + '\n'
     })
     out += sep + '\n'
     if (gstActive && gstAmt > 0) {
