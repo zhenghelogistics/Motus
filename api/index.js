@@ -44,6 +44,9 @@ async function requireAuth(req, res, next) {
     })
     if (!r.ok) return res.status(401).json({ error: 'Unauthorized — invalid or expired session' })
     req.user = await r.json()
+    if (!req.user.email?.toLowerCase().endsWith('@zhenghe.com.sg')) {
+      return res.status(403).json({ error: 'Forbidden — company account required' })
+    }
     next()
   } catch (e) {
     console.error('[ZHL] requireAuth error:', e.message)
@@ -145,6 +148,37 @@ async function initDB() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_leads_active_created ON leads (created_at DESC) WHERE (is_archived IS NULL OR is_archived = FALSE)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_leads_status ON leads (status)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_leads_source_ref ON leads (source_ref) WHERE source_ref IS NOT NULL`);
+  // jobs/cost_lines/billing_lines had zero indexes beyond primary keys — job_id is joined/
+  // grouped on constantly (enrichJob, dashboard, company stats) and status/mode/created_at
+  // are filtered on every list view, same class of slowness the leads table had.
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_jobs_mode ON jobs (mode)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_cost_lines_job_id ON cost_lines (job_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_billing_lines_job_id ON billing_lines (job_id)`);
+  // Tracks when a lead actually turned into a won deal, so "won this month" can be based
+  // on the real close date instead of the lead's original creation date (a deal that took
+  // 6 weeks to close was previously excluded from every month's count).
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS won_at TIMESTAMP`);
+  // Money/quantity columns were REAL (single-precision float, ~7 significant digits) —
+  // switched to NUMERIC so amounts don't accumulate floating-point rounding error on
+  // large sums (a real risk for a billing/invoicing system where totals must tie out
+  // to the cent). ALTER COLUMN TYPE is safe/idempotent to re-run — Postgres skips the
+  // rewrite once a column is already the target type.
+  await pool.query(`ALTER TABLE jobs ALTER COLUMN weight TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE jobs ALTER COLUMN cbm TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE jobs ALTER COLUMN gp_override TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE leads ALTER COLUMN quoted_price TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE fx_rates ALTER COLUMN rate TYPE NUMERIC(14,6)`);
+  await pool.query(`ALTER TABLE cost_lines ALTER COLUMN amount TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE cost_lines ALTER COLUMN amount_local TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE cost_lines ALTER COLUMN total_payable TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE billing_lines ALTER COLUMN rate TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE billing_lines ALTER COLUMN qty TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE billing_lines ALTER COLUMN rate_local TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE split_entities ALTER COLUMN default_share TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE billing_line_splits ALTER COLUMN amount TYPE NUMERIC(14,4)`);
+  await pool.query(`ALTER TABLE cost_line_splits ALTER COLUMN amount TYPE NUMERIC(14,4)`);
   await pool.query(`ALTER TABLE fx_rates ADD COLUMN IF NOT EXISTS is_manual BOOLEAN DEFAULT FALSE`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_profiles (
@@ -268,6 +302,23 @@ async function initDB() {
       file_url TEXT NOT NULL
     )
   `);
+  // Atomic per-year counter for job numbers — generateJobNumber() used to read
+  // MAX(sequence) and add 1 in application code, which two concurrent job creations
+  // could both read before either wrote, producing a duplicate job_number. This table
+  // + an INSERT ... ON CONFLICT DO UPDATE ... RETURNING makes the increment atomic.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS job_number_counters (
+      year INTEGER PRIMARY KEY,
+      seq INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  // Backfill/reconcile from existing jobs on every startup so the counter is never
+  // behind the highest sequence already in use (safe to re-run — GREATEST never lowers it).
+  await pool.query(`
+    INSERT INTO job_number_counters (year, seq)
+    SELECT year, MAX(sequence) FROM jobs GROUP BY year
+    ON CONFLICT (year) DO UPDATE SET seq = GREATEST(job_number_counters.seq, EXCLUDED.seq)
+  `);
 }
 
 async function ensureDB() {
@@ -292,8 +343,16 @@ async function enrichJob(job) {
 
 async function generateJobNumber() {
   const year = new Date().getFullYear() % 100;
-  const result = await pool.query('SELECT COALESCE(MAX(sequence),0) as max_seq FROM jobs WHERE year=$1', [year]);
-  const seq = (parseInt(result.rows[0].max_seq) || 0) + 1;
+  // Atomic increment — INSERT ... ON CONFLICT DO UPDATE ... RETURNING is a single
+  // statement Postgres serializes at the row level, so two concurrent calls can never
+  // both receive the same seq (unlike the old read-MAX-then-add-1 approach).
+  const result = await pool.query(
+    `INSERT INTO job_number_counters (year, seq) VALUES ($1, 1)
+     ON CONFLICT (year) DO UPDATE SET seq = job_number_counters.seq + 1
+     RETURNING seq`,
+    [year]
+  );
+  const seq = result.rows[0].seq;
   const job_number = `ZHL-${String(seq).padStart(3, '0')}/${String(year).padStart(2, '0')}`;
   return { job_number, year, sequence: seq };
 }
@@ -332,6 +391,28 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
     throw new Error(`Storage upload failed: ${err}`);
   }
   return `${supabaseUrl}/storage/v1/object/public/Documents/${filename}`;
+}
+
+// Deleting a job (or a single document) used to only remove the database row, leaving
+// the actual uploaded file sitting in Supabase Storage forever — this cleans that up.
+// Best-effort: a failure here is logged but never blocks the DB delete from succeeding,
+// since an orphaned file is a minor cleanup issue, not a reason to fail the user's action.
+async function deleteFromSupabaseStorage(fileUrl) {
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  if (!key || !fileUrl) return;
+  const marker = '/storage/v1/object/public/Documents/';
+  const idx = fileUrl.indexOf(marker);
+  if (idx === -1) return;
+  const filename = fileUrl.slice(idx + marker.length);
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/Documents/${filename}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${key}`, apikey: key },
+    });
+    if (!res.ok) console.error(`[ZHL] Storage delete failed for ${filename}: ${res.status}`);
+  } catch (e) {
+    console.error('[ZHL] Storage delete error:', e.message);
+  }
 }
 
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────────────
@@ -375,7 +456,10 @@ app.get('/api/dbtest', async (req, res) => {
     const r = await pool.query('SELECT NOW() as time');
     res.json({ ok: true, time: r.rows[0].time });
   } catch (e) {
-    res.json({ ok: false, error: e.message });
+    // This route is unauthenticated by design (a public connectivity check), so the raw
+    // driver/Postgres error is logged server-side only — never handed to the caller.
+    console.error('[ZHL] /api/dbtest error:', e.message);
+    res.json({ ok: false, error: 'Database check failed' });
   }
 });
 
@@ -409,7 +493,13 @@ app.get('/api/jobs', async (req, res) => {
           WHEN COALESCE(b.total,0) > 0   THEN ROUND(((COALESCE(b.total,0) - COALESCE(c.total,0)) / b.total * 100)::numeric, 1)
           ELSE 0
         END AS gp_percent,
-        COALESCE(j.gp_override, NULL) AS computed_gp
+        -- The real calculated margin, ignoring any manual override — used to previously
+        -- just echo gp_override back (a no-op), which showed the wrong number for exactly
+        -- the jobs where an override is set, the one case where the true computed GP matters.
+        CASE
+          WHEN COALESCE(b.total,0) > 0 THEN ROUND(((COALESCE(b.total,0) - COALESCE(c.total,0)) / b.total * 100)::numeric, 1)
+          ELSE 0
+        END AS computed_gp
       FROM jobs j
       LEFT JOIN (SELECT job_id, SUM(amount)    AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
       LEFT JOIN (SELECT job_id, SUM(rate*qty)  AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
@@ -458,12 +548,12 @@ app.post('/api/jobs', async (req, res) => {
     ]);
     const job = result.rows[0];
     if (f.billing_lines && Array.isArray(f.billing_lines)) {
-      for (const bl of f.billing_lines) {
-        await pool.query(
-          'INSERT INTO billing_lines (job_id,service,unit,rate,qty,remarks) VALUES ($1,$2,$3,$4,$5,$6)',
-          [job.id, bl.service||'', bl.unit||'', bl.rate||0, bl.qty||1, bl.remarks||'']
-        );
-      }
+      // Parallel inserts instead of one-at-a-time — a job created from an AI-parsed
+      // email with many billing lines no longer waits on N sequential round-trips.
+      await Promise.all(f.billing_lines.map(bl => pool.query(
+        'INSERT INTO billing_lines (job_id,service,unit,rate,qty,remarks) VALUES ($1,$2,$3,$4,$5,$6)',
+        [job.id, bl.service||'', bl.unit||'', bl.rate||0, bl.qty||1, bl.remarks||'']
+      )));
     }
     res.status(201).json(await enrichJob(job));
   } catch (err) {
@@ -530,7 +620,11 @@ app.put('/api/jobs/:id', async (req, res) => {
 
 app.delete('/api/jobs/:id', async (req, res) => {
   try {
+    // Fetch attached documents before the cascade delete removes their DB rows, so their
+    // actual files in Supabase Storage can be cleaned up too (previously left orphaned).
+    const docs = (await pool.query('SELECT file_url FROM documents WHERE job_id=$1', [req.params.id])).rows;
     await pool.query('DELETE FROM jobs WHERE id=$1', [req.params.id]);
+    Promise.all(docs.map(d => deleteFromSupabaseStorage(d.file_url))).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
@@ -725,10 +819,23 @@ app.post('/api/jobs/:id/inventory-sync-lines', async (req, res) => {
 
 app.put('/api/jobs/:id/costs/:lid', async (req, res) => {
   try {
-    const { vendor='', amount=0, invoice_no='', invoice_date=null, service='', remarks='', currency='SGD', amount_local=null, total_payable=null } = req.body;
+    // Partial update — only touch fields actually present in the request body, matching
+    // PUT /api/jobs/:id's pattern. This used to unconditionally overwrite every column
+    // with a defaulted value even if the caller only sent one field, which today's React
+    // UI happens to avoid (it always sends the full row) but silently resets currency to
+    // 'SGD' and nulls out amount_local/total_payable for any future caller that doesn't.
+    const allowed = ['vendor','amount','invoice_no','invoice_date','service','remarks','currency','amount_local','total_payable']
+    const updates = {}
+    allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
+    if (!Object.keys(updates).length) {
+      const existing = (await pool.query('SELECT * FROM cost_lines WHERE id=$1 AND job_id=$2', [req.params.lid, req.params.id])).rows[0]
+      return res.json(existing)
+    }
+    const cols = Object.keys(updates).map((k, i) => `${k}=$${i + 1}`).join(', ')
+    const vals = [...Object.values(updates), req.params.lid, req.params.id]
     const r = await pool.query(
-      'UPDATE cost_lines SET vendor=$1,amount=$2,invoice_no=$3,invoice_date=$4,service=$5,remarks=$6,currency=$7,amount_local=$8,total_payable=$9 WHERE id=$10 AND job_id=$11 RETURNING *',
-      [vendor, amount, invoice_no, invoice_date, service, remarks, currency, amount_local, total_payable, req.params.lid, req.params.id]
+      `UPDATE cost_lines SET ${cols} WHERE id=$${vals.length - 1} AND job_id=$${vals.length} RETURNING *`,
+      vals
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -765,12 +872,22 @@ app.post('/api/jobs/:id/billing', async (req, res) => {
 
 app.put('/api/jobs/:id/billing/:lid', async (req, res) => {
   try {
-    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null } = req.body;
-    const r = await pool.query(
-      'UPDATE billing_lines SET service=$1,unit=$2,rate=$3,qty=$4,remarks=$5,currency=$6,rate_local=$7 WHERE id=$8 AND job_id=$9 RETURNING *',
-      [service, unit, rate, qty, remarks, currency, rate_local, req.params.lid, req.params.id]
-    );
-    const line = r.rows[0];
+    // Partial update — see the matching comment on PUT /api/jobs/:id/costs/:lid above.
+    const allowed = ['service','unit','rate','qty','remarks','currency','rate_local']
+    const updates = {}
+    allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
+    let line
+    if (!Object.keys(updates).length) {
+      line = (await pool.query('SELECT * FROM billing_lines WHERE id=$1 AND job_id=$2', [req.params.lid, req.params.id])).rows[0]
+    } else {
+      const cols = Object.keys(updates).map((k, i) => `${k}=$${i + 1}`).join(', ')
+      const vals = [...Object.values(updates), req.params.lid, req.params.id]
+      const r = await pool.query(
+        `UPDATE billing_lines SET ${cols} WHERE id=$${vals.length - 1} AND job_id=$${vals.length} RETURNING *`,
+        vals
+      );
+      line = r.rows[0];
+    }
     res.json({ ...line, total: parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2)) });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
@@ -901,7 +1018,9 @@ app.post('/api/jobs/:id/documents', upload.single('file'), async (req, res) => {
 
 app.delete('/api/jobs/:id/documents/:did', async (req, res) => {
   try {
+    const doc = (await pool.query('SELECT file_url FROM documents WHERE id=$1 AND job_id=$2', [req.params.did, req.params.id])).rows[0];
     await pool.query('DELETE FROM documents WHERE id=$1 AND job_id=$2', [req.params.did, req.params.id]);
+    if (doc) deleteFromSupabaseStorage(doc.file_url).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
@@ -1371,7 +1490,10 @@ async function fetchPrevMonthEndClose(ticker) {
 
 app.get('/api/fx-rates/sync', async (req, res) => {
   const auth = req.headers.authorization
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Fail CLOSED: if CRON_SECRET is ever unset/misconfigured, refuse the request rather
+  // than silently letting it through unauthenticated (this route is exempted from the
+  // global requireAuth guard, so this check is the only gate it has).
+  if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
   try {
@@ -1409,7 +1531,10 @@ app.get('/api/fx-rates/sync', async (req, res) => {
 })
 
 // Release manual lock (and immediately fetch live rate)
-app.put('/api/fx-rates/:currency/unlock', requireAuth, async (req, res) => {
+// requireAuth is not passed as route middleware here — the global `app.use('/api', ...)`
+// guard already applies it to every route except an explicit exempt list (this route
+// isn't in it), so adding it again just did the same Supabase auth check twice per request.
+app.put('/api/fx-rates/:currency/unlock', async (req, res) => {
   try {
     await ensureDB()
     const { currency } = req.params
@@ -1463,7 +1588,8 @@ app.get('/api/fx-rates', async (req, res) => {
   }
 });
 
-app.put('/api/fx-rates', requireAuth, async (req, res) => {
+// See the comment on the /unlock route above — requireAuth already runs via the global guard.
+app.put('/api/fx-rates', async (req, res) => {
   try {
     await ensureDB();
     const { rates } = req.body;
@@ -1517,7 +1643,11 @@ app.get('/api/stats/company', async (req, res) => {
     const params = [start, end]
     const conditions = [`j.created_at >= $1 AND j.created_at < $2`]
     if (company && company !== '__all__') {
-      params.push(`%${company}%`)
+      // Exact match (no % wildcards) — this used to wrap the value in %...%, so selecting
+      // "ABC Pte Ltd" would also silently pull in "New ABC Pte Ltd Holdings" or any other
+      // company whose name merely contained the selected string. ILIKE with no wildcards
+      // still gives a case-insensitive match without that substring bleed.
+      params.push(company)
       conditions.push(`(COALESCE(NULLIF(j.customer_name,''), j.shipper) ILIKE $${params.length})`)
     }
     if (mode && mode !== '__all__') {
@@ -1631,8 +1761,12 @@ app.get('/api/leads/stats', async (req, res) => {
     const [activeRes, wonRes, industryRes, statusRes] = await Promise.all([
       pool.query(`SELECT COUNT(*) AS total, COALESCE(SUM(quoted_price),0) AS pipeline_value
                   FROM leads WHERE (is_archived IS NULL OR is_archived=FALSE) AND status NOT IN ('Won','Lost')`),
+      // won_at (set when a lead's status first flips to Won) reflects when the deal
+      // actually closed, not when the lead was originally created — a lead that took
+      // 6 weeks to close should count in the month it won, not be excluded entirely.
+      // Falls back to created_at for leads won before won_at existed.
       pool.query(`SELECT COUNT(*) AS count, COALESCE(SUM(quoted_price),0) AS value
-                  FROM leads WHERE status='Won' AND created_at>=$1`, [monthStart]),
+                  FROM leads WHERE status='Won' AND COALESCE(won_at, created_at)>=$1`, [monthStart]),
       pool.query(`SELECT industry, COUNT(*) AS count FROM leads
                   WHERE (is_archived IS NULL OR is_archived=FALSE) GROUP BY industry ORDER BY count DESC`),
       pool.query(`SELECT status, COUNT(*) AS count FROM leads
@@ -1691,17 +1825,25 @@ app.get('/api/leads', async (req, res) => {
   try {
     const archived = req.query.archived === 'true'
     const where = archived ? `WHERE is_archived=TRUE` : `WHERE (is_archived IS NULL OR is_archived=FALSE)`
-    const r = await pool.query(
-      `SELECT id, ref, customer_name, customer_email, quoted_price, industry, lead_score,
-              status, stage, risk_level, source, notes, created_at, next_follow_up, is_archived,
-              claimed_by, claimed_at, follow_up_note, lost_reason, simple_mode, converted_job_id,
-              contact_person, phone_number, load_type, origin, destination, service_type,
-              incoterm, container_size, lead_dimensions, commodity_name, hs_code, lead_quantity,
-              lead_weight, packaging_type, pickup_address, delivery_address,
-              special_handling_notes, addons, cargo_lines
-       FROM leads ${where} ORDER BY created_at DESC`
-    )
-    res.json(r.rows)
+    // Paginated: every load used to pull the entire table, which only gets slower as
+    // leads accumulate. Defaults to the first 100 if the caller doesn't specify.
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500)
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0)
+    const [rows, count] = await Promise.all([
+      pool.query(
+        `SELECT id, ref, customer_name, customer_email, quoted_price, industry, lead_score,
+                status, stage, risk_level, source, notes, created_at, next_follow_up, is_archived,
+                claimed_by, claimed_at, follow_up_note, lost_reason, simple_mode, converted_job_id,
+                contact_person, phone_number, load_type, origin, destination, service_type,
+                incoterm, container_size, lead_dimensions, commodity_name, hs_code, lead_quantity,
+                lead_weight, packaging_type, pickup_address, delivery_address,
+                special_handling_notes, addons, cargo_lines, won_at
+         FROM leads ${where} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+        [limit, offset]
+      ),
+      pool.query(`SELECT COUNT(*) as total FROM leads ${where}`),
+    ])
+    res.json({ leads: rows.rows, total: parseInt(count.rows[0].total) })
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
@@ -1731,15 +1873,22 @@ app.post('/api/leads', async (req, res) => {
 
 app.put('/api/leads/:id', async (req, res) => {
   try {
+    // claimed_by is deliberately NOT in this allowlist — it's only settable through the
+    // dedicated PUT /api/leads/:id/claim endpoint, which does an atomic check-then-claim.
+    // Allowing it here let any caller silently steal or un-claim a lead with no conflict
+    // check at all, bypassing the whole point of the claim workflow.
     const allowed = ['customer_name','customer_email','quoted_price','industry',
                      'status','stage','risk_level','source','notes','next_follow_up','is_archived',
-                     'follow_up_note','lost_reason','claimed_by',
+                     'follow_up_note','lost_reason',
                      'contact_person','phone_number','load_type','origin','destination',
                      'service_type','incoterm','container_size','lead_dimensions','commodity_name',
                      'hs_code','lead_quantity','lead_weight','packaging_type','pickup_address',
                      'delivery_address','special_handling_notes','addons']
     const updates = {}
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
+    // Stamp won_at the first time a lead's status flips to Won, so "won this month"
+    // stats can be based on when the deal actually closed, not when the lead was created.
+    if (updates.status === 'Won') updates.won_at = new Date()
     if (Object.keys(updates).length) {
       const cols = Object.keys(updates).map((k,i) => `${k}=$${i+1}`).join(', ')
       const vals = [...Object.values(updates), req.params.id]
@@ -1758,9 +1907,18 @@ app.delete('/api/leads/:id', async (req, res) => {
     const lead = (await pool.query('SELECT customer_email, customer_name, industry, source, ref FROM leads WHERE id=$1', [req.params.id])).rows[0]
     if (!lead) return res.status(404).json({ error: 'Lead not found' })
     if (lead.customer_email) {
+      // DO UPDATE (not DO NOTHING) — a repeat customer submitting a new lead months later
+      // under a different company name/industry should refresh marketing_contacts with
+      // their latest info, not keep showing whatever their very first inquiry looked like.
       await pool.query(
         `INSERT INTO marketing_contacts (email, customer_name, industry, source, lead_ref, archived_at)
-         VALUES ($1,$2,$3,$4,$5,NOW()) ON CONFLICT (email) DO NOTHING`,
+         VALUES ($1,$2,$3,$4,$5,NOW())
+         ON CONFLICT (email) DO UPDATE SET
+           customer_name = EXCLUDED.customer_name,
+           industry = EXCLUDED.industry,
+           source = EXCLUDED.source,
+           lead_ref = EXCLUDED.lead_ref,
+           archived_at = NOW()`,
         [lead.customer_email, lead.customer_name, lead.industry, lead.source, lead.ref]
       )
     }
@@ -1956,7 +2114,11 @@ app.post('/api/rfq', async (req, res) => {
   }
   try {
     const b = req.body || {}
-    const str = (v) => (v == null ? '' : String(v))
+    // This endpoint is intentionally public (the site can't easily carry the shared
+    // secret from a plain contact form) — cap every field length so an anonymous caller
+    // can't flood the leads table with unbounded garbage/oversized records.
+    const MAX_LEN = 2000
+    const str = (v) => (v == null ? '' : String(v).slice(0, MAX_LEN))
 
     const companyName        = str(b.companyName)
     const contactPerson      = str(b.contactPerson)
@@ -2233,20 +2395,30 @@ app.get('/api/customer/invoices', async (req, res) => {
 
 // ─── LEADS PURGE CRON ────────────────────────────────────────────────────────
 // Called by Vercel cron daily. Copies email of leads >30 days old to
-// marketing_contacts, then deletes those lead records.
+// marketing_contacts, then deletes those lead records — except leads that were
+// Won or already converted into a real job, which are never auto-deleted
+// regardless of age (a deal that closed shouldn't be shreddable by a cron job).
 app.get('/api/leads/purge-old', async (req, res) => {
   const auth = req.headers.authorization
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Fail CLOSED: if CRON_SECRET is ever unset/misconfigured, refuse the request rather
+  // than silently letting it through unauthenticated (this route is exempted from the
+  // global requireAuth guard, so this check is the only gate it has).
+  if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
   try {
     await ensureDB()
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 30)
+    const PURGE_EXCLUSION = `
+      AND COALESCE(status,'') <> 'Won'
+      AND COALESCE(stage,'') <> 'Won'
+      AND converted_job_id IS NULL
+    `
 
     const oldLeads = await pool.query(
       `SELECT id, ref, customer_name, customer_email, industry, source
-       FROM leads WHERE created_at < $1 AND (customer_email IS NOT NULL AND customer_email <> '')`,
+       FROM leads WHERE created_at < $1 AND (customer_email IS NOT NULL AND customer_email <> '') ${PURGE_EXCLUSION}`,
       [cutoff]
     )
 
@@ -2256,14 +2428,19 @@ app.get('/api/leads/purge-old', async (req, res) => {
         await pool.query(
           `INSERT INTO marketing_contacts (email, customer_name, industry, source, lead_ref, archived_at)
            VALUES ($1,$2,$3,$4,$5,NOW())
-           ON CONFLICT (email) DO NOTHING`,
+           ON CONFLICT (email) DO UPDATE SET
+             customer_name = EXCLUDED.customer_name,
+             industry = EXCLUDED.industry,
+             source = EXCLUDED.source,
+             lead_ref = EXCLUDED.lead_ref,
+             archived_at = NOW()`,
           [lead.customer_email, lead.customer_name, lead.industry, lead.source, lead.ref]
         )
         archived++
       } catch { skipped++ }
     }
 
-    const del = await pool.query(`DELETE FROM leads WHERE created_at < $1`, [cutoff])
+    const del = await pool.query(`DELETE FROM leads WHERE created_at < $1 ${PURGE_EXCLUSION}`, [cutoff])
     deleted = del.rowCount
 
     console.log(`[ZHL] Leads purge: ${deleted} deleted, ${archived} emails archived, ${skipped} skipped`)

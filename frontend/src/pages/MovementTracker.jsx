@@ -12,14 +12,33 @@ const STATUSES = ['', 'New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtGP = (n) => n == null || isNaN(n) ? '—' : `${Number(n).toFixed(1)}%`
 
+// Parse a 'YYYY-MM-DD' date-only string as a *local* midnight Date, matching
+// how `today` below is constructed. `new Date(dateString)` parses date-only
+// strings as UTC midnight, which shifts the comparison by the local UTC
+// offset (e.g. in Singapore, UTC+8) and can misclassify a job due yesterday
+// as "due today".
+function parseLocalDate(dateString) {
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
 function deadlineInfo(date) {
   if (!date) return { label: '—', cls: '' }
   const today = new Date(); today.setHours(0,0,0,0)
-  const d = new Date(date)
+  const d = parseLocalDate(date)
   const diff = Math.ceil((d - today) / (1000*60*60*24))
   if (diff < 0) return { label: date, cls: 'deadline-past' }
   if (diff <= 3) return { label: date, cls: 'deadline-soon' }
   return { label: date, cls: 'deadline-ok' }
+}
+
+// Extract the numeric sequence portion of a job number like "ZHL-1000/26"
+// (the digits between "ZHL-" and "/") so job numbers sort numerically
+// instead of lexicographically — otherwise "ZHL-1000/26" sorts before
+// "ZHL-999/26" once a year passes 999 jobs.
+function jobNumberSeq(jobNumber) {
+  const match = String(jobNumber).match(/ZHL-(\d+)\//)
+  return match ? Number(match[1]) : NaN
 }
 
 function gpClass(gp) {
@@ -77,6 +96,8 @@ export default function MovementTracker() {
   const [sortDir, setSortDir] = useState('desc')
   const navigate = useNavigate()
   const logoRef = useRef(null)
+  const requestIdRef = useRef(0)
+  const isFirstLoadRef = useRef(true)
 
   useEffect(() => {
     const img = new Image()
@@ -93,6 +114,9 @@ export default function MovementTracker() {
   }, [])
 
   function load() {
+    // Stamp this request so a slower, older request can't clobber the
+    // results of a newer one that resolves first.
+    const requestId = ++requestIdRef.current
     setLoading(true)
     getJobs({
       search: search || undefined,
@@ -100,11 +124,29 @@ export default function MovementTracker() {
       mode: filterMode || undefined,
       created_by: filterCreatedBy || undefined,
     })
-      .then(r => { setJobs(r.data); setLoading(false) })
-      .catch(() => setLoading(false))
+      .then(r => {
+        if (requestIdRef.current !== requestId) return // stale response, ignore
+        setJobs(r.data)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (requestIdRef.current !== requestId) return
+        setLoading(false)
+      })
   }
 
-  useEffect(() => { load() }, [search, filterStatus, filterMode, filterCreatedBy])
+  // Debounce re-fetching while the user is still typing in the search box
+  // (and filter changes, which arrive far less often) so we don't fire a
+  // network request on every keystroke. The initial mount loads immediately.
+  useEffect(() => {
+    if (isFirstLoadRef.current) {
+      isFirstLoadRef.current = false
+      load()
+      return
+    }
+    const timer = setTimeout(() => { load() }, 300)
+    return () => clearTimeout(timer)
+  }, [search, filterStatus, filterMode, filterCreatedBy])
 
   function handleSort(key) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -119,7 +161,13 @@ export default function MovementTracker() {
         if (av == null && bv == null) return 0
         if (av == null) return 1
         if (bv == null) return -1
-        const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))
+        let cmp
+        if (sortKey === 'job_number') {
+          const an = jobNumberSeq(av), bn = jobNumberSeq(bv)
+          cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : String(av).localeCompare(String(bv))
+        } else {
+          cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))
+        }
         return sortDir === 'asc' ? cmp : -cmp
       })
   }, [jobs, sortKey, sortDir, showVoided])

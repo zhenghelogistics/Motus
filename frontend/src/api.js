@@ -79,6 +79,7 @@ export const getLeads = (params) => api.get('/leads', { params })
 export const getNewLeadsCount = (since) => api.get('/leads/new-count', { params: since ? { since } : {} })
 export const createLead = (data) => api.post('/leads', data)
 export const updateLead = (id, data) => api.put(`/leads/${id}`, data)
+export const deleteLead = (id) => api.delete(`/leads/${id}`)
 export const getLeadStats = () => api.get('/leads/stats')
 export const claimLead = (id) => api.put(`/leads/${id}/claim`)
 export const generateEmail = (id, data) => api.post(`/leads/${id}/generate-email`, data)
@@ -99,5 +100,20 @@ export const parsePackingList = (file, text) => {
 
 export const getMarketingContacts = () => api.get('/marketing-contacts')
 export const deleteMarketingContact = (id) => api.delete(`/marketing-contacts/${id}`)
+
+// If a request comes back unauthorized (expired/invalid session), the token
+// is no longer valid — sign out of Supabase and force a reload back to the
+// login gate rather than letting every subsequent request silently 401.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      supabase.auth.signOut().finally(() => {
+        window.location.href = '/'
+      })
+    }
+    return Promise.reject(error)
+  }
+)
 
 export default api

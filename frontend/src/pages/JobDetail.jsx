@@ -32,7 +32,13 @@ const fmt = (n) => `$${Number(n||0).toLocaleString('en-SG', { minimumFractionDig
 function deadlineClass(date) {
   if (!date) return ''
   const today = new Date(); today.setHours(0,0,0,0)
-  const d = new Date(date)
+  // `new Date('YYYY-MM-DD')` parses as UTC midnight, but `today` above is local midnight —
+  // in timezones ahead of UTC (e.g. Singapore, UTC+8) that shifts the diff by a fixed amount,
+  // hiding genuinely-overdue deadlines in the "coming due" bucket for part of the day.
+  // Build the deadline from its local date-string parts instead, so both sides compare in
+  // the same (local) timezone frame.
+  const [y, m, dd] = String(date).split('T')[0].split('-').map(Number)
+  const d = new Date(y, (m || 1) - 1, dd || 1)
   const diff = Math.ceil((d - today) / (1000*60*60*24))
   if (diff < 0) return 'deadline-past'
   if (diff <= 3) return 'deadline-soon'
@@ -69,14 +75,16 @@ export default function JobDetail() {
   const [fxRates, setFxRates] = useState({})
   const [staffList, setStaffList] = useState([])
   const [showPdfCcyMenu, setShowPdfCcyMenu] = useState(false)
-  const [createdByEdit, setCreatedByEdit] = useState(false)
-  const [createdByVal, setCreatedByVal] = useState('')
   const [plParsing, setPlParsing] = useState(false)
   const [syncingLines, setSyncingLines] = useState(false)
   const invoiceRef = useRef()
   const plFileRef = useRef()
   const logoRef = useRef(null)
   const logoBlueRef = useRef(null)
+  // Always-fresh mirror of `job` so document generator functions — which may be invoked from a
+  // stale render closure right after an auto-save — read the latest data instead of a snapshot
+  // from before the save (see saveInfo/ensureInfoSaved below).
+  const jobRef = useRef(job)
 
   useEffect(() => {
     function loadLogo(path, ref) {
@@ -107,6 +115,7 @@ export default function JobDetail() {
     return getJob(id).then(r => { setJob(r.data); setLoading(false) })
   }
   useEffect(() => { loadJob() }, [id])
+  useEffect(() => { jobRef.current = job }, [job])
   useEffect(() => {
     if (!job || job.id === infoForm.id) return
     setInfoForm({ ...job })
@@ -117,7 +126,11 @@ export default function JobDetail() {
     setSaving(true)
     try {
       const r = await updateJob(id, infoForm)
-      setJob(j => ({ ...j, ...r.data }))
+      setJob(j => {
+        const merged = { ...j, ...r.data }
+        jobRef.current = merged // sync immediately — no waiting for the render/effect cycle
+        return merged
+      })
 
       let movementId = r.data.inventory_movement_id || job.inventory_movement_id
 
@@ -146,6 +159,47 @@ export default function JobDetail() {
   }
 
   function setInfo(k, v) { setInfoForm(f => ({ ...f, [k]: v })) }
+
+  // ── Guard against document generators reading stale data ──────────────────
+  // The Job Information panel (infoForm) is always-editable and only persisted to `job`
+  // when "Save Changes" is clicked. Every PDF/document generator reads from `job`, so if
+  // the user edits a field and immediately clicks a document button without saving first,
+  // the document would silently reflect old data. These fields are the ones InfoEdit /
+  // the Packing List panel actually let the user change.
+  const INFO_FORM_FIELDS = [
+    'shipper', 'consignee', 'mode', 'agent', 'customer_ref', 'status', 'deadline_date', 'commodity',
+    'zhl_invoice_no', 'created_by', 'customer_name', 'customer_email', 'customer_contact_name',
+    'customer_contact_number', 'weight', 'cbm', 'packages', 'dimensions',
+    'pickup_address', 'pickup_contact_name', 'pickup_contact_number',
+    'delivery_address', 'delivery_contact_name', 'delivery_contact_number',
+    'date_out', 'eta', 'date_delivered', 'notes', 'packing_list_items',
+  ]
+  function hasUnsavedInfoChanges() {
+    if (!job) return false
+    return INFO_FORM_FIELDS.some(f => {
+      const a = infoForm[f]
+      const b = job[f]
+      if (f === 'packing_list_items') return JSON.stringify(a || []) !== JSON.stringify(b || [])
+      const an = a == null ? '' : String(a)
+      const bn = b == null ? '' : String(b)
+      return an !== bn
+    })
+  }
+  // Auto-saves pending Job Information edits before a document is generated, so the PDF
+  // always reflects current form state. Returns false (and warns the user) if the save
+  // fails, so callers can skip generating a document from data that never made it to `job`.
+  async function ensureInfoSaved() {
+    if (!hasUnsavedInfoChanges()) return true
+    try {
+      await saveInfo()
+      return true
+    } catch (e) {
+      alert('Could not save your Job Information changes before generating this document: '
+        + (e?.response?.data?.error || e.message)
+        + '\n\nPlease click Save Changes and try again.')
+      return false
+    }
+  }
 
   // ── Packing list ─────────────────────────────────────────────────────────
   async function extractPDFTextPL(file) {
@@ -227,8 +281,11 @@ export default function JobDetail() {
   }
 
   // ── Cost lines ───────────────────────────────────────────────────────────
-  function matchesNOA(s) { const v = (s||'').toLowerCase(); return v.includes('noa') || v.includes('notice of arrival') }
-  function matchesGST(s) { const v = (s||'').toLowerCase(); return v.includes('gst') || v.includes('goods and services tax') }
+  // Whole-word/whole-code matching only — a bare substring check false-positives on services
+  // like "Genoa Port Handling" (contains "noa") or "Longstanding Storage Fee" (contains "gst"),
+  // silently auto-creating an unwanted billing line via autoMirrorToBilling.
+  function matchesNOA(s) { const v = (s||''); return /\bnoa\b/i.test(v) || /\bnotice of arrival\b/i.test(v) }
+  function matchesGST(s) { const v = (s||''); return /\bgst\b/i.test(v) || /\bgoods and services tax\b/i.test(v) }
 
   async function autoMirrorToBilling(service, amount, currentBillingLines) {
     if (!service) return
@@ -362,7 +419,9 @@ export default function JobDetail() {
       setJob(j => ({ ...j, status: 'Voided', void_reason: r.data.void_reason }))
       if (job.inventory_movement_id && voidLinkedInventory) {
         try { await voidInventoryMovement(id) } catch (e) {
-          console.error('[Nexus] Inventory void failed:', e?.response?.data?.error || e.message)
+          const msg = e?.response?.data?.error || e.message
+          console.error('[Nexus] Inventory void failed:', msg)
+          alert(`Inventory void failed: ${msg}\n\nThe job was voided but the linked Inventory movement was NOT voided — the two systems are now out of sync. Please void movement #${job.inventory_movement_id} manually in Inventory.`)
         }
       }
       setVoidModal(false)
@@ -371,7 +430,10 @@ export default function JobDetail() {
   }
 
   // ── Full Costing Sheet PDF ────────────────────────────────────────────────
-  function exportPDF() {
+  // `job` defaults to jobRef.current (not the closed-over state variable) so that even if
+  // this function is called from a stale render closure right after ensureInfoSaved()
+  // auto-saves pending edits, it still reads the freshest data.
+  function exportPDF(job = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 30, vw = 61  // label / value col width — (lw+vw)×2 = 182
@@ -510,7 +572,7 @@ export default function JobDetail() {
   }
 
   // ── Accounts Reference PDF (billing + cost for accounts team) ─────────────
-  function exportAccountsPDF(exportCcy = 'SGD') {
+  function exportAccountsPDF(exportCcy = 'SGD', job = jobRef.current) {
     // Convert a stored SGD amount to the target export currency.
     // For lines whose original currency matches the target, use rate_local directly
     // to avoid drift from rate changes between entry and export.
@@ -686,7 +748,7 @@ export default function JobDetail() {
   }
 
   // ── Split Invoicing: customer-facing invoice (sale-only, no cost/vendor) ──
-  function exportEntityInvoice(entity) {
+  function exportEntityInvoice(entity, job = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 30, vw = 61
@@ -766,7 +828,7 @@ export default function JobDetail() {
   }
 
   // ── Split Invoicing: internal breakdown (billing + cost + profit for one entity) ──
-  function exportEntityBreakdown(entity) {
+  function exportEntityBreakdown(entity, job = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 30, vw = 61
@@ -870,7 +932,7 @@ export default function JobDetail() {
   }
 
   // ── Internal Job Report PDF ───────────────────────────────────────────────
-  function exportJobReport() {
+  function exportJobReport(job = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 34, vw = 57
@@ -1025,7 +1087,7 @@ export default function JobDetail() {
   }
 
   // ── Pickup Request Order PDF ──────────────────────────────────────────────
-  function exportPickupOrder() {
+  function exportPickupOrder(job = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 35
@@ -1135,7 +1197,7 @@ export default function JobDetail() {
   }
 
   // ── Delivery Order — opens modal for editing before PDF generation ─────────
-  function openDOModal() {
+  function openDOModal(job = jobRef.current) {
     const isLocal = ['Local Delivery', 'Local Clearance & Delivery'].includes(job.mode)
     setDoModal({
       type: isLocal ? 'local' : 'international',
@@ -1155,13 +1217,14 @@ export default function JobDetail() {
   }
 
   function handleDOGenerate(type, fields) {
+    const job = jobRef.current
     const d = { ...job, ...fields, packages: fields.packages ? parseInt(fields.packages) : job.packages, weight: fields.weight ? parseFloat(fields.weight) : job.weight, cbm: fields.cbm ? parseFloat(fields.cbm) : job.cbm }
     if (type === 'local' || type === 'both') exportLocalDO(d)
     if (type === 'international' || type === 'both') exportInternationalDO(d)
     setDoModal(null)
   }
 
-  function openSubCertModal() {
+  function openSubCertModal(job = jobRef.current) {
     const billingTotal = (job.billing_lines||[]).reduce((s,l) => s + (l.rate||0)*(l.qty||1), 0)
     const defaultInvoiceValue = billingTotal > 0
       ? `SGD ${billingTotal.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -1175,7 +1238,7 @@ export default function JobDetail() {
     })
   }
 
-  function exportSubCert(fields) {
+  function exportSubCert(fields, job = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ph = 297
 
@@ -1279,7 +1342,7 @@ export default function JobDetail() {
     doc.save(`ZHL_${job.job_number.replace('/', '-')}_SubCert.pdf`)
   }
 
-  function exportLocalDO(d = job) {
+  function exportLocalDO(d = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 35
@@ -1388,11 +1451,11 @@ export default function JobDetail() {
     doc.line(ml, y + 16, 80, y + 16)
     doc.text('Company Stamp', ml, y + 21)
     doc.setFontSize(7); doc.setTextColor(150, 150, 150)
-    doc.text(`Zhenghe Logistics Pte Ltd — Local Delivery Order — ${job.job_number} — ${new Date().toLocaleDateString('en-SG')}`, ml, 290)
-    doc.save(`ZHL_${job.job_number.replace('/', '-')}_LocalDO.pdf`)
+    doc.text(`Zhenghe Logistics Pte Ltd — Local Delivery Order — ${d.job_number} — ${new Date().toLocaleDateString('en-SG')}`, ml, 290)
+    doc.save(`ZHL_${d.job_number.replace('/', '-')}_LocalDO.pdf`)
   }
 
-  function openReleaseDOModal() {
+  function openReleaseDOModal(job = jobRef.current) {
     const totalPkgs = (job.packing_list_items || []).reduce((s, it) => s + (parseInt(it.num_packages) || 0), 0)
     setReleaseDOModal({
       company:     job.consignee || '',
@@ -1402,7 +1465,7 @@ export default function JobDetail() {
     })
   }
 
-  function exportReleaseDO(fields) {
+  function exportReleaseDO(fields, job = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const navy = [0, 48, 135]   // #003087
@@ -1502,7 +1565,7 @@ export default function JobDetail() {
     setReleaseDOModal(null)
   }
 
-  function exportInternationalDO(d = job) {
+  function exportInternationalDO(d = jobRef.current) {
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 35
@@ -1594,8 +1657,8 @@ export default function JobDetail() {
     doc.line(ml, y + 16, 80, y + 16)
     doc.text('Company Stamp', ml, y + 21)
     doc.setFontSize(7); doc.setTextColor(150, 150, 150)
-    doc.text(`Zhenghe Logistics Pte Ltd — Delivery Order — ${job.job_number} — ${new Date().toLocaleDateString('en-SG')}`, ml, 290)
-    doc.save(`ZHL_${job.job_number.replace('/', '-')}_DO.pdf`)
+    doc.text(`Zhenghe Logistics Pte Ltd — Delivery Order — ${d.job_number} — ${new Date().toLocaleDateString('en-SG')}`, ml, 290)
+    doc.save(`ZHL_${d.job_number.replace('/', '-')}_DO.pdf`)
   }
 
   // ─── RENDER ────────────────────────────────────────────────────────────────
@@ -1704,7 +1767,7 @@ export default function JobDetail() {
                 <button className="btn btn-ghost" onClick={() => setSendToAccountsModal(false)}>
                   Dismiss
                 </button>
-                <button className="btn btn-navy" onClick={() => { exportAccountsPDF(); setSendToAccountsModal(false) }}>
+                <button className="btn btn-navy" onClick={async () => { if (await ensureInfoSaved()) { exportAccountsPDF(); setSendToAccountsModal(false) } }}>
                   <FileText size={14} /> Download Accounts PDF
                 </button>
               </div>
@@ -1786,15 +1849,15 @@ export default function JobDetail() {
           <StatusDropdown status={job.status} onChange={changeStatus} />
         </div>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost btn-sm" onClick={exportJobReport}><ClipboardList size={14} /> Job Report</button>
-          <button className="btn btn-ghost btn-sm" onClick={exportPDF}><Download size={14} /> Costing PDF</button>
-          <button className="btn btn-ghost btn-sm" onClick={exportPickupOrder}><Truck size={14} /> Pickup Order</button>
-          <button className="btn btn-ghost btn-sm" onClick={openDOModal}><Package size={14} /> Delivery Order</button>
-          <button className="btn btn-ghost btn-sm" onClick={openReleaseDOModal}><ClipboardList size={14} /> Release D/O</button>
-          <button className="btn btn-ghost btn-sm" onClick={openSubCertModal}><Stamp size={14} /> Sub Cert</button>
+          <button className="btn btn-ghost btn-sm" onClick={async () => { if (await ensureInfoSaved()) exportJobReport() }}><ClipboardList size={14} /> Job Report</button>
+          <button className="btn btn-ghost btn-sm" onClick={async () => { if (await ensureInfoSaved()) exportPDF() }}><Download size={14} /> Costing PDF</button>
+          <button className="btn btn-ghost btn-sm" onClick={async () => { if (await ensureInfoSaved()) exportPickupOrder() }}><Truck size={14} /> Pickup Order</button>
+          <button className="btn btn-ghost btn-sm" onClick={async () => { if (await ensureInfoSaved()) openDOModal() }}><Package size={14} /> Delivery Order</button>
+          <button className="btn btn-ghost btn-sm" onClick={async () => { if (await ensureInfoSaved()) openReleaseDOModal() }}><ClipboardList size={14} /> Release D/O</button>
+          <button className="btn btn-ghost btn-sm" onClick={async () => { if (await ensureInfoSaved()) openSubCertModal() }}><Stamp size={14} /> Sub Cert</button>
           <div style={{ position: 'relative' }}>
             <div style={{ display: 'flex', borderRadius: 6, overflow: 'visible', border: '1.5px solid var(--border-solid)' }}>
-              <button className="btn btn-ghost btn-sm" style={{ borderRadius: '4px 0 0 4px', border: 'none' }} onClick={() => exportAccountsPDF('SGD')}><FileText size={14} /> Accounts PDF</button>
+              <button className="btn btn-ghost btn-sm" style={{ borderRadius: '4px 0 0 4px', border: 'none' }} onClick={async () => { if (await ensureInfoSaved()) exportAccountsPDF('SGD') }}><FileText size={14} /> Accounts PDF</button>
               <button className="btn btn-ghost btn-sm" style={{ borderRadius: '0 4px 4px 0', border: 'none', borderLeft: '1px solid var(--border-solid)', padding: '0 8px' }}
                 onClick={() => setShowPdfCcyMenu(v => !v)}><ChevronDown size={14} /></button>
             </div>
@@ -1803,7 +1866,7 @@ export default function JobDetail() {
                 <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShowPdfCcyMenu(false)} />
                 <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 200, marginTop: 4, backgroundColor: '#ffffff', border: '1px solid var(--border-solid)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.14)', minWidth: 160 }}>
                   {CURRENCIES.map(ccy => (
-                    <button key={ccy} onClick={() => { exportAccountsPDF(ccy); setShowPdfCcyMenu(false) }}
+                    <button key={ccy} onClick={async () => { if (await ensureInfoSaved()) { exportAccountsPDF(ccy); setShowPdfCcyMenu(false) } }}
                       style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '9px 14px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: 'var(--font)' }}
                       onMouseEnter={e => e.currentTarget.style.background = '#F0F4FB'}
                       onMouseLeave={e => e.currentTarget.style.background = 'none'}
@@ -1902,16 +1965,16 @@ export default function JobDetail() {
         <div className="section-title">
           Cost Lines
           <div className="flex gap-2">
-            <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+            <label className="btn btn-ghost btn-sm" style={{ cursor: job.status === 'Voided' ? 'not-allowed' : 'pointer', opacity: job.status === 'Voided' ? 0.6 : 1 }}>
               {invoiceParsing ? <><span className="spinner spinner-dark"></span> Parsing...</> : <><Upload size={14} /> Invoice PDF → AI</>}
-              <input ref={invoiceRef} type="file" accept=".pdf" style={{ display: 'none' }}
+              <input ref={invoiceRef} type="file" accept=".pdf" style={{ display: 'none' }} disabled={job.status === 'Voided'}
                 onChange={e => handleInvoiceUpload(e.target.files[0])} />
             </label>
-            <button className="btn btn-outline btn-sm" onClick={addCost}>+ Add Row</button>
+            <button className="btn btn-outline btn-sm" onClick={addCost} disabled={job.status === 'Voided'}>+ Add Row</button>
           </div>
         </div>
         <CostTable lines={job.cost_lines||[]} onSave={saveCost} onDelete={removeCost} fxRates={fxRates}
-          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'cost')} />
+          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'cost')} locked={job.status === 'Voided'} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.cost_lines?.length||0} line(s)</span>
           <span style={{ fontWeight: 700, color: 'var(--heading)' }}>Total Cost: {fmt(totalCost)}</span>
@@ -1922,10 +1985,10 @@ export default function JobDetail() {
       <div className="card mb-4">
         <div className="section-title">
           Billing Lines
-          <button className="btn btn-outline btn-sm" onClick={addBilling}>+ Add Row</button>
+          <button className="btn btn-outline btn-sm" onClick={addBilling} disabled={job.status === 'Voided'}>+ Add Row</button>
         </div>
         <BillingTable lines={job.billing_lines||[]} onSave={saveBilling} onDelete={removeBilling} fxRates={fxRates}
-          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'billing')} />
+          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'billing')} locked={job.status === 'Voided'} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.billing_lines?.length||0} line(s)</span>
           <span style={{ fontWeight: 700, color: 'var(--heading)' }}>Total Sale: {fmt(totalSale)}</span>
@@ -1960,8 +2023,8 @@ export default function JobDetail() {
           job={job}
           onSave={saveEntity}
           onDelete={removeEntity}
-          onGenerateInvoice={exportEntityInvoice}
-          onGenerateBreakdown={exportEntityBreakdown}
+          onGenerateInvoice={async (e) => { if (await ensureInfoSaved()) exportEntityInvoice(e) }}
+          onGenerateBreakdown={async (e) => { if (await ensureInfoSaved()) exportEntityBreakdown(e) }}
         />
       </div>
 
@@ -2025,10 +2088,10 @@ export default function JobDetail() {
           Documents
           <div className="flex-center gap-2">
             {docUploading && <span className="spinner spinner-dark" style={{ width: 16, height: 16 }}></span>}
-            <DocUploadButton onUpload={handleDocUpload} disabled={docUploading} />
+            <DocUploadButton onUpload={handleDocUpload} disabled={docUploading || job.status === 'Voided'} />
           </div>
         </div>
-        <DocDropZone onUpload={handleDocUpload} disabled={docUploading} />
+        <DocDropZone onUpload={handleDocUpload} disabled={docUploading || job.status === 'Voided'} />
         {(job.documents||[]).length > 0 && (
           <ul className="doc-list" style={{ marginTop: 12 }}>
             {job.documents.map(d => (
@@ -2040,7 +2103,7 @@ export default function JobDetail() {
                   <span className="doc-type-badge">{d.doc_type}</span>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{d.upload_date?.split('T')[0]}</span>
                 </div>
-                <button className="btn btn-ghost btn-xs" style={{ color: 'var(--red)' }} onClick={() => removeDoc(d.id)}><X size={13} /></button>
+                <button className="btn btn-ghost btn-xs" style={{ color: 'var(--red)' }} onClick={() => removeDoc(d.id)} disabled={job.status === 'Voided'}><X size={13} /></button>
               </li>
             ))}
           </ul>
@@ -2184,30 +2247,41 @@ function InfoEdit({ form, setField, staffList = [] }) {
   )
 }
 
-function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits }) {
+function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits, locked=false }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
 
-  function startEdit(l) { setDrafts(d => ({ ...d, [l.id]: { ...l, currency: l.currency||'SGD', amount_local: l.amount_local ?? l.amount, total_payable: l.total_payable ?? '' } })); setEditing(e => ({ ...e, [l.id]: true })) }
+  function startEdit(l) { if (locked) return; setDrafts(d => ({ ...d, [l.id]: { ...l, currency: l.currency||'SGD', amount_local: l.amount_local ?? l.amount, total_payable: l.total_payable ?? '' } })); setEditing(e => ({ ...e, [l.id]: true })) }
   function setDraft(id, key, val) { setDrafts(d => ({ ...d, [id]: { ...d[id], [key]: val } })) }
 
+  // Returns null (never the raw local amount) when the FX rate is missing, so a missing
+  // rate can never silently pass through as if it were already SGD and corrupt cost_sgd.
   function toSGD(localAmt, currency) {
     if (!currency || currency === 'SGD') return localAmt
     const rate = fxRates[currency]
-    return rate ? parseFloat((localAmt / rate).toFixed(2)) : localAmt
+    return rate ? parseFloat((localAmt / rate).toFixed(2)) : null
   }
 
   async function save(id) {
     setSaving(s => ({ ...s, [id]: true }))
-    const d = drafts[id]
-    const currency = d.currency || 'SGD'
-    const amount_local = parseFloat(d.amount_local) || 0
-    const amount = toSGD(amount_local, currency)
-    const total_payable = d.total_payable !== '' && d.total_payable != null ? parseFloat(d.total_payable) : null
-    await onSave(id, { ...d, amount, amount_local, currency, total_payable })
-    setEditing(e => ({ ...e, [id]: false }))
-    setSaving(s => ({ ...s, [id]: false }))
+    try {
+      const d = drafts[id]
+      const currency = d.currency || 'SGD'
+      const amount_local = parseFloat(d.amount_local) || 0
+      const amount = toSGD(amount_local, currency)
+      if (amount === null) {
+        alert(`Exchange rate for ${currency} is unavailable — please try again or contact support.`)
+        return
+      }
+      const total_payable = d.total_payable !== '' && d.total_payable != null ? parseFloat(d.total_payable) : null
+      await onSave(id, { ...d, amount, amount_local, currency, total_payable })
+      setEditing(e => ({ ...e, [id]: false }))
+    } catch (e) {
+      alert('Failed to save cost line: ' + (e?.response?.data?.error || e.message))
+    } finally {
+      setSaving(s => ({ ...s, [id]: false }))
+    }
   }
 
   if (!lines.length) return <p className="text-muted" style={{ fontSize:13, padding:'8px 0' }}>No cost lines yet. Add a row or upload an invoice PDF.</p>
@@ -2247,7 +2321,11 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
                         {CURRENCIES.map(c => <option key={c}>{c}</option>)}
                       </select>
                     </div>
-                    {currency !== 'SGD' && <span style={{ fontSize:10, color:'var(--text-muted)' }}>≈ {fmt(sgdAmt)} SGD</span>}
+                    {currency !== 'SGD' && (
+                      sgdAmt === null
+                        ? <span style={{ fontSize:10, color:'var(--red)' }}>Exchange rate unavailable</span>
+                        : <span style={{ fontSize:10, color:'var(--text-muted)' }}>≈ {fmt(sgdAmt)} SGD</span>
+                    )}
                   </div>
                 ) : (
                   <strong>
@@ -2271,12 +2349,12 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
                 <td>
                   {l.splits?.length ? (
                     <button className="btn btn-xs" style={{ background:'var(--green-light)', color:'var(--green)', border:'1px solid rgba(20,128,74,0.3)', whiteSpace:'nowrap', display:'inline-flex', alignItems:'center', gap:4 }}
-                      onClick={() => onEditSplits(l)} title="Edit how this line is split across entities">
+                      onClick={() => onEditSplits(l)} disabled={locked} title="Edit how this line is split across entities">
                       <Check size={12} /> Split ({l.splits.length})
                     </button>
                   ) : (
                     <button className="btn btn-outline btn-xs" style={{ whiteSpace:'nowrap' }}
-                      onClick={() => onEditSplits(l)} title="Assign this line's amount across entities">
+                      onClick={() => onEditSplits(l)} disabled={locked} title="Assign this line's amount across entities">
                       Split
                     </button>
                   )}
@@ -2285,8 +2363,8 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
               <td>
                 <div className="flex gap-2">
                   {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':<Check size={13} />}</button>
-                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)}><Pencil size={13} /></button>}
-                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)}><X size={13} /></button>
+                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)} disabled={locked}><Pencil size={13} /></button>}
+                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)} disabled={locked}><X size={13} /></button>
                 </div>
               </td>
             </tr>
@@ -2297,29 +2375,40 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
   )
 }
 
-function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits }) {
+function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits, locked=false }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
 
-  function startEdit(l) { setDrafts(d => ({ ...d, [l.id]: { ...l, currency: l.currency||'SGD', rate_local: l.rate_local ?? l.rate } })); setEditing(e => ({ ...e, [l.id]: true })) }
+  function startEdit(l) { if (locked) return; setDrafts(d => ({ ...d, [l.id]: { ...l, currency: l.currency||'SGD', rate_local: l.rate_local ?? l.rate } })); setEditing(e => ({ ...e, [l.id]: true })) }
   function setDraft(id, key, val) { setDrafts(d => ({ ...d, [id]: { ...d[id], [key]: val } })) }
 
+  // Returns null (never the raw local rate) when the FX rate is missing, so a missing
+  // rate can never silently pass through as if it were already SGD and corrupt sale_sgd.
   function toSGD(localRate, currency) {
     if (!currency || currency === 'SGD') return localRate
     const fx = fxRates[currency]
-    return fx ? parseFloat((localRate / fx).toFixed(4)) : localRate
+    return fx ? parseFloat((localRate / fx).toFixed(4)) : null
   }
 
   async function save(id) {
     setSaving(s => ({ ...s, [id]: true }))
-    const d = drafts[id]
-    const currency = d.currency || 'SGD'
-    const rate_local = parseFloat(d.rate_local) || 0
-    const rate = toSGD(rate_local, currency)
-    await onSave(id, { ...d, rate, rate_local, currency })
-    setEditing(e => ({ ...e, [id]: false }))
-    setSaving(s => ({ ...s, [id]: false }))
+    try {
+      const d = drafts[id]
+      const currency = d.currency || 'SGD'
+      const rate_local = parseFloat(d.rate_local) || 0
+      const rate = toSGD(rate_local, currency)
+      if (rate === null) {
+        alert(`Exchange rate for ${currency} is unavailable — please try again or contact support.`)
+        return
+      }
+      await onSave(id, { ...d, rate, rate_local, currency })
+      setEditing(e => ({ ...e, [id]: false }))
+    } catch (e) {
+      alert('Failed to save billing line: ' + (e?.response?.data?.error || e.message))
+    } finally {
+      setSaving(s => ({ ...s, [id]: false }))
+    }
   }
 
   if (!lines.length) return <p className="text-muted" style={{ fontSize:13, padding:'8px 0' }}>No billing lines yet. Add a row or use Email Intake to pre-populate.</p>
@@ -2341,7 +2430,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
           const currency = d.currency || 'SGD'
           const rate_local = parseFloat(d.rate_local) || 0
           const rate_sgd = toSGD(rate_local, currency)
-          const total = rate_sgd * (parseFloat(d.qty)||1)
+          const total = rate_sgd === null ? null : rate_sgd * (parseFloat(d.qty)||1)
           return (
             <tr key={l.id} onDoubleClick={() => startEdit(l)}>
               <td>{isEdit ? <input className="form-control form-control-sm" value={d.service||''} onChange={e => setDraft(l.id,'service',e.target.value)} /> : (l.service||'—')}</td>
@@ -2357,7 +2446,11 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
                         {CURRENCIES.map(c => <option key={c}>{c}</option>)}
                       </select>
                     </div>
-                    {currency !== 'SGD' && <span style={{ fontSize:10, color:'var(--text-muted)' }}>≈ {fmt(rate_sgd)} SGD each</span>}
+                    {currency !== 'SGD' && (
+                      rate_sgd === null
+                        ? <span style={{ fontSize:10, color:'var(--red)' }}>Exchange rate unavailable</span>
+                        : <span style={{ fontSize:10, color:'var(--text-muted)' }}>≈ {fmt(rate_sgd)} SGD each</span>
+                    )}
                   </div>
                 ) : (
                   (l.currency && l.currency !== 'SGD')
@@ -2366,18 +2459,18 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
                 )}
               </td>
               <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.qty||''} onChange={e => setDraft(l.id,'qty',parseFloat(e.target.value)||1)} /> : l.qty}</td>
-              <td><strong style={{ fontSize: 15 }}>{fmt(isEdit ? total : l.total)}</strong></td>
+              <td><strong style={{ fontSize: 15 }}>{isEdit && total === null ? <span style={{ color:'var(--red)', fontSize:12 }}>Rate unavailable</span> : fmt(isEdit ? total : l.total)}</strong></td>
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               {hasSplitEntities && (
                 <td>
                   {l.splits?.length ? (
                     <button className="btn btn-xs" style={{ background:'var(--green-light)', color:'var(--green)', border:'1px solid rgba(20,128,74,0.3)', whiteSpace:'nowrap', display:'inline-flex', alignItems:'center', gap:4 }}
-                      onClick={() => onEditSplits(l)} title="Edit how this line is split across entities">
+                      onClick={() => onEditSplits(l)} disabled={locked} title="Edit how this line is split across entities">
                       <Check size={12} /> Split ({l.splits.length})
                     </button>
                   ) : (
                     <button className="btn btn-outline btn-xs" style={{ whiteSpace:'nowrap' }}
-                      onClick={() => onEditSplits(l)} title="Assign this line's amount across entities">
+                      onClick={() => onEditSplits(l)} disabled={locked} title="Assign this line's amount across entities">
                       Split
                     </button>
                   )}
@@ -2386,8 +2479,8 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
               <td>
                 <div className="flex gap-2">
                   {isEdit ? <button className="btn btn-primary btn-xs" onClick={() => save(l.id)} disabled={saving[l.id]}>{saving[l.id]?'...':<Check size={13} />}</button>
-                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)}><Pencil size={13} /></button>}
-                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)}><X size={13} /></button>
+                    : <button className="btn btn-ghost btn-xs" onClick={() => startEdit(l)} disabled={locked}><Pencil size={13} /></button>}
+                  <button className="btn btn-ghost btn-xs" style={{ color:'var(--red)' }} onClick={() => onDelete(l.id)} disabled={locked}><X size={13} /></button>
                 </div>
               </td>
             </tr>

@@ -44,6 +44,8 @@ export default function EmailIntake() {
   // Customer autocomplete
   const [customerSuggestions, setCustomerSuggestions] = useState([])
   const [showCustomerDrop, setShowCustomerDrop] = useState(false)
+  const customerSearchTimer = useRef(null)
+  const customerSearchSeq = useRef(0)
 
   const fileInputRef = useRef(null)
   const doFileRef = useRef(null)
@@ -216,11 +218,14 @@ export default function EmailIntake() {
         packages: form.packages ? parseInt(form.packages) : null,
         cbm: form.cbm ? parseFloat(form.cbm) : null,
         packing_list_items: plItems,
-        billing_lines: (form.billing_lines || []).map(bl => ({
-          ...bl,
-          rate: parseFloat(bl.rate) || 0,
-          qty: parseFloat(bl.qty) || 1
-        }))
+        billing_lines: (form.billing_lines || []).map(bl => {
+          const parsedQty = parseFloat(bl.qty)
+          return {
+            ...bl,
+            rate: parseFloat(bl.rate) || 0,
+            qty: Number.isFinite(parsedQty) ? parsedQty : 1
+          }
+        })
       }
       const { data } = await createJob(payload)
       navigate(`/jobs/${data.id}`)
@@ -289,13 +294,21 @@ export default function EmailIntake() {
 
   // ── Customer autocomplete ─────────────────────────────────────────────────
   async function searchCustomers(q) {
+    const seq = ++customerSearchSeq.current
     try {
       const { data } = await getCustomers(q)
+      if (seq !== customerSearchSeq.current) return // a newer search has since been issued — ignore this stale response
       setCustomerSuggestions(data)
       setShowCustomerDrop(data.length > 0)
     } catch {
+      if (seq !== customerSearchSeq.current) return
       setShowCustomerDrop(false)
     }
+  }
+
+  function debouncedSearchCustomers(q) {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current)
+    customerSearchTimer.current = setTimeout(() => searchCustomers(q), 300)
   }
 
   function selectCustomer(c) {
@@ -488,7 +501,7 @@ export default function EmailIntake() {
                 <label className="form-label">Customer Name</label>
                 <input className="form-control" value={form.customer_name}
                   placeholder="Type to search past customers..."
-                  onChange={e => { setField('customer_name', e.target.value); searchCustomers(e.target.value) }}
+                  onChange={e => { setField('customer_name', e.target.value); debouncedSearchCustomers(e.target.value) }}
                   onFocus={() => searchCustomers(form.customer_name)}
                   onBlur={() => setTimeout(() => setShowCustomerDrop(false), 180)}
                 />
@@ -536,7 +549,11 @@ export default function EmailIntake() {
             </div>
             <div className="form-group">
               <label className="form-label">Mode</label>
-              <select className="form-control" value={form.mode} onChange={e => setField('mode', e.target.value)}>
+              <select className="form-control" value={form.mode} onChange={e => {
+                const newMode = e.target.value
+                setField('mode', newMode)
+                if (newMode !== 'Warehousing') setPlItems([])
+              }}>
                 {MODES.map(m => <option key={m}>{m}</option>)}
               </select>
             </div>

@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, Circle, Mail, X, ArrowRight, Check, AlertTriangle, Sparkles, Inbox, ClipboardList } from 'lucide-react'
-import { getLeads, createLead, updateLead, getLeadStats, claimLead, generateEmail, convertLeadToJob, getMarketingContacts, deleteMarketingContact } from '../api'
-import { supabase } from '../lib/supabase'
+import { getLeads, createLead, updateLead, deleteLead, getLeadStats, claimLead, generateEmail, convertLeadToJob, getMarketingContacts, deleteMarketingContact } from '../api'
 import { SectionHead, SectionBox } from '../components/SectionBox'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -33,6 +32,28 @@ function fmtPrice(v) {
   if (!v) return '—'
   return `S$${Number(v).toLocaleString('en-SG', { maximumFractionDigits: 0 })}`
 }
+
+// Normalize a GET /api/leads response into { items, hasMore }, regardless of
+// whether the backend has been updated to support limit/offset pagination yet.
+// - Plain array (today's shape / not-yet-upgraded backend) → everything is
+//   already loaded, no "Load More" needed.
+// - Object shape (once pagination lands) → look for the list under a few
+//   likely keys, and derive hasMore from an explicit flag or a total count,
+//   falling back to "got a full page, so assume there might be more".
+function extractLeadsPage(data, offset, limit) {
+  if (Array.isArray(data)) {
+    return { items: data, hasMore: false }
+  }
+  const items = data?.leads || data?.data || data?.items || data?.rows || []
+  let hasMore
+  if (typeof data?.hasMore === 'boolean') hasMore = data.hasMore
+  else if (typeof data?.has_more === 'boolean') hasMore = data.has_more
+  else if (typeof data?.total === 'number') hasMore = (offset + items.length) < data.total
+  else hasMore = items.length > 0 && items.length >= limit
+  return { items, hasMore }
+}
+
+const LEADS_PAGE_SIZE = 100
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -224,6 +245,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
     quoted_price:   lead.quoted_price   || '',
     industry:       lead.industry       || 'General',
     stage:          lead.stage          || 'New Lead',
+    status:         lead.status         || lead.stage || 'New Lead',
     risk_level:     lead.risk_level     || 'Medium',
     source:         lead.source         || '',
     notes:          lead.notes          || '',
@@ -303,6 +325,10 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
   const [copied, setCopied]               = useState('')
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  // stage and status must always move together — the backend's Won-This-Month /
+  // Active-Leads KPIs key off `status`, not `stage`, so every path that changes
+  // `stage` mirrors the same value into `status`.
+  const setStage = (newStage) => setForm(f => ({ ...f, stage: newStage, status: newStage }))
   const inp = { className: 'form-control', style: { width: '100%' } }
 
   // ── save ──
@@ -318,6 +344,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
         quoted_price:   form.quoted_price ? parseFloat(form.quoted_price) : 0,
         industry:       form.industry,
         stage:          form.stage,
+        status:         form.status,
         risk_level:     form.risk_level,
         source:         form.source,
         notes:          form.notes,
@@ -359,7 +386,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
     if (!window.confirm(`Permanently delete this lead (${lead.customer_name || lead.ref})? This cannot be undone.`)) return
     setDeleting(true)
     try {
-      await import('../api').then(m => m.default.delete(`/leads/${lead.id}`))
+      await deleteLead(lead.id)
       onSave()
     } catch (e) {
       setErr(e?.response?.data?.error || 'Delete failed')
@@ -487,7 +514,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                 <input {...inp} type="number" value={form.quoted_price} onChange={e => set('quoted_price', e.target.value)} placeholder="0" />
               )}
               {fieldRow('Stage',
-                <select {...inp} value={form.stage} onChange={e => set('stage', e.target.value)}>
+                <select {...inp} value={form.stage} onChange={e => setStage(e.target.value)}>
                   {PIPELINE_STAGES.map(s => <option key={s}>{s}</option>)}
                 </select>
               )}
@@ -613,7 +640,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                     onClick={() => {
                       if (a.special === 'quote') { setShowQuoteIn(v => !v); setShowLostIn(false) }
                       else if (a.special === 'lost') { setShowLostIn(v => !v); setShowQuoteIn(false) }
-                      else set('stage', a.target)
+                      else setStage(a.target)
                     }}
                     style={{
                       padding: '5px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700,
@@ -625,7 +652,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                   >{a.label}</button>
                 ))}
                 {form.stage === 'Lost' && (
-                  <button onClick={() => { set('stage', 'Follow-Up'); set('lost_reason', '') }}
+                  <button onClick={() => { setStage('Follow-Up'); set('lost_reason', '') }}
                     style={{ padding: '5px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, border: '1.5px solid var(--amber)', background: 'transparent', color: 'var(--amber)' }}
                   >Recover</button>
                 )}
@@ -637,7 +664,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                     onChange={e => setQuoteIn(e.target.value)}
                     className="form-control" style={{ maxWidth: 200 }} autoFocus />
                   <button className="btn btn-primary btn-sm" onClick={() => {
-                    set('stage', 'Quote Sent')
+                    setStage('Quote Sent')
                     if (quoteIn) set('quoted_price', quoteIn)
                     setShowQuoteIn(false)
                   }}>Confirm</button>
@@ -651,7 +678,7 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                     onChange={e => setLostIn(e.target.value)}
                     className="form-control" style={{ flex: 1 }} autoFocus />
                   <button className="btn btn-danger btn-sm" onClick={() => {
-                    set('stage', 'Lost'); set('lost_reason', lostIn); setShowLostIn(false)
+                    setStage('Lost'); set('lost_reason', lostIn); setShowLostIn(false)
                   }}>Mark Lost</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setShowLostIn(false)}><X size={14} /></button>
                 </div>
@@ -1173,7 +1200,15 @@ function ContactsView() {
         c.archived_at ? new Date(c.archived_at).toLocaleDateString('en-SG') : '',
       ])
     ]
-    const csv = rows.map(r => r.map(v => `"${(v||'').replace(/"/g,'""')}"`).join(',')).join('\n')
+    // Guard against CSV/formula injection: values here can originate from the public,
+    // unauthenticated RFQ webhook, so a field starting with =, +, - or @ gets a leading
+    // single quote to force spreadsheet apps to treat it as plain text, not a formula.
+    const csvSafe = (v) => {
+      let s = String(v || '')
+      if (/^[=+\-@]/.test(s)) s = `'${s}`
+      return s.replace(/"/g, '""')
+    }
+    const csv = rows.map(r => r.map(v => `"${csvSafe(v)}"`).join(',')).join('\n')
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
     a.download = `ZHL_Marketing_Contacts_${new Date().toISOString().slice(0,10)}.csv`
@@ -1273,15 +1308,20 @@ export default function Leads() {
   const [showArchived, setShowArchived] = useState(false)
   const [search, setSearch]       = useState('')
   const [modalLead, setModalLead] = useState(null)
+  const [offset, setOffset]       = useState(0)
+  const [hasMore, setHasMore]     = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   function handleClaim(id, claimedBy) {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, claimed_by: claimedBy } : l))
   }
 
   async function handleStatusChange(id, stage) {
+    // mirror stage into status too — the backend's KPI queries read `status`,
+    // not `stage`, so every stage-changing path needs to keep them in sync.
     try {
-      await updateLead(id, { stage })
-      setLeads(prev => prev.map(l => l.id === id ? { ...l, stage } : l))
+      await updateLead(id, { stage, status: stage })
+      setLeads(prev => prev.map(l => l.id === id ? { ...l, stage, status: stage } : l))
     } catch { /* silent — the dropdown snaps back on next fetch */ }
   }
 
@@ -1289,10 +1329,13 @@ export default function Leads() {
     setLoading(true); setError('')
     try {
       const [lr, sr] = await Promise.all([
-        getLeads({ archived: showArchived ? 'true' : 'false' }),
+        getLeads({ archived: showArchived ? 'true' : 'false', limit: LEADS_PAGE_SIZE, offset: 0 }),
         getLeadStats(),
       ])
-      setLeads(lr.data)
+      const { items, hasMore: more } = extractLeadsPage(lr.data, 0, LEADS_PAGE_SIZE)
+      setLeads(items)
+      setOffset(items.length)
+      setHasMore(more)
       setStats(sr.data)
     } catch {
       setError('Failed to load leads')
@@ -1302,6 +1345,22 @@ export default function Leads() {
   }, [showArchived])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const lr = await getLeads({ archived: showArchived ? 'true' : 'false', limit: LEADS_PAGE_SIZE, offset })
+      const { items, hasMore: more } = extractLeadsPage(lr.data, offset, LEADS_PAGE_SIZE)
+      setLeads(prev => [...prev, ...items])
+      setOffset(o => o + items.length)
+      setHasMore(more)
+    } catch {
+      // silent — the button just stays available for the user to retry
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const filtered = leads.filter(l => {
     const q = search.toLowerCase()
@@ -1403,6 +1462,14 @@ export default function Leads() {
 
       {view !== 'contacts' && !loading && !error && filtered.length > 0 && view === 'list' && (
         <ListView leads={filtered} onRowClick={setModalLead} onStatusChange={handleStatusChange} />
+      )}
+
+      {view !== 'contacts' && !loading && !error && hasMore && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+          <button className="btn btn-ghost btn-sm" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Loading…' : 'Load More'}
+          </button>
+        </div>
       )}
 
       {view === 'contacts' && <ContactsView />}

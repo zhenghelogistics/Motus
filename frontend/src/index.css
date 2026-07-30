@@ -21,6 +21,8 @@
   --heading: #003087;
   --link: #0061E0;
   --border-solid: #D1DCE8;
+  --border: var(--border-solid);
+  --bg-hover: #EFF4FA;
 
   --glass-bg: rgba(255, 255, 255, 0.82);
   --glass-border: rgba(255, 255, 255, 0.6);
@@ -86,6 +88,8 @@
   --heading: #dce9ff;
   --link: #4d9fff;
   --border-solid: rgba(255,255,255,0.10);
+  --border: var(--border-solid);
+  --bg-hover: rgba(255,255,255,0.06);
 
   --glass-bg: rgba(15,28,45,0.92);
   --glass-border: rgba(255,255,255,0.07);

@@ -30,11 +30,21 @@ function CountUp({ value, format, duration = 900 }) {
   return Math.round(display)
 }
 
+// Parse a 'YYYY-MM-DD' date-only string as a *local* midnight Date, matching
+// how `today` below is constructed. `new Date(dateString)` parses date-only
+// strings as UTC midnight, which shifts the comparison by the local UTC
+// offset (e.g. in Singapore, UTC+8) and can misclassify a job due yesterday
+// as "due today".
+function parseLocalDate(dateString) {
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
 function deadlineClass(date) {
   if (!date) return ''
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  const d = new Date(date)
+  const d = parseLocalDate(date)
   const diff = Math.ceil((d - today) / (1000 * 60 * 60 * 24))
   if (diff < 0) return 'deadline-past'
   if (diff <= 3) return 'deadline-soon'
@@ -310,7 +320,7 @@ function JobStatusWidget({ statusCounts, missingCount, flaggedJobs, navigate }) 
                     let dlCls = ''
                     if (dl) {
                       const today = new Date(); today.setHours(0, 0, 0, 0)
-                      const diff = Math.ceil((new Date(dl) - today) / (1000 * 60 * 60 * 24))
+                      const diff = Math.ceil((parseLocalDate(dl) - today) / (1000 * 60 * 60 * 24))
                       dlCls = diff < 0 ? 'deadline-past' : diff <= 3 ? 'deadline-soon' : 'deadline-ok'
                     }
                     return (

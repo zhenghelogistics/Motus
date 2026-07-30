@@ -149,19 +149,29 @@ export default function ProfileModal({ onClose }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
-  useEffect(() => {
+  function loadProfile() {
+    setLoading(true)
+    setLoadError('')
     getProfile()
       .then(r => {
         setDisplayName(r.data.display_name || '')
         setDesignation(r.data.designation || '')
         setSignature(r.data.signature_data || '')
       })
-      .catch(() => {})
+      .catch(e => {
+        setLoadError(e?.response?.data?.error || e.message || 'Failed to load your profile.')
+      })
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadProfile()
   }, [])
 
   async function handleSave() {
+    if (loadError) return // don't allow saving over real data when we never confirmed what it was
     setSaving(true)
     try {
       await updateProfile({ display_name: displayName, designation, signature_data: signature })
@@ -186,6 +196,13 @@ export default function ProfileModal({ onClose }) {
           {loading ? (
             <div style={{ textAlign: 'center', padding: 40 }}>
               <span className="spinner spinner-dark" />
+            </div>
+          ) : loadError ? (
+            <div className="alert alert-error" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>Could not load your profile: {loadError}. Saving is disabled until this is resolved, so your existing name, designation, and signature aren't accidentally overwritten with blanks.</div>
+              <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start' }} onClick={loadProfile}>
+                Retry
+              </button>
             </div>
           ) : (
             <>
@@ -257,7 +274,8 @@ export default function ProfileModal({ onClose }) {
 
         <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading || !!loadError}
+            title={loadError ? 'Profile failed to load — resolve that before saving to avoid overwriting your saved data.' : ''}>
             {saving
               ? <><span className="spinner"></span> Saving...</>
               : saved ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Saved!</> : 'Save Changes'}

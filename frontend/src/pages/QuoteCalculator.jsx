@@ -107,7 +107,23 @@ export default function QuoteCalculator() {
   const preGst     = subtotal + markupAmt
   const gstAmt     = gstActive ? preGst * 0.09 : 0
   const finalPrice = Math.ceil(preGst + gstAmt)
-  const effectiveMargin = finalPrice > 0 ? ((finalPrice - subtotal) / finalPrice * 100) : 0
+  // Margin = real profit (markup) relative to the pre-tax price. GST is a pass-through
+  // to the government, not profit, so it must never move this number — using finalPrice
+  // (which includes GST) as the denominator/numerator previously let toggling GST on
+  // inflate the displayed margin even though nothing about profitability changed.
+  const effectiveMargin = preGst > 0 ? ((preGst - subtotal) / preGst * 100) : 0
+
+  // Math.ceil() above rounds the total up to the nearest whole dollar, but the
+  // breakdown rows we display (subtotal / markup / GST) are the exact, un-rounded
+  // figures — so they can visibly fail to sum to the printed total by a few cents.
+  // Spread that rounding delta into whichever row is rendered last, right above the
+  // total (GST when it's shown, otherwise markup, otherwise the subtotal itself), so
+  // every rendering path (panel / PDF / copy text) shows components that add up
+  // exactly to the printed total.
+  const roundingAdj = finalPrice - (preGst + gstAmt)
+  const gstAmtDisplay = gstActive ? gstAmt + roundingAdj : gstAmt
+  const markupAmtDisplay = (!gstActive && globalMarkup > 0) ? markupAmt + roundingAdj : markupAmt
+  const subtotalDisplay = (!gstActive && globalMarkup <= 0) ? subtotal + roundingAdj : subtotal
 
   function fmtM(n) {
     return `${sym}${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -267,7 +283,7 @@ export default function QuoteCalculator() {
       // ── Total ────────────────────────────────────────────────────────
       if (gstActive && gstAmt > 0) {
         doc.setFontSize(8.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80)
-        doc.text(`GST (9%): ${sym}${gstAmt.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, pw - mr, y, { align: 'right' })
+        doc.text(`GST (9%): ${sym}${gstAmtDisplay.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, pw - mr, y, { align: 'right' })
         y += 6
       }
       doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
@@ -406,7 +422,7 @@ export default function QuoteCalculator() {
     })
     out += sep + '\n'
     if (gstActive && gstAmt > 0) {
-      out += padRow('GST (9%):', fmtM(gstAmt)) + '\n'
+      out += padRow('GST (9%):', fmtM(gstAmtDisplay)) + '\n'
     }
     out += padRow('Total Quoted Price', fmtM(finalPrice)) + '\n'
     if (allRemarks.length) {
@@ -649,7 +665,7 @@ export default function QuoteCalculator() {
                 >
                   {gstActive ? <Check size={14} /> : '+'} GST 9%
                   {gstActive && gstAmt > 0 && (
-                    <span style={{ fontWeight: 500, fontSize: 12, opacity: 0.85 }}>({fmtM(gstAmt)})</span>
+                    <span style={{ fontWeight: 500, fontSize: 12, opacity: 0.85 }}>({fmtM(gstAmtDisplay)})</span>
                   )}
                 </button>
               </div>
@@ -683,16 +699,16 @@ export default function QuoteCalculator() {
                 <div style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '0 0 12px' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14, fontSize: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgba(255,255,255,0.6)' }}>
-                    <span>Subtotal</span><span>{fmtM(subtotal)}</span>
+                    <span>Subtotal</span><span>{fmtM(subtotalDisplay)}</span>
                   </div>
                   {globalMarkup > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgba(255,255,255,0.6)' }}>
-                      <span>Markup ({globalMarkup}%)</span><span>{fmtM(markupAmt)}</span>
+                      <span>Markup ({globalMarkup}%)</span><span>{fmtM(markupAmtDisplay)}</span>
                     </div>
                   )}
                   {gstActive && gstAmt > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgba(255,255,255,0.6)' }}>
-                      <span>GST (9%)</span><span>{fmtM(gstAmt)}</span>
+                      <span>GST (9%)</span><span>{fmtM(gstAmtDisplay)}</span>
                     </div>
                   )}
                   <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '2px 0' }} />

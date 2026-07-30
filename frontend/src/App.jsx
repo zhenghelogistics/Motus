@@ -526,8 +526,9 @@ function AppShell() {
   }
 
   useEffect(() => {
+    if (!user) return
     getFxRates().then(r => setFxUpdatedAt(r.data.updated_at)).catch(() => {})
-  }, [])
+  }, [user])
 
   // Fetch new leads count on mount and poll every 60s
   useEffect(() => {
