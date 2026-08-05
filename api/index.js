@@ -1,12 +1,29 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
+const { Pool, types: pgTypes } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
 const { mapLeadToJobFields } = require('./leadConversion');
 const { extractCargoLines } = require('./cargoLines');
 const app = express();
+
+// Return NUMERIC/DECIMAL (type OID 1700) as a JS number instead of a string.
+//
+// node-postgres hands NUMERIC back as a string by default, because NUMERIC is
+// arbitrary-precision and a JS double cannot represent every possible value. That is
+// the right default in general — but it silently broke this app when the money columns
+// were migrated REAL -> NUMERIC(14,4): REAL came back as a number, NUMERIC comes back
+// as a string, and every `sum + line.amount` in the frontend started concatenating
+// strings ("0" + "123.45" + "466.75" = "0123.45466.75" -> NaN). Multiplication still
+// coerced, so sale totals looked fine while cost totals showed $NaN — including on
+// customer-facing invoice PDFs.
+//
+// A double is comfortably exact for NUMERIC(14,4) money (14 digits < 2^53) and is
+// strictly more precise than the REAL these columns used to be, so nothing is lost
+// versus the pre-migration behaviour. The DB still stores and SUMs them exactly, which
+// was the point of the migration.
+pgTypes.setTypeParser(pgTypes.builtins.NUMERIC, parseFloat);
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

@@ -117,4 +117,34 @@ describe('computeEntityTotals', () => {
     const totals = computeEntityTotals({ id: 1 }, {})
     expect(totals).toEqual({ sale: 0, cost: 0, profit: 0, gp: 0 })
   })
+
+  // Regression: money columns are NUMERIC, and a NUMERIC comes back from the database
+  // driver as a STRING unless it is explicitly parsed. Summing those with `+` silently
+  // concatenates ("0" + "120.50" + "80.25" = "0120.5080.25" -> NaN) and corrupted
+  // on-screen totals and invoice PDFs in production. Every fixture above uses JS
+  // numbers, so none of them caught it — this one uses strings, as the driver does.
+  it('sums string amounts as numbers, not string concatenation', () => {
+    const job = {
+      billing_lines: [
+        { splits: [{ entity_id: 1, amount: '120.50' }] },
+        { splits: [{ entity_id: 1, amount: '80.25' }] },
+      ],
+      cost_lines: [
+        { splits: [{ entity_id: 1, amount: '60.10' }] },
+        { splits: [{ entity_id: 1, amount: '40.40' }] },
+      ],
+    }
+    const totals = computeEntityTotals({ id: 1 }, job)
+    expect(totals.sale).toBeCloseTo(200.75, 2)
+    expect(totals.cost).toBeCloseTo(100.50, 2)
+    expect(totals.profit).toBeCloseTo(100.25, 2)
+    expect(Number.isNaN(totals.gp)).toBe(false)
+  })
+
+  it('splits a string line total without corrupting the reconciliation', () => {
+    const entities = [{ id: 1, default_share: '0.6' }, { id: 2, default_share: '0.4' }]
+    const out = autoFillSplit('100.00', entities)
+    expect(out[0].amount + out[1].amount).toBeCloseTo(100, 2)
+    expect(out.every(o => !Number.isNaN(o.amount))).toBe(true)
+  })
 })

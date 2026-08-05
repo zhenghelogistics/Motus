@@ -14,9 +14,16 @@ export function autoFillSplit(lineTotal, entities) {
   return out
 }
 
+// Amounts are coerced with Number() rather than trusted as-is: these come from
+// NUMERIC columns, and a NUMERIC arrives as a *string* unless the driver is told
+// otherwise. A bare `s + l.amount` then concatenates instead of adding
+// ("0" + "12.50" + "7.25" = "012.507.25" -> NaN) and quietly corrupts invoice totals.
+const splitAmount = (line, entityId) =>
+  Number(line.splits?.find(x => x.entity_id === entityId)?.amount) || 0
+
 export function computeEntityTotals(entity, job) {
-  const sale = (job.billing_lines||[]).reduce((s,l) => s + (l.splits?.find(x => x.entity_id===entity.id)?.amount || 0), 0)
-  const cost = (job.cost_lines||[]).reduce((s,l) => s + (l.splits?.find(x => x.entity_id===entity.id)?.amount || 0), 0)
+  const sale = (job.billing_lines||[]).reduce((s,l) => s + splitAmount(l, entity.id), 0)
+  const cost = (job.cost_lines||[]).reduce((s,l) => s + splitAmount(l, entity.id), 0)
   const profit = sale - cost
   return { sale, cost, profit, gp: sale > 0 ? (profit/sale)*100 : 0 }
 }
