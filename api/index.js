@@ -160,6 +160,10 @@ async function initDB() {
   // on the real close date instead of the lead's original creation date (a deal that took
   // 6 weeks to close was previously excluded from every month's count).
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS won_at TIMESTAMP`);
+  // Stamped when the nightly job archives a stale lead. Kept separate from created_at so
+  // the team can tell how long a lead has been dormant and run "still need this shipped?"
+  // follow-up campaigns off it. Leads archived by hand (via the lead card) leave this null.
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS dormant_at TIMESTAMP`);
   // Money/quantity columns were REAL (single-precision float, ~7 significant digits) —
   // switched to NUMERIC so amounts don't accumulate floating-point rounding error on
   // large sums (a real risk for a billing/invoicing system where totals must tie out
@@ -1837,7 +1841,7 @@ app.get('/api/leads', async (req, res) => {
                 contact_person, phone_number, load_type, origin, destination, service_type,
                 incoterm, container_size, lead_dimensions, commodity_name, hs_code, lead_quantity,
                 lead_weight, packaging_type, pickup_address, delivery_address,
-                special_handling_notes, addons, cargo_lines, won_at
+                special_handling_notes, addons, cargo_lines, won_at, dormant_at
          FROM leads ${where} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
         [limit, offset]
       ),
@@ -2393,11 +2397,18 @@ app.get('/api/customer/invoices', async (req, res) => {
   }
 })
 
-// ─── LEADS PURGE CRON ────────────────────────────────────────────────────────
-// Called by Vercel cron daily. Copies email of leads >30 days old to
-// marketing_contacts, then deletes those lead records — except leads that were
-// Won or already converted into a real job, which are never auto-deleted
-// regardless of age (a deal that closed shouldn't be shreddable by a cron job).
+// ─── LEADS DORMANCY CRON ─────────────────────────────────────────────────────
+// Called by Vercel cron daily. Leads older than 30 days that never closed are
+// ARCHIVED (is_archived = TRUE, dormant_at stamped) — never deleted. The full
+// record is retained so the team can still reach back out later ("do you still
+// need this shipped?"), and archived leads remain viewable/exportable in the
+// Leads page via the "Show archived" toggle and recoverable via the lead card.
+// Their email is additionally copied into marketing_contacts for list-building.
+// Won / already-converted leads are excluded entirely and stay in the active list.
+//
+// NOTE: the route path still reads "purge-old" because it is wired into the cron
+// config in vercel.json; renaming it would need a coordinated change there. It no
+// longer purges anything — nothing in this app deletes a lead automatically.
 app.get('/api/leads/purge-old', async (req, res) => {
   const auth = req.headers.authorization
   // Fail CLOSED: if CRON_SECRET is ever unset/misconfigured, refuse the request rather
@@ -2410,19 +2421,22 @@ app.get('/api/leads/purge-old', async (req, res) => {
     await ensureDB()
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 30)
-    const PURGE_EXCLUSION = `
+    // Never touch a lead that closed, and never re-process one that's already archived
+    // (without the is_archived guard this would re-stamp dormant_at every single night).
+    const DORMANCY_SCOPE = `
       AND COALESCE(status,'') <> 'Won'
       AND COALESCE(stage,'') <> 'Won'
       AND converted_job_id IS NULL
+      AND (is_archived IS NULL OR is_archived = FALSE)
     `
 
     const oldLeads = await pool.query(
       `SELECT id, ref, customer_name, customer_email, industry, source
-       FROM leads WHERE created_at < $1 AND (customer_email IS NOT NULL AND customer_email <> '') ${PURGE_EXCLUSION}`,
+       FROM leads WHERE created_at < $1 AND (customer_email IS NOT NULL AND customer_email <> '') ${DORMANCY_SCOPE}`,
       [cutoff]
     )
 
-    let archived = 0, skipped = 0, deleted = 0
+    let contactsSaved = 0, skipped = 0, archived = 0
     for (const lead of oldLeads.rows) {
       try {
         await pool.query(
@@ -2436,17 +2450,23 @@ app.get('/api/leads/purge-old', async (req, res) => {
              archived_at = NOW()`,
           [lead.customer_email, lead.customer_name, lead.industry, lead.source, lead.ref]
         )
-        archived++
+        contactsSaved++
       } catch { skipped++ }
     }
 
-    const del = await pool.query(`DELETE FROM leads WHERE created_at < $1 ${PURGE_EXCLUSION}`, [cutoff])
-    deleted = del.rowCount
+    // Archive rather than delete. A failed marketing_contacts copy above no longer costs
+    // anything either — the lead itself is still here in full, so nothing is lost.
+    const arch = await pool.query(
+      `UPDATE leads SET is_archived = TRUE, dormant_at = NOW()
+       WHERE created_at < $1 ${DORMANCY_SCOPE}`,
+      [cutoff]
+    )
+    archived = arch.rowCount
 
-    console.log(`[ZHL] Leads purge: ${deleted} deleted, ${archived} emails archived, ${skipped} skipped`)
-    res.json({ success: true, deleted, archived, skipped, cutoff })
+    console.log(`[ZHL] Leads dormancy sweep: ${archived} archived, ${contactsSaved} emails copied to marketing contacts, ${skipped} skipped`)
+    res.json({ success: true, archived, contactsSaved, skipped, cutoff })
   } catch (err) {
-    console.error('[ZHL] leads purge error:', err.message)
+    console.error('[ZHL] leads dormancy sweep error:', err.message)
     res.status(500).json({ error: err.message })
   }
 })

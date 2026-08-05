@@ -55,6 +55,26 @@ function extractLeadsPage(data, offset, limit) {
 
 const LEADS_PAGE_SIZE = 100
 
+// Guard against CSV/formula injection: lead data can originate from the public,
+// unauthenticated RFQ webhook, so a field starting with =, +, - or @ gets a leading
+// single quote to force spreadsheet apps to treat it as plain text, not a formula.
+function csvSafe(v) {
+  let s = String(v ?? '')
+  if (/^[=+\-@]/.test(s)) s = `'${s}`
+  return s.replace(/"/g, '""')
+}
+
+function downloadCSV(rows, filename) {
+  const csv = rows.map(r => r.map(v => `"${csvSafe(v)}"`).join(',')).join('\n')
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+const asDate = (v) => (v ? new Date(v).toLocaleDateString('en-SG') : '')
+
 // ── constants ─────────────────────────────────────────────────────────────────
 
 const PIPELINE_STAGES = [
@@ -1193,26 +1213,12 @@ function ContactsView() {
   }
 
   function exportCSV() {
-    const rows = [
+    downloadCSV([
       ['Email', 'Name', 'Industry', 'Source', 'Lead Ref', 'Archived Date'],
       ...filtered.map(c => [
-        c.email, c.customer_name, c.industry, c.source, c.lead_ref,
-        c.archived_at ? new Date(c.archived_at).toLocaleDateString('en-SG') : '',
+        c.email, c.customer_name, c.industry, c.source, c.lead_ref, asDate(c.archived_at),
       ])
-    ]
-    // Guard against CSV/formula injection: values here can originate from the public,
-    // unauthenticated RFQ webhook, so a field starting with =, +, - or @ gets a leading
-    // single quote to force spreadsheet apps to treat it as plain text, not a formula.
-    const csvSafe = (v) => {
-      let s = String(v || '')
-      if (/^[=+\-@]/.test(s)) s = `'${s}`
-      return s.replace(/"/g, '""')
-    }
-    const csv = rows.map(r => r.map(v => `"${csvSafe(v)}"`).join(',')).join('\n')
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    a.download = `ZHL_Marketing_Contacts_${new Date().toISOString().slice(0,10)}.csv`
-    a.click()
+    ], `ZHL_Marketing_Contacts_${new Date().toISOString().slice(0, 10)}.csv`)
   }
 
   const q = search.toLowerCase()
@@ -1377,6 +1383,23 @@ export default function Leads() {
     return acc
   }, {})
 
+  // Exports whatever is currently on screen — so ticking "Show archived" and hitting this
+  // gives you the dormant-lead list to run a "do you still need this shipped?" follow-up from.
+  function exportLeadsCSV() {
+    downloadCSV([
+      ['Ref', 'Company', 'Contact', 'Email', 'Phone', 'Stage', 'Status', 'Industry',
+       'Quoted Price', 'Origin', 'Destination', 'Commodity', 'Service', 'Claimed By',
+       'Created', 'Went Dormant', 'Archived', 'Next Follow-Up', 'Notes'],
+      ...filtered.map(l => [
+        l.ref, l.customer_name, l.contact_person, l.customer_email, l.phone_number,
+        l.stage, l.status, l.industry, l.quoted_price, l.origin, l.destination,
+        l.commodity_name, l.service_type, l.claimed_by,
+        asDate(l.created_at), asDate(l.dormant_at), l.is_archived ? 'Yes' : 'No',
+        asDate(l.next_follow_up), (l.notes || '').replace(/\s+/g, ' ').trim(),
+      ])
+    ], `ZHL_Leads${showArchived ? '_incl_archived' : ''}_${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+
   return (
     <div style={{ padding: '24px 32px', maxWidth: view === 'pipeline' ? 'none' : 1200, margin: view === 'pipeline' ? undefined : '0 auto' }}>
 
@@ -1434,6 +1457,11 @@ export default function Leads() {
             <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />
             Show archived
           </label>
+        )}
+        {view !== 'contacts' && filtered.length > 0 && (
+          <button className="btn btn-ghost btn-sm" onClick={exportLeadsCSV} title="Export the leads currently shown, including any search filter">
+            Export CSV ({filtered.length})
+          </button>
         )}
       </div>
 
