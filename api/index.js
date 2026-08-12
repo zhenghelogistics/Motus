@@ -6,6 +6,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
 const { mapLeadToJobFields } = require('./leadConversion');
 const { extractCargoLines } = require('./cargoLines');
+const { deriveMetrics, computeRateAmount } = require('./rateCalc');
 const app = express();
 
 // Return NUMERIC/DECIMAL (type OID 1700) as a JS number instead of a string.
@@ -340,6 +341,54 @@ async function initDB() {
     SELECT year, MAX(sequence) FROM jobs GROUP BY year
     ON CONFLICT (year) DO UPDATE SET seq = GREATEST(job_number_counters.seq, EXCLUDED.seq)
   `);
+
+  // Vendor rate cards — the negotiated rates partners give us, kept in the app so
+  // coordinators stop re-keying them off a PDF. One card per vendor per freight mode
+  // (e.g. Quality Transport for Air, Cargohub for Sea); the mode is what decides which
+  // card gets offered on a given job.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS rate_cards (
+      id SERIAL PRIMARY KEY,
+      vendor_name TEXT NOT NULL,
+      title TEXT DEFAULT '',
+      mode TEXT DEFAULT '',
+      currency TEXT DEFAULT 'SGD',
+      volumetric_divisor NUMERIC(10,2),
+      valid_from TEXT,
+      valid_to TEXT,
+      notes TEXT DEFAULT '',
+      source_file_url TEXT DEFAULT '',
+      is_active BOOLEAN DEFAULT TRUE,
+      created_by TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  // The individual charges on a card. `bands` holds weight/count tiers as JSONB
+  // ([{from,to,amount,basis}]) because a tier can carry its own basis — real cards
+  // switch the top tier from a flat amount to a per-kg rate. Same JSONB-for-line-items
+  // approach already used by leads.cargo_lines and jobs.packing_list_items.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS rate_lines (
+      id SERIAL PRIMARY KEY,
+      card_id INTEGER NOT NULL REFERENCES rate_cards(id) ON DELETE CASCADE,
+      charge_name TEXT NOT NULL DEFAULT '',
+      category TEXT DEFAULT 'optional',
+      basis TEXT DEFAULT 'flat',
+      rate NUMERIC(14,4),
+      min_charge NUMERIC(14,4),
+      min_qty NUMERIC(14,4),
+      bands JSONB,
+      band_metric TEXT,
+      currency TEXT,
+      auto_apply BOOLEAN DEFAULT FALSE,
+      condition_note TEXT DEFAULT '',
+      remarks TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_lines_card_id ON rate_lines (card_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_cards_lookup ON rate_cards (is_active, mode)`);
 }
 
 async function ensureDB() {
@@ -2485,6 +2534,192 @@ app.get('/api/leads/purge-old', async (req, res) => {
   } catch (err) {
     console.error('[ZHL] leads dormancy sweep error:', err.message)
     res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── VENDOR RATE CARDS ───────────────────────────────────────────────────────
+// Reference sheet of the negotiated rates our transport partners give us, read on the
+// job screen to build cost lines without re-keying a PDF. Cost side only — these never
+// touch billing lines.
+
+app.get('/api/rate-cards', async (req, res) => {
+  try {
+    await ensureDB()
+    const where = []
+    const params = []
+    if (req.query.vendor) { params.push(`%${req.query.vendor}%`); where.push(`vendor_name ILIKE $${params.length}`) }
+    if (req.query.mode)   { params.push(req.query.mode);          where.push(`(mode = $${params.length} OR COALESCE(mode,'') = '')`) }
+    if (req.query.active === 'true') where.push(`is_active = TRUE`)
+    const sql = `SELECT * FROM rate_cards ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+                 ORDER BY vendor_name, id`
+    const cards = (await pool.query(sql, params)).rows
+    if (!cards.length) return res.json([])
+
+    // One query for all lines rather than one per card — this list is read every time
+    // the job-screen picker opens.
+    const lines = (await pool.query(
+      `SELECT * FROM rate_lines WHERE card_id = ANY($1::int[]) ORDER BY sort_order, id`,
+      [cards.map(c => c.id)]
+    )).rows
+    const byCard = {}
+    for (const l of lines) (byCard[l.card_id] = byCard[l.card_id] || []).push(l)
+    res.json(cards.map(c => ({ ...c, lines: byCard[c.id] || [] })))
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.post('/api/rate-cards', async (req, res) => {
+  try {
+    await ensureDB()
+    const b = req.body || {}
+    if (!b.vendor_name) return res.status(400).json({ error: 'Vendor name is required.' })
+    const r = await pool.query(
+      `INSERT INTO rate_cards (vendor_name, title, mode, currency, volumetric_divisor,
+                               valid_from, valid_to, notes, source_file_url, is_active, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [b.vendor_name, b.title || '', b.mode || '', b.currency || 'SGD',
+       b.volumetric_divisor || null, b.valid_from || null, b.valid_to || null,
+       b.notes || '', b.source_file_url || '',
+       b.is_active !== undefined ? b.is_active : true, req.user?.email || '']
+    )
+    res.status(201).json({ ...r.rows[0], lines: [] })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.put('/api/rate-cards/:id', async (req, res) => {
+  try {
+    await ensureDB()
+    const allowed = ['vendor_name','title','mode','currency','volumetric_divisor',
+                     'valid_from','valid_to','notes','source_file_url','is_active']
+    const updates = {}
+    allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
+    if (Object.keys(updates).length) {
+      updates.updated_at = new Date()
+      const cols = Object.keys(updates).map((k, i) => `${k}=$${i + 1}`).join(', ')
+      const vals = [...Object.values(updates), req.params.id]
+      await pool.query(`UPDATE rate_cards SET ${cols} WHERE id=$${vals.length}`, vals)
+    }
+    const card = (await pool.query('SELECT * FROM rate_cards WHERE id=$1', [req.params.id])).rows[0]
+    if (!card) return res.status(404).json({ error: 'Rate card not found' })
+    const lines = (await pool.query('SELECT * FROM rate_lines WHERE card_id=$1 ORDER BY sort_order, id', [req.params.id])).rows
+    res.json({ ...card, lines })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.delete('/api/rate-cards/:id', async (req, res) => {
+  try {
+    await ensureDB()
+    await pool.query('DELETE FROM rate_cards WHERE id=$1', [req.params.id]) // lines cascade
+    res.json({ success: true })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// `bands` arrives as an array and must reach JSONB as a string; passing the array
+// straight through makes node-postgres send a Postgres array literal instead.
+function bandsParam(v) {
+  if (v === undefined || v === null || v === '') return null
+  return typeof v === 'string' ? v : JSON.stringify(v)
+}
+
+app.post('/api/rate-cards/:id/lines', async (req, res) => {
+  try {
+    await ensureDB()
+    const b = req.body || {}
+    const r = await pool.query(
+      `INSERT INTO rate_lines (card_id, charge_name, category, basis, rate, min_charge, min_qty,
+                               bands, band_metric, currency, auto_apply, condition_note, remarks, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [req.params.id, b.charge_name || '', b.category || 'optional', b.basis || 'flat',
+       b.rate ?? null, b.min_charge ?? null, b.min_qty ?? null, bandsParam(b.bands),
+       b.band_metric || null, b.currency || null,
+       b.auto_apply !== undefined ? b.auto_apply : false,
+       b.condition_note || '', b.remarks || '', b.sort_order ?? 0]
+    )
+    res.status(201).json(r.rows[0])
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.put('/api/rate-cards/:id/lines/:lid', async (req, res) => {
+  try {
+    await ensureDB()
+    const allowed = ['charge_name','category','basis','rate','min_charge','min_qty',
+                     'bands','band_metric','currency','auto_apply','condition_note','remarks','sort_order']
+    const updates = {}
+    allowed.forEach(f => {
+      if (req.body[f] !== undefined) updates[f] = f === 'bands' ? bandsParam(req.body[f]) : req.body[f]
+    })
+    if (!Object.keys(updates).length) {
+      const cur = (await pool.query('SELECT * FROM rate_lines WHERE id=$1 AND card_id=$2', [req.params.lid, req.params.id])).rows[0]
+      return cur ? res.json(cur) : res.status(404).json({ error: 'Rate line not found' })
+    }
+    const cols = Object.keys(updates).map((k, i) => `${k}=$${i + 1}`).join(', ')
+    const vals = [...Object.values(updates), req.params.lid, req.params.id]
+    const r = await pool.query(
+      `UPDATE rate_lines SET ${cols} WHERE id=$${vals.length - 1} AND card_id=$${vals.length} RETURNING *`, vals)
+    if (!r.rows[0]) return res.status(404).json({ error: 'Rate line not found' })
+    res.json(r.rows[0])
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.delete('/api/rate-cards/:id/lines/:lid', async (req, res) => {
+  try {
+    await ensureDB()
+    await pool.query('DELETE FROM rate_lines WHERE id=$1 AND card_id=$2', [req.params.lid, req.params.id])
+    res.json({ success: true })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// Price a card's lines against a real job. Deliberately server-side: the maths lives in
+// one tested module (rateCalc.js) rather than being reimplemented in the browser, which
+// is how money logic drifts out of sync. `qtys` supplies quantities for the bases that
+// can't be derived from the job (per_hour, per_head, ...), keyed by rate-line id.
+app.post('/api/jobs/:id/rate-preview', async (req, res) => {
+  try {
+    await ensureDB()
+    const { card_id, qtys = {} } = req.body || {}
+    if (!card_id) return res.status(400).json({ error: 'card_id is required.' })
+
+    const job = (await pool.query('SELECT weight, cbm, packages FROM jobs WHERE id=$1', [req.params.id])).rows[0]
+    if (!job) return res.status(404).json({ error: 'Job not found' })
+
+    const card = (await pool.query('SELECT * FROM rate_cards WHERE id=$1', [card_id])).rows[0]
+    if (!card) return res.status(404).json({ error: 'Rate card not found' })
+
+    const lines = (await pool.query(
+      'SELECT * FROM rate_lines WHERE card_id=$1 ORDER BY sort_order, id', [card_id])).rows
+
+    const metrics = deriveMetrics(job, { volumetricDivisor: card.volumetric_divisor })
+    res.json({
+      metrics,
+      currency: card.currency || 'SGD',
+      lines: lines.map(l => ({
+        ...l,
+        ...computeRateAmount(l, metrics, { qty: qtys[l.id] }),
+      })),
+    })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
 })
 

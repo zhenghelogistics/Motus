@@ -101,6 +101,18 @@ export const parsePackingList = (file, text) => {
 export const getMarketingContacts = () => api.get('/marketing-contacts')
 export const deleteMarketingContact = (id) => api.delete(`/marketing-contacts/${id}`)
 
+// Vendor rate cards — reference sheet of negotiated partner rates. Cards come back
+// with their `lines` nested, so the picker needs one request, not one per card.
+export const getRateCards = (params) => api.get('/rate-cards', { params: params || {} })
+export const createRateCard = (data) => api.post('/rate-cards', data)
+export const updateRateCard = (id, data) => api.put(`/rate-cards/${id}`, data)
+export const deleteRateCard = (id) => api.delete(`/rate-cards/${id}`)
+export const addRateLine = (cardId, data) => api.post(`/rate-cards/${cardId}/lines`, data)
+export const updateRateLine = (cardId, lid, data) => api.put(`/rate-cards/${cardId}/lines/${lid}`, data)
+export const deleteRateLine = (cardId, lid) => api.delete(`/rate-cards/${cardId}/lines/${lid}`)
+// Prices a card against a job server-side so the rate maths has a single implementation.
+export const previewRates = (jobId, card_id, qtys) => api.post(`/jobs/${jobId}/rate-preview`, { card_id, qtys })
+
 // If a request comes back unauthorized (expired/invalid session), the token
 // is no longer valid — sign out of Supabase and force a reload back to the
 // login gate rather than letting every subsequent request silently 401.

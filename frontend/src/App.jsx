@@ -3,6 +3,7 @@ import { useState, useEffect, lazy, Suspense } from 'react'
 import {
   LayoutDashboard, Route as RouteIcon, PlusCircle, BarChart3, Calculator, Inbox,
   Sparkles, DollarSign, UserCircle, LogOut, X, ArrowRightLeft, AlertTriangle, Sun, Moon, Check,
+  ReceiptText,
 } from 'lucide-react'
 const ProfileModal = lazy(() => import('./components/ProfileModal'))
 import Dashboard from './pages/Dashboard'
@@ -12,6 +13,7 @@ import EmailIntake from './pages/EmailIntake'
 import CompanyStats from './pages/CompanyStats'
 import QuoteCalculator from './pages/QuoteCalculator'
 import Leads from './pages/Leads'
+import RateCards from './pages/RateCards'
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
@@ -25,6 +27,7 @@ const NAV = [
   { to: '/stats',  icon: BarChart3,       label: 'Company Stats',     exact: false },
   { to: '/quote',  icon: Calculator,      label: 'Quote Calculator',  exact: false },
   { to: '/leads',  icon: Inbox,           label: 'Leads Pipeline',     exact: false },
+  { to: '/rates',  icon: ReceiptText,     label: 'Rate Cards',        exact: false },
 ]
 
 // Default SGD-based rates (approximate; overwritten by the daily Yahoo Finance sync)
@@ -592,6 +595,7 @@ function AppShell() {
             <Route path="/stats"    element={<CompanyStats />} />
             <Route path="/quote"    element={<QuoteCalculator />} />
             <Route path="/leads"    element={<Leads />} />
+            <Route path="/rates"    element={<RateCards />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
           </Routes>
         </div>
