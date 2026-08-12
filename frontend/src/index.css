@@ -752,8 +752,17 @@ select.form-control { cursor: pointer; }
   from { opacity: 0; transform: translateY(14px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+/* fill-mode is `backwards`, NOT `both`, and that matters more than it looks.
+   `both` retains the final keyframe forever, and that keyframe sets `transform:
+   translateY(0)`. Any element carrying a transform becomes the containing block for
+   its `position: fixed` descendants — so every modal overlay rendered inside a page
+   was sizing itself to this wrapper instead of the viewport. Because the wrapper sits
+   inside .main-content (margin-left: sidebar) and is as tall as the page content, the
+   overlay was pushed right by the sidebar width and centred against the full content
+   height, which put tall modals' headers above the top of the screen.
+   `backwards` keeps the entrance animation but leaves no transform behind. */
 .page-enter {
-  animation: page-enter 240ms cubic-bezier(.165, .84, .44, 1) both;
+  animation: page-enter 240ms cubic-bezier(.165, .84, .44, 1) backwards;
 }
 
 /* ─── Accessibility — Reduced Motion ─────────────────────────────────────── */
