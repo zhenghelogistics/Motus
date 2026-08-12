@@ -8,13 +8,15 @@ import {
   addCostLine, updateCostLine, deleteCostLine,
   addBillingLine, updateBillingLine, deleteBillingLine,
   addSplitEntity, updateSplitEntity, deleteSplitEntity, setBillingLineSplits, setCostLineSplits,
-  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates, linkInventoryMovement, voidInventoryMovement, parsePackingList, syncStockLines
+  uploadDocument, deleteDocument, parseInvoice, getStaff, getFxRates, linkInventoryMovement, voidInventoryMovement, parsePackingList, syncStockLines,
+  getRateCards, previewRates
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
 import { autoFillSplit, computeEntityTotals } from '../utils/splitInvoicing'
 import {
   X, ClipboardList, FileText, Ban, ArrowLeft, Download, Truck, Package, Stamp,
-  ChevronDown, ChevronRight, Check, Upload, AlertTriangle, Pencil, RotateCcw, Paperclip, Info
+  ChevronDown, ChevronRight, Check, Upload, AlertTriangle, Pencil, RotateCcw, Paperclip, Info,
+  ReceiptText
 } from 'lucide-react'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
@@ -72,6 +74,7 @@ export default function JobDetail() {
   const [subCertModal, setSubCertModal] = useState(null)
   const [releaseDOModal, setReleaseDOModal] = useState(null)
   const [splitModal, setSplitModal] = useState(null)
+  const [rateCardModal, setRateCardModal] = useState(false)
   const [fxRates, setFxRates] = useState({})
   const [staffList, setStaffList] = useState([])
   const [showPdfCcyMenu, setShowPdfCcyMenu] = useState(false)
@@ -303,6 +306,37 @@ export default function JobDetail() {
   async function addCost() {
     const r = await addCostLine(id, { vendor:'', amount:0, invoice_no:'', invoice_date:'', service:'', remarks:'' })
     setJob(j => ({ ...j, cost_lines: [...j.cost_lines, r.data] }))
+    refreshTotals()
+  }
+
+  // Insert the charges picked off a rate card as ordinary cost lines. They stay fully
+  // editable afterwards — the rate card is a starting point, not a lock.
+  async function addCostLinesFromRateCard(chosen, ccy, vendorName) {
+    // amount is always SGD; amount_local keeps the figure in the rate's own currency.
+    // Rates in a foreign currency go through the same conversion the cost table uses,
+    // and are refused rather than silently mis-booked when no FX rate is available.
+    const rate = ccy === 'SGD' ? 1 : fxRates[ccy]
+    if (ccy !== 'SGD' && !rate) {
+      alert(`Exchange rate for ${ccy} is unavailable, so these rates can't be converted to SGD. Update FX rates and try again.`)
+      throw new Error('missing fx rate')
+    }
+    const created = []
+    for (const l of chosen) {
+      const local = Number(l.amount)
+      const r = await addCostLine(id, {
+        vendor: vendorName || '',
+        service: l.charge_name || '',
+        amount: ccy === 'SGD' ? local : parseFloat((local / rate).toFixed(2)),
+        amount_local: local,
+        currency: ccy,
+        // Keep the working ("480 kg → band 401-500 → 45.00") on the line so the figure
+        // stays auditable months later without reopening the rate card.
+        remarks: [l.workingNote, l.remarks].filter(Boolean).join(' · '),
+        invoice_no: '', invoice_date: null,
+      })
+      created.push(r.data)
+    }
+    setJob(j => ({ ...j, cost_lines: [...(j.cost_lines || []), ...created] }))
     refreshTotals()
   }
   async function saveCost(lid, data) {
@@ -1703,6 +1737,15 @@ export default function JobDetail() {
         />
       )}
 
+      {rateCardModal && (
+        <RateCardPicker
+          jobId={id}
+          jobMode={job.mode}
+          onInsert={(chosen, ccy, vendorName) => addCostLinesFromRateCard(chosen, ccy, vendorName)}
+          onClose={() => setRateCardModal(false)}
+        />
+      )}
+
       {/* Release D/O Modal */}
       {releaseDOModal && (
         <div className="modal-overlay" onClick={() => setReleaseDOModal(null)}>
@@ -1970,6 +2013,9 @@ export default function JobDetail() {
               <input ref={invoiceRef} type="file" accept=".pdf" style={{ display: 'none' }} disabled={job.status === 'Voided'}
                 onChange={e => handleInvoiceUpload(e.target.files[0])} />
             </label>
+            <button className="btn btn-ghost btn-sm" onClick={() => setRateCardModal(true)} disabled={job.status === 'Voided'}>
+              <ReceiptText size={14} /> Rate Card
+            </button>
             <button className="btn btn-outline btn-sm" onClick={addCost} disabled={job.status === 'Voided'}>+ Add Row</button>
           </div>
         </div>
@@ -2882,6 +2928,176 @@ function DOModal({ modal, onClose, onGenerate }) {
           <button className="btn btn-navy" onClick={() => onGenerate(type, fields)}>
             <FileText size={14} /> Generate PDF{type === 'both' ? 's' : ''}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Rate Card Picker ─────────────────────────────────────────────────────────
+// Turns a partner's agreed rates into cost lines. Pricing runs server-side via
+// /api/jobs/:id/rate-preview so the maths has exactly one implementation
+// (api/rateCalc.js) rather than a second copy here that can drift out of sync.
+function RateCardPicker({ jobId, jobMode, onInsert, onClose }) {
+  const [cards, setCards] = useState([])
+  const [cardId, setCardId] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [ticked, setTicked] = useState({})
+  const [qtys, setQtys] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [inserting, setInserting] = useState(false)
+
+  // Only active cards, and default to one matching this job's freight mode — an Air
+  // job should land on the air partner's card without hunting for it.
+  useEffect(() => {
+    getRateCards({ active: 'true' })
+      .then(({ data }) => {
+        const all = Array.isArray(data) ? data : []
+        setCards(all)
+        const preferred = all.find(c => c.mode && jobMode && c.mode === jobMode)
+        setCardId((preferred || all[0])?.id ?? null)
+        if (!all.length) setError('No active rate cards yet — add one on the Rate Cards page.')
+      })
+      .catch(() => setError('Could not load rate cards.'))
+      .finally(() => setLoading(false))
+  }, [jobMode])
+
+  // Re-price when the card or a quantity changes, debounced so typing in a qty box
+  // doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (!cardId) return
+    let cancelled = false
+    const t = setTimeout(() => {
+      previewRates(jobId, cardId, qtys)
+        .then(({ data }) => {
+          if (cancelled) return
+          setPreview(data)
+          // Pre-tick what the vendor always charges; conditional extras stay off
+          // until the coordinator confirms they apply.
+          setTicked(prev => Object.keys(prev).length ? prev
+            : Object.fromEntries(data.lines.filter(l => l.auto_apply && l.amount != null).map(l => [l.id, true])))
+        })
+        .catch(() => { if (!cancelled) setError('Could not price this rate card.') })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [jobId, cardId, qtys])
+
+  const lines = preview?.lines || []
+  const ccy = preview?.currency || 'SGD'
+  const chosen = lines.filter(l => ticked[l.id] && l.amount != null)
+  const total = chosen.reduce((s, l) => s + Number(l.amount || 0), 0)
+
+  async function insert() {
+    setInserting(true)
+    try {
+      // Pass the vendor through so each inserted cost line is attributed to the
+      // partner whose card it came from.
+      await onInsert(chosen, ccy, cards.find(c => c.id === cardId)?.vendor_name || '')
+      onClose()
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Could not add these cost lines.')
+      setInserting(false)
+    }
+  }
+
+  const groups = [
+    ['main', 'Main charges'],
+    ['surcharge', 'Standard surcharges'],
+    ['optional', 'Conditional extras — tick only what applies'],
+  ]
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 style={{ fontSize: 16 }}>Add from Rate Card</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
+        </div>
+        <div className="modal-body">
+          {loading && <p style={{ color: 'var(--text-muted)' }}>Loading rate cards…</p>}
+          {error && <div className="alert alert-error">{error}</div>}
+
+          {!loading && cards.length > 0 && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Rate card</label>
+                <select className="form-control" value={cardId || ''}
+                  onChange={e => { setCardId(Number(e.target.value)); setTicked({}); setQtys({}) }}>
+                  {cards.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.vendor_name}{c.mode ? ` — ${c.mode}` : ''}{c.title ? ` (${c.title})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {preview && (
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: -6 }}>
+                  Priced against this job — {preview.metrics.weight_kg ?? '—'} kg,{' '}
+                  {preview.metrics.cbm ?? '—'} M3, {preview.metrics.packages ?? '—'} pkg
+                  {preview.metrics.chargeable_kg != null && ` · chargeable ${Math.round(preview.metrics.chargeable_kg)} kg`}
+                </p>
+              )}
+
+              {groups.map(([cat, heading]) => {
+                const rows = lines.filter(l => (l.category || 'optional') === cat)
+                if (!rows.length) return null
+                return (
+                  <div key={cat} style={{ marginTop: 14 }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
+                      {heading}
+                    </div>
+                    {rows.map(l => {
+                      const unavailable = l.amount == null
+                      const needsQty = ['per_pallet', 'per_carton', 'per_head', 'per_hour', 'per_unit'].includes(l.basis)
+                      return (
+                        <div key={l.id} style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px',
+                          borderRadius: 8, border: '1px solid var(--border)', marginBottom: 6,
+                          background: ticked[l.id] ? 'var(--blue-light)' : 'transparent',
+                          opacity: unavailable ? 0.65 : 1,
+                        }}>
+                          <input type="checkbox" style={{ marginTop: 3 }}
+                            checked={!!ticked[l.id]} disabled={unavailable}
+                            onChange={e => setTicked(t => ({ ...t, [l.id]: e.target.checked }))} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--heading)' }}>{l.charge_name}</div>
+                            <div style={{ fontSize: 11, color: unavailable ? 'var(--red)' : 'var(--text-muted)' }}>
+                              {unavailable ? l.reason : l.workingNote}
+                            </div>
+                            {l.condition_note && (
+                              <div style={{ fontSize: 11, color: 'var(--amber)' }}>Applies when: {l.condition_note}</div>
+                            )}
+                          </div>
+                          {needsQty && (
+                            <input className="form-control form-control-sm" type="number" min="0"
+                              style={{ width: 68 }} placeholder="qty"
+                              value={qtys[l.id] ?? ''}
+                              onChange={e => setQtys(q => ({ ...q, [l.id]: e.target.value }))} />
+                          )}
+                          <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', minWidth: 88, textAlign: 'right' }}>
+                            {unavailable ? '—' : `${ccy} ${Number(l.amount).toFixed(2)}`}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </>
+          )}
+        </div>
+        <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--heading)' }}>
+            {chosen.length} selected · {ccy} {total.toFixed(2)}
+          </span>
+          <div className="flex gap-2">
+            <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={insert} disabled={inserting || !chosen.length}>
+              {inserting ? 'Adding…' : `Add ${chosen.length} cost line${chosen.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
         </div>
       </div>
     </div>
