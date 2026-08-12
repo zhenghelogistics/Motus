@@ -98,11 +98,12 @@ function LineModal({ line, cardCurrency, onSave, onClose }) {
   const [d, setD] = useState(line)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [savedCount, setSavedCount] = useState(0)
   const set = (k, v) => setD(p => ({ ...p, [k]: v }))
   const isBanded = d.basis === 'banded'
   const needsQty = QTY_BASES.includes(d.basis)
 
-  async function save() {
+  async function save(addAnother) {
     if (!d.charge_name.trim()) { setError('Give the charge a name.'); return }
     if (isBanded && !(Array.isArray(d.bands) && d.bands.length)) { setError('A banded charge needs at least one tier.'); return }
     if (!isBanded && (d.rate === '' || d.rate === null)) { setError('Enter a rate, or 0 if it is quoted on request.'); return }
@@ -119,7 +120,15 @@ function LineModal({ line, cardCurrency, onSave, onClose }) {
         })) : null,
         band_metric: isBanded ? d.band_metric : null,
       })
-      onClose()
+      if (addAnother) {
+        // Cards carry a long tail of similar charges (a dozen zone surcharges in a
+        // row), so keep the category and clear the rest rather than closing.
+        setD({ ...blankLine(), category: d.category, auto_apply: d.auto_apply })
+        setSaving(false)
+        setSavedCount(n => n + 1)
+      } else {
+        onClose()
+      }
     } catch (err) {
       setError(err?.response?.data?.error || 'Could not save this charge.')
       setSaving(false)
@@ -233,11 +242,23 @@ function LineModal({ line, cardCurrency, onSave, onClose }) {
 
           {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
         </div>
-        <div className="modal-footer">
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Save charge'}
-          </button>
+        <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {savedCount > 0 ? `${savedCount} charge${savedCount === 1 ? '' : 's'} added` : ''}
+          </span>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-ghost btn-sm" onClick={onClose}>
+              {savedCount > 0 ? 'Done' : 'Cancel'}
+            </button>
+            {!line.id && (
+              <button className="btn btn-outline btn-sm" onClick={() => save(true)} disabled={saving}>
+                Save &amp; add another
+              </button>
+            )}
+            <button className="btn btn-primary btn-sm" onClick={() => save(false)} disabled={saving}>
+              {saving ? 'Saving…' : 'Save charge'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -268,6 +289,13 @@ function CardModal({ card, onSave, onClose }) {
           <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="modal-body">
+          {!card.id && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+              This step is just the header — who the rates are from and when they apply.
+              You&apos;ll add the actual charges straight after saving. To read them off the
+              vendor&apos;s PDF instead, cancel and use <strong>Import PDF</strong>.
+            </p>
+          )}
           <div className="form-group">
             <label className="form-label">Vendor</label>
             <input className="form-control" value={d.vendor_name} autoFocus
@@ -326,7 +354,7 @@ function CardModal({ card, onSave, onClose }) {
         <div className="modal-footer">
           <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Save card'}
+            {saving ? 'Saving…' : card.id ? 'Save card' : 'Save & add charges'}
           </button>
         </div>
       </div>
@@ -495,12 +523,17 @@ export default function RateCards() {
   useEffect(() => { load() }, [load])
 
   async function saveCard(d) {
-    if (d.id) await updateRateCard(d.id, d)
-    else {
-      const { data } = await createRateCard(d)
-      setExpanded(e => ({ ...e, [data.id]: true }))
+    if (d.id) {
+      await updateRateCard(d.id, d)
+      await load()
+      return
     }
+    const { data } = await createRateCard(d)
+    setExpanded(e => ({ ...e, [data.id]: true }))
     await load()
+    // A card with no charges does nothing, so go straight into adding them rather
+    // than leaving the user on a saved-but-empty card wondering where the rates go.
+    setLineModal({ cardId: data.id, line: blankLine() })
   }
 
   async function removeCard(card) {
@@ -654,7 +687,8 @@ export default function RateCards() {
                 )}
                 {(card.lines || []).length === 0 ? (
                   <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                    No charges on this card yet.
+                    No charges on this card yet — it won&apos;t appear on jobs until you add at
+                    least one. Use <strong>Add charge</strong> below.
                   </p>
                 ) : (
                   <div className="table-wrap">
