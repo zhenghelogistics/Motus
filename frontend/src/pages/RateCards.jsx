@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, Pencil, Trash2, X, ChevronRight, ChevronDown, ReceiptText } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Plus, Pencil, Trash2, X, ChevronRight, ChevronDown, ReceiptText, Upload, AlertTriangle } from 'lucide-react'
 import {
   getRateCards, createRateCard, updateRateCard, deleteRateCard,
-  addRateLine, updateRateLine, deleteRateLine,
+  addRateLine, updateRateLine, deleteRateLine, parseRateCard,
 } from '../api'
 import { SectionHead } from '../components/SectionBox'
 
@@ -334,6 +334,138 @@ function CardModal({ card, onSave, onClose }) {
   )
 }
 
+// ── Import review ─────────────────────────────────────────────────────────────
+// Never save a parsed card straight to the database. Real rate cards contain
+// contradictions (one sampled card states its fuel surcharge twice with two different
+// figures) and placeholders ("$0.00 — please request quotation"), so the extraction is
+// a first draft that a human confirms.
+function ImportReviewModal({ draft, onSave, onClose }) {
+  const [card, setCard] = useState({
+    vendor_name: draft.vendor_name || '', title: draft.title || '',
+    mode: '', currency: draft.currency || 'SGD',
+    valid_from: draft.valid_from || '', notes: draft.notes || '', is_active: true,
+  })
+  const [lines, setLines] = useState((draft.lines || []).map((l, i) => ({ ...l, _key: i, _keep: true })))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const setLine = (k, key, val) => setLines(ls => ls.map(l => l._key === k ? { ...l, [key]: val } : l))
+  const kept = lines.filter(l => l._keep)
+
+  async function save() {
+    if (!card.vendor_name.trim()) { setError('Enter the vendor name.'); return }
+    if (!card.mode) { setError('Pick the freight mode — it decides which jobs offer this card.'); return }
+    setSaving(true); setError('')
+    try {
+      await onSave(card, kept)
+      onClose()
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Could not save the imported card.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 860 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 style={{ fontSize: 16 }}>Review imported rates</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="alert alert-warn" style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span style={{ fontSize: 12 }}>
+              Read these against the PDF before saving. Rate cards often repeat a charge with
+              two different figures, or list a price as &quot;on request&quot; — the extraction
+              cannot tell which is correct.
+            </span>
+          </div>
+
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Vendor</label>
+              <input className="form-control" value={card.vendor_name}
+                onChange={e => setCard(c => ({ ...c, vendor_name: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Freight mode</label>
+              <select className="form-control" value={card.mode}
+                onChange={e => setCard(c => ({ ...c, mode: e.target.value }))}>
+                <option value="">Choose a mode…</option>
+                {MODES.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Card title</label>
+              <input className="form-control" value={card.title}
+                onChange={e => setCard(c => ({ ...c, title: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Currency</label>
+              <select className="form-control" value={card.currency}
+                onChange={e => setCard(c => ({ ...c, currency: e.target.value }))}>
+                {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <SectionHead>{kept.length} of {lines.length} charges will be saved</SectionHead>
+          {lines.map(l => (
+            <div key={l._key} style={{
+              display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px',
+              border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6,
+              opacity: l._keep ? 1 : 0.45,
+            }}>
+              <input type="checkbox" checked={l._keep} style={{ marginTop: 8 }}
+                onChange={e => setLine(l._key, '_keep', e.target.checked)} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <input className="form-control form-control-sm" value={l.charge_name || ''}
+                  onChange={e => setLine(l._key, 'charge_name', e.target.value)} />
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                  {l.basis === 'banded'
+                    ? `${(l.bands || []).length} tiers on ${l.band_metric || 'weight_kg'}`
+                    : BASIS_LABEL[l.basis] || l.basis}
+                  {l.min_charge != null && ` · min ${l.min_charge}`}
+                  {l.min_qty != null && ` · min qty ${l.min_qty}`}
+                  {l.condition_note && ` · ${l.condition_note}`}
+                </div>
+                {l.remarks && (
+                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>{l.remarks}</div>
+                )}
+              </div>
+              <select className="form-control form-control-sm" style={{ width: 120 }}
+                value={l.category || 'optional'}
+                onChange={e => setLine(l._key, 'category', e.target.value)}>
+                {CATEGORIES.map(c => <option key={c.v} value={c.v}>{c.label}</option>)}
+              </select>
+              <input className="form-control form-control-sm" type="number" step="0.0001"
+                style={{ width: 90 }} placeholder={l.basis === 'banded' ? 'tiers' : 'rate'}
+                disabled={l.basis === 'banded'}
+                value={l.rate ?? ''} onChange={e => setLine(l._key, 'rate', e.target.value)} />
+            </div>
+          ))}
+          {lines.length === 0 && (
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              No charges were found in that PDF. You can still add them by hand.
+            </p>
+          )}
+
+          {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary btn-sm" onClick={save} disabled={saving || !kept.length}>
+            {saving ? 'Saving…' : `Save card + ${kept.length} charge${kept.length === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function RateCards() {
   const [cards, setCards] = useState([])
@@ -343,6 +475,9 @@ export default function RateCards() {
   const [expanded, setExpanded] = useState({})
   const [cardModal, setCardModal] = useState(null)
   const [lineModal, setLineModal] = useState(null) // { cardId, line }
+  const [importDraft, setImportDraft] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const fileRef = useRef(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -384,6 +519,50 @@ export default function RateCards() {
     try { await deleteRateLine(cardId, line.id); await load() } catch { alert('Could not delete that charge.') }
   }
 
+  async function handleImport(file) {
+    if (!file) return
+    // Vercel caps a request body at roughly 4.5MB and the PDF is sent whole (extracted
+    // text would lose the column alignment a rate table depends on).
+    if (file.size > 4 * 1024 * 1024) {
+      alert('That PDF is over 4 MB, which is too large to upload. Compress it at ilovepdf.com and try again.')
+      return
+    }
+    setImporting(true)
+    try {
+      const { data } = await parseRateCard(file)
+      setImportDraft(data)
+    } catch (err) {
+      alert('Could not read that rate card: ' + (err?.response?.data?.error || err.message))
+    } finally {
+      setImporting(false)
+      if (fileRef.current) fileRef.current.value = '' // let the same file re-trigger onChange
+    }
+  }
+
+  // Saves the reviewed import as a card plus its charges. The card must exist before its
+  // lines can reference it, so the card insert is awaited first; the lines then go in
+  // together rather than one round trip at a time.
+  async function saveImport(cardData, lines) {
+    const { data: created } = await createRateCard(cardData)
+    const num = v => (v === '' || v === null || v === undefined ? null : Number(v))
+    await Promise.all(lines.map((l, i) => addRateLine(created.id, {
+      charge_name: l.charge_name || '',
+      category: l.category || 'optional',
+      basis: l.basis || 'flat',
+      rate: l.basis === 'banded' ? null : num(l.rate),
+      min_charge: num(l.min_charge),
+      min_qty: num(l.min_qty),
+      bands: l.basis === 'banded' ? (l.bands || []) : null,
+      band_metric: l.basis === 'banded' ? (l.band_metric || 'weight_kg') : null,
+      auto_apply: (l.category || 'optional') !== 'optional',
+      condition_note: l.condition_note || '',
+      remarks: l.remarks || '',
+      sort_order: i,
+    })))
+    setExpanded(e => ({ ...e, [created.id]: true }))
+    await load()
+  }
+
   const q = search.toLowerCase()
   const filtered = cards.filter(c => !q
     || (c.vendor_name || '').toLowerCase().includes(q)
@@ -399,9 +578,18 @@ export default function RateCards() {
           <h1>Rate Cards</h1>
           <p>Negotiated partner rates, used to build job costs without re-keying a PDF</p>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setCardModal(blankCard())}>
-          <Plus size={14} /> New Rate Card
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label className="btn btn-ghost btn-sm" style={{ cursor: importing ? 'wait' : 'pointer' }}>
+            {importing
+              ? <><span className="spinner spinner-dark"></span> Reading…</>
+              : <><Upload size={14} /> Import PDF</>}
+            <input ref={fileRef} type="file" accept=".pdf" style={{ display: 'none' }}
+              disabled={importing} onChange={e => handleImport(e.target.files[0])} />
+          </label>
+          <button className="btn btn-primary btn-sm" onClick={() => setCardModal(blankCard())}>
+            <Plus size={14} /> New Rate Card
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -522,6 +710,9 @@ export default function RateCards() {
         )
       })}
 
+      {importDraft && (
+        <ImportReviewModal draft={importDraft} onSave={saveImport} onClose={() => setImportDraft(null)} />
+      )}
       {cardModal && (
         <CardModal card={cardModal} onSave={saveCard} onClose={() => setCardModal(null)} />
       )}

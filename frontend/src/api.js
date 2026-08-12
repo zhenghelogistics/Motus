@@ -112,6 +112,12 @@ export const updateRateLine = (cardId, lid, data) => api.put(`/rate-cards/${card
 export const deleteRateLine = (cardId, lid) => api.delete(`/rate-cards/${cardId}/lines/${lid}`)
 // Prices a card against a job server-side so the rate maths has a single implementation.
 export const previewRates = (jobId, card_id, qtys) => api.post(`/jobs/${jobId}/rate-preview`, { card_id, qtys })
+// Reads a vendor's rate-card PDF into draft card + line data for review before saving.
+export const parseRateCard = (file) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.post('/parse-rate-card', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
 
 // If a request comes back unauthorized (expired/invalid session), the token
 // is no longer valid — sign out of Supabase and force a reload back to the

@@ -1297,6 +1297,97 @@ Return only the JSON object.`
 })
 
 // ─── PARSE PACKING LIST ─────────────────────────────────────────────────────
+// ─── RATE CARD PDF → structured rates ────────────────────────────────────────
+// Deliberately sends the PDF itself as a document block rather than extracted text.
+// Rate cards are tables, and our text extraction flattens each page into one line
+// (items.map(i => i.str).join(' ')), which destroys the column alignment the whole
+// document depends on. Claude reads the PDF natively and keeps the layout.
+// The result is always reviewed by a human before saving — real cards contain
+// contradictions (one sampled card states its fuel surcharge twice, with two
+// different numbers) and placeholders ("$0.00 please request quotation").
+const RATE_CARD_PROMPT = `You are reading a freight vendor's rate card. Extract every chargeable item into JSON.
+
+Return ONLY this object, no other text:
+{
+  "vendor_name": "the company issuing these rates",
+  "title": "the document's subject line, or null",
+  "currency": "3-letter code, default SGD",
+  "valid_from": "YYYY-MM-DD if the card is dated, else null",
+  "notes": "any overall conditions worth keeping, or null",
+  "lines": [ ... ]
+}
+
+Each element of "lines" must be:
+{
+  "charge_name": "what the charge is called",
+  "category": "main" | "surcharge" | "optional",
+  "basis": "flat" | "banded" | "per_kg" | "per_chargeable_kg" | "per_cbm" | "per_rt" | "per_pallet" | "per_carton" | "per_head" | "per_hour" | "per_unit",
+  "rate": <number, or null when basis is "banded">,
+  "min_charge": <number or null>,
+  "min_qty": <number or null>,
+  "band_metric": "weight_kg" | "packages" | "cbm"   (only when basis is "banded", else null),
+  "bands": [ {"from": <number>, "to": <number or null>, "amount": <number>, "basis": "flat" | "per_kg"} ]  (only when basis is "banded", else null),
+  "condition_note": "when this charge applies, or null",
+  "remarks": "anything else worth keeping, or null"
+}
+
+Rules that matter:
+- "category": the main transport/handling charge is "main"; charges that always apply
+  such as fuel surcharge are "surcharge"; anything conditional (a specific location or
+  zone, dangerous goods, oversized cargo, overtime, extra manpower, cancellation,
+  equipment like a tailgate) is "optional".
+- A WEIGHT OR QUANTITY TABLE is one single line with basis "banded" — NOT one line per
+  row. Put each row in "bands". Bands are inclusive at both ends. The final row is
+  usually open-ended ("1001 & above") — give it "to": null.
+- Watch for a band that changes how it is priced. A table can list flat amounts per
+  band and then switch the top band to a per-unit rate, e.g. "001-50 = $17.00 ...
+  1001 & above = $0.065 per kg". That last band is {"from":1001,"to":null,
+  "amount":0.065,"basis":"per_kg"} while the others are "basis":"flat".
+- "Min $X or $Y per kg" (whichever is greater) is ONE line: basis "per_kg", rate Y,
+  min_charge X. Do not split it into two.
+- "Whichever is greater, weight or volume/M3" means basis "per_rt" (revenue tonne).
+  "Chargeable weight" (volumetric vs gross) means basis "per_chargeable_kg".
+- "per job", "per trip", "per shipment", "per D/O" all mean basis "flat".
+- A minimum number of billable units ("min 3 hours") is "min_qty", not "min_charge".
+- If one line lists two variants at different prices (e.g. small crate $40 / big crate
+  $50), emit two lines with distinct names.
+- Use null for anything not stated. Never invent a number.
+- If the same charge is stated twice with different amounts, emit it once using the
+  first value and say so in "remarks".
+
+If you find no rates at all, return {"vendor_name": null, "lines": []}.`
+
+app.post('/api/parse-rate-card', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-5',
+      max_tokens: 8000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: req.file.buffer.toString('base64') } },
+          { type: 'text', text: RATE_CARD_PROMPT },
+        ],
+      }],
+    })
+    // A rate card can run to dozens of charges; a truncated response would fail to
+    // parse and surface as a confusing 500, so check for it explicitly.
+    if (msg.stop_reason === 'max_tokens') {
+      console.error('[ZHL] POST /api/parse-rate-card: response hit max_tokens')
+      return res.status(422).json({ error: 'This rate card is too long to read in one pass. Try splitting the PDF, or add the charges manually.' })
+    }
+    const content = getResponseText(msg).replace(/```json\s*|\s*```/g, '').trim()
+    const match = content.match(/\{[\s\S]*\}/)
+    if (!match) return res.status(422).json({ error: 'Could not read any rates from that PDF.' })
+    const parsed = JSON.parse(match[0])
+    res.json({ ...parsed, lines: Array.isArray(parsed.lines) ? parsed.lines : [] })
+  } catch (err) {
+    console.error('[ZHL] POST /api/parse-rate-card', err.message)
+    res.status(500).json({ error: 'Rate card parsing failed. Please try again.' })
+  }
+})
+
 app.post('/api/parse-packing-list', upload.single('file'), async (req, res) => {
   const PROMPT = `Extract all line items from this packing list. Return a JSON array only — no other text.
 Each element must have these fields (use null for missing values):

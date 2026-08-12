@@ -702,12 +702,19 @@ select.form-control { cursor: pointer; }
 }
 [data-theme="dark"] .modal-overlay { background: rgba(0,0,0,0.5); }
 
+/* The modal is a flex column so the header and footer stay put and only the body
+   scrolls. This used to rely on `position: sticky` on the header, which silently
+   did nothing: `backdrop-filter` on this element makes it the scroll container AND
+   a new containing block, which breaks sticky positioning for its descendants. On
+   a tall form the header simply scrolled off the top of the screen. */
 .modal {
   background: var(--glass-bg);
   backdrop-filter: blur(16px);
   border-radius: 16px;
   width: 100%; max-width: 680px; max-height: 90vh;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--glass-shadow-hover);
   border: 1px solid var(--glass-border);
   animation: modal-in 240ms cubic-bezier(.165,.84,.44,1) both;
@@ -716,15 +723,16 @@ select.form-control { cursor: pointer; }
   padding: 20px 24px;
   border-bottom: 1px solid var(--border-solid);
   display: flex; align-items: center; justify-content: space-between;
-  position: sticky; top: 0;
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
-  z-index: 1;
+  flex: 0 0 auto;
   border-radius: 16px 16px 0 0;
 }
 .modal-header h2 { font-family: var(--font-heading); font-size: 16px; font-weight: 700; color: var(--heading); }
-.modal-body { padding: 24px; }
-.modal-footer { padding: 16px 24px; border-top: 1px solid var(--border-solid); display: flex; justify-content: flex-end; gap: 10px; }
+.modal-body { padding: 24px; flex: 1 1 auto; overflow-y: auto; }
+.modal-footer {
+  padding: 16px 24px; border-top: 1px solid var(--border-solid);
+  display: flex; justify-content: flex-end; gap: 10px;
+  flex: 0 0 auto;
+}
 
 /* ─── Badge Ping ─────────────────────────────────────────────────────────── */
 @keyframes badge-ping {
