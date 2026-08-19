@@ -11,7 +11,7 @@ const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold']
 const emptyJob = {
   shipper: '', consignee: '',
   customer_name: '', customer_contact_name: '', customer_contact_number: '', customer_email: '',
-  pickup_address: '', pickup_contact_name: '', pickup_contact_number: '',
+  pickup_company: '', pickup_address: '', pickup_contact_name: '', pickup_contact_number: '',
   delivery_address: '', delivery_contact_name: '', delivery_contact_number: '',
   packages: '', dimensions: '', weight: '', cbm: '', commodity: '',
   mode: 'Air Express', agent: '', status: 'New',
@@ -264,6 +264,7 @@ export default function EmailIntake() {
       customer_email: j.customer_email || '',
       customer_contact_name: j.customer_contact_name || '',
       customer_contact_number: j.customer_contact_number || '',
+      pickup_company: j.pickup_company || '',
       pickup_address: j.pickup_address || '',
       pickup_contact_name: j.pickup_contact_name || '',
       pickup_contact_number: j.pickup_contact_number || '',
@@ -566,6 +567,12 @@ export default function EmailIntake() {
           {/* Pickup */}
           <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 10 }}>Pickup</div>
+            <div className="form-group">
+              <label className="form-label">Collect From (company)</label>
+              <input className="form-control" value={form.pickup_company}
+                placeholder="Leave blank if collecting from the shipper"
+                onChange={e => setField('pickup_company', e.target.value)} />
+            </div>
             <div className="form-group">
               <label className="form-label">Address</label>
               <input className="form-control" value={form.pickup_address} onChange={e => setField('pickup_address', e.target.value)} />

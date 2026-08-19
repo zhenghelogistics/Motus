@@ -116,6 +116,10 @@ async function initDB() {
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS zhl_invoice_no TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS salesperson TEXT DEFAULT ''`);
+  // The company a driver collects FROM, which is not always the shipper — cargo is
+  // often staged at a third party (a supplier, a warehouse, a forwarder's dock), and
+  // the Pickup Request Order has to name that place, not the shipper of record.
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pickup_company TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS rate_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
@@ -597,17 +601,17 @@ app.post('/api/jobs', async (req, res) => {
     const f = req.body;
     const result = await pool.query(`
       INSERT INTO jobs (job_number, year, sequence, shipper, consignee, weight, packages,
-        dimensions, cbm, pickup_address, pickup_contact_name, pickup_contact_number,
+        dimensions, cbm, pickup_company, pickup_address, pickup_contact_name, pickup_contact_number,
         delivery_address, delivery_contact_name, delivery_contact_number,
         date_out, date_delivered, agent, mode, status, customer_ref, deadline_date, commodity, notes, created_by, packing_list_items,
         customer_name, customer_contact_name, customer_contact_number, customer_email)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
       RETURNING *
     `, [
       job_number, year, sequence,
       f.shipper||'', f.consignee||'', f.weight||null, f.packages||null,
       f.dimensions||'', f.cbm||null,
-      f.pickup_address||'', f.pickup_contact_name||'', f.pickup_contact_number||'',
+      f.pickup_company||'', f.pickup_address||'', f.pickup_contact_name||'', f.pickup_contact_number||'',
       f.delivery_address||'', f.delivery_contact_name||'', f.delivery_contact_number||'',
       f.date_out||null, f.date_delivered||null,
       f.agent||'', f.mode||'Local Delivery', f.status||'New',
@@ -663,7 +667,7 @@ app.get('/api/jobs/:id', async (req, res) => {
 app.put('/api/jobs/:id', async (req, res) => {
   try {
     const allowed = ['shipper','consignee','weight','packages','dimensions','cbm',
-      'pickup_address','pickup_contact_name','pickup_contact_number',
+      'pickup_company','pickup_address','pickup_contact_name','pickup_contact_number',
       'delivery_address','delivery_contact_name','delivery_contact_number',
       'date_out','date_delivered','eta','agent','mode','status','customer_ref',
       'deadline_date','commodity','notes','gp_override',

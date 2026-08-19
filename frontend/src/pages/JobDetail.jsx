@@ -173,7 +173,7 @@ export default function JobDetail() {
     'shipper', 'consignee', 'mode', 'agent', 'customer_ref', 'status', 'deadline_date', 'commodity',
     'zhl_invoice_no', 'created_by', 'customer_name', 'customer_email', 'customer_contact_name',
     'customer_contact_number', 'weight', 'cbm', 'packages', 'dimensions',
-    'pickup_address', 'pickup_contact_name', 'pickup_contact_number',
+    'pickup_company', 'pickup_address', 'pickup_contact_name', 'pickup_contact_number',
     'delivery_address', 'delivery_contact_name', 'delivery_contact_number',
     'date_out', 'eta', 'date_delivered', 'notes', 'packing_list_items',
   ]
@@ -1162,7 +1162,10 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: y,
       body: [
-        ['Shipper',        { content: job.shipper || '—',               colSpan: 3 }],
+        // Cargo is often staged somewhere that isn't the shipper (a supplier, a
+        // warehouse), so the driver needs the company actually being collected from.
+        // Falls back to the shipper, which is who it is on a straightforward job.
+        ['Collect From',   { content: job.pickup_company || job.shipper || '—', colSpan: 3 }],
         ['Pickup Address', { content: job.pickup_address || '—',        colSpan: 3 }],
         ['Contact Name',   job.pickup_contact_name || '—', 'Contact No.', job.pickup_contact_number || '—'],
       ],
@@ -1179,7 +1182,6 @@ export default function JobDetail() {
     autoTable(doc, {
       startY: y,
       body: [
-        ['Consignee',        { content: job.consignee || '—',            colSpan: 3 }],
         ['Delivery Address', { content: job.delivery_address || '—',     colSpan: 3 }],
         ['Contact Name',     job.delivery_contact_name || '—', 'Contact No.', job.delivery_contact_number || '—'],
       ],
@@ -2257,6 +2259,7 @@ function InfoEdit({ form, setField, staffList = [] }) {
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
         <div className="sub-box">
           <div className="sub-box-label">Pickup</div>
+          <div style={{ marginBottom:10 }}>{inp('pickup_company','Collect From (company)')}</div>
           <div className="form-grid-3" style={{ gap:10 }}>
             {inp('pickup_address','Address')} {inp('pickup_contact_name','Contact Name')} {inp('pickup_contact_number','Contact Number')}
           </div>
