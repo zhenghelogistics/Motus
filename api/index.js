@@ -50,9 +50,43 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 // ─── AUTH MIDDLEWARE ─────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://wwaupgxlzardsrxikuvj.supabase.co'
 
+// Validated sessions, cached in the function instance's memory.
+//
+// Every authenticated request used to make its own outbound HTTPS call to Supabase
+// to ask "is this token still good?" — so opening a page that fires five API calls
+// paid five round-trips to a third-party service before a single row was read. That
+// is the largest single source of latency in the app.
+//
+// Caching the ANSWER is safe in a way that verifying the token ourselves is not: we
+// still rely entirely on Supabase's verdict, we just remember it briefly. The cost
+// is that a session revoked mid-window stays usable until the entry expires, so the
+// window is deliberately short and is also capped by the token's own expiry.
+const AUTH_CACHE_TTL_MS = 60_000
+const AUTH_CACHE_MAX = 500
+const authCache = new Map()
+
+// Read a JWT's own expiry without verifying it. Used ONLY to shorten the cache
+// window, never to decide whether a token is valid — an attacker editing this claim
+// could make us cache for less time, which is harmless.
+function tokenExpiryMs(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString())
+    return payload.exp ? payload.exp * 1000 : null
+  } catch { return null }
+}
+
 async function requireAuth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Unauthorized — no token' })
+
+  const now = Date.now()
+  const hit = authCache.get(token)
+  if (hit && hit.expiresAt > now) {
+    req.user = hit.user
+    return next()
+  }
+  if (hit) authCache.delete(token)
+
   try {
     const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: {
@@ -61,10 +95,20 @@ async function requireAuth(req, res, next) {
       }
     })
     if (!r.ok) return res.status(401).json({ error: 'Unauthorized — invalid or expired session' })
-    req.user = await r.json()
-    if (!req.user.email?.toLowerCase().endsWith('@zhenghe.com.sg')) {
+    const user = await r.json()
+    if (!user.email?.toLowerCase().endsWith('@zhenghe.com.sg')) {
       return res.status(403).json({ error: 'Forbidden — company account required' })
     }
+
+    // Simple size cap so a long-lived warm instance can't grow this without bound.
+    if (authCache.size >= AUTH_CACHE_MAX) authCache.clear()
+    const exp = tokenExpiryMs(token)
+    authCache.set(token, {
+      user,
+      expiresAt: Math.min(now + AUTH_CACHE_TTL_MS, exp ?? Infinity),
+    })
+
+    req.user = user
     next()
   } catch (e) {
     console.error('[ZHL] requireAuth error:', e.message)
@@ -395,9 +439,41 @@ async function initDB() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_cards_lookup ON rate_cards (is_active, mode)`);
 }
 
+// initDB() is ~90 sequential statements. They are all idempotent, but they are also
+// 90 separate round-trips to Postgres, and they run in front of the first request
+// after every cold start — which is exactly when the app already feels slowest.
+//
+// So we fingerprint the DDL and record it in the database. If the fingerprint still
+// matches, the schema is already what this build expects and all 90 statements are
+// skipped in favour of a single SELECT. The fingerprint is derived from the source of
+// initDB itself, so it updates automatically whenever the schema changes — there is
+// no version number for anyone to forget to bump.
+const DDL_FINGERPRINT = require('crypto')
+  .createHash('sha1').update(initDB.toString()).digest('hex')
+
+async function runSchema() {
+  try {
+    const r = await pool.query(`SELECT value FROM schema_meta WHERE key = 'ddl_fingerprint'`)
+    if (r.rows[0]?.value === DDL_FINGERPRINT) return  // already current, nothing to do
+  } catch {
+    // schema_meta doesn't exist yet (first deploy against this database) — fall
+    // through and build everything.
+  }
+
+  await initDB()
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+  await pool.query(
+    `INSERT INTO schema_meta (key, value) VALUES ('ddl_fingerprint', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [DDL_FINGERPRINT]
+  )
+  console.log(`[ZHL] schema applied, fingerprint ${DDL_FINGERPRINT.slice(0, 8)}`)
+}
+
 async function ensureDB() {
   if (_dbReady) return;
-  if (!_dbPromise) _dbPromise = initDB().then(() => { _dbReady = true; });
+  if (!_dbPromise) _dbPromise = runSchema().then(() => { _dbReady = true; });
   await _dbPromise;
 }
 

@@ -6,16 +6,25 @@ import {
   ReceiptText,
 } from 'lucide-react'
 const ProfileModal = lazy(() => import('./components/ProfileModal'))
-import Dashboard from './pages/Dashboard'
-import MovementTracker from './pages/MovementTracker'
-import JobDetail from './pages/JobDetail'
-import EmailIntake from './pages/EmailIntake'
-import CompanyStats from './pages/CompanyStats'
-import QuoteCalculator from './pages/QuoteCalculator'
-import Leads from './pages/Leads'
-import RateCards from './pages/RateCards'
+
+// Pages are loaded on demand rather than all bundled into the first download.
+// Statically importing them meant opening the Dashboard also pulled in jsPDF (used
+// by three pages), xlsx, recharts and every other page's code — a 1.8 MB bundle that
+// had to arrive and parse before anything appeared on screen. Splitting per route
+// means each page's weight is paid only when someone actually visits it.
+//
+// Login and AuthCallback stay eager: they are the very first thing an unauthenticated
+// visitor sees, so lazy-loading them would only add a spinner to the critical path.
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
+const Dashboard       = lazy(() => import('./pages/Dashboard'))
+const MovementTracker = lazy(() => import('./pages/MovementTracker'))
+const JobDetail       = lazy(() => import('./pages/JobDetail'))
+const EmailIntake     = lazy(() => import('./pages/EmailIntake'))
+const CompanyStats    = lazy(() => import('./pages/CompanyStats'))
+const QuoteCalculator = lazy(() => import('./pages/QuoteCalculator'))
+const Leads           = lazy(() => import('./pages/Leads'))
+const RateCards       = lazy(() => import('./pages/RateCards'))
 import { AuthProvider, useAuth } from './lib/AuthContext'
 import { CHANGELOG } from './changelog'
 import { getFxRates, updateFxRates, unlockFxRate, getNewLeadsCount } from './api'
@@ -582,6 +591,11 @@ function AppShell() {
       <main className="main-content">
         <FxReminderBanner updatedAt={fxUpdatedAt} onOpenRates={() => setShowCurrency(true)} />
         <div key={location.pathname} className="page-enter">
+          <Suspense fallback={
+            <div style={{ padding: 60, textAlign: 'center' }}>
+              <span className="spinner spinner-dark" style={{ width: 28, height: 28 }}></span>
+            </div>
+          }>
           <Routes>
             <Route path="/"         element={<Dashboard />} />
             <Route path="/jobs"     element={<MovementTracker />} />
@@ -593,6 +607,7 @@ function AppShell() {
             <Route path="/rates"    element={<RateCards />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
           </Routes>
+          </Suspense>
         </div>
       </main>
       {showCurrency && <CurrencyConverter onClose={() => setShowCurrency(false)} onRatesSaved={rates => { setFxUpdatedAt(new Date().toISOString()) }} />}
