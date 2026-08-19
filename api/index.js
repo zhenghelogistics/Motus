@@ -615,11 +615,19 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
 const dnsp = require('dns').promises
 const net = require('net')
 
-const ATTACH_MAX_BYTES = 4 * 1024 * 1024
+// Deliberately larger than the ~4.5MB cap on the multipart upload routes. That cap is
+// Vercel's limit on an incoming request BODY and applies on every plan — but this path
+// has no incoming body, it fetches the file itself, so the only real constraints are
+// function memory (1GB) and the 30s duration. 25MB comfortably covers scanned packing
+// lists and photos while staying far inside both.
+const ATTACH_MAX_BYTES = 25 * 1024 * 1024
 const ATTACH_MAX_FILES = 10
 const ATTACH_HOP_LIMIT = 4
-const ATTACH_TIMEOUT_MS = 8000
-const ATTACH_TOTAL_BUDGET_MS = 15000
+// Per-file and whole-batch ceilings, sized so a slow or oversized host can never push
+// the webhook near the 30s function limit — a timeout there would look to the sender
+// like a failed submission and risk a duplicate lead.
+const ATTACH_TIMEOUT_MS = 15000
+const ATTACH_TOTAL_BUDGET_MS = 22000
 
 function isPrivateAddress(ip) {
   if (net.isIPv4(ip)) {
