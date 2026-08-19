@@ -615,12 +615,17 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
 const dnsp = require('dns').promises
 const net = require('net')
 
-// Deliberately larger than the ~4.5MB cap on the multipart upload routes. That cap is
-// Vercel's limit on an incoming request BODY and applies on every plan — but this path
-// has no incoming body, it fetches the file itself, so the only real constraints are
-// function memory (1GB) and the 30s duration. 25MB comfortably covers scanned packing
-// lists and photos while staying far inside both.
-const ATTACH_MAX_BYTES = 25 * 1024 * 1024
+// Larger than the ~4.5MB cap on the multipart upload routes, because that cap is
+// Vercel's limit on an incoming request BODY and this path has no incoming body: we
+// fetch the file ourselves, bounded only by function memory (1GB) and the 30s duration.
+//
+// Set to 10MB rather than higher because the binding constraint is not Vercel, it is
+// our Supabase plan: the free tier allows 1GB of storage in TOTAL, shared with job
+// documents. At 10MB a single worst-case attachment costs 1% of everything we have,
+// which is a sane blast radius; at 25MB it would be 2.5%. 10MB still covers scanned
+// packing lists and photos, which is what actually arrives. Raise this if the storage
+// plan is ever upgraded.
+const ATTACH_MAX_BYTES = 10 * 1024 * 1024
 const ATTACH_MAX_FILES = 10
 const ATTACH_HOP_LIMIT = 4
 // Per-file and whole-batch ceilings, sized so a slow or oversized host can never push
