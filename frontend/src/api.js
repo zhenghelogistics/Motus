@@ -98,6 +98,17 @@ export const parsePackingList = (file, text) => {
   return api.post('/parse-packing-list', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
 }
 
+// Paperwork attached to an enquiry — sent by the customer via the website, or added
+// by staff from an email.
+export const getLeadDocuments = (id) => api.get(`/leads/${id}/documents`)
+export const uploadLeadDocument = (id, file, doc_type = 'Other') => {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('doc_type', doc_type)
+  return api.post(`/leads/${id}/documents`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
+export const deleteLeadDocument = (id, did) => api.delete(`/leads/${id}/documents/${did}`)
+
 export const getMarketingContacts = () => api.get('/marketing-contacts')
 export const deleteMarketingContact = (id) => api.delete(`/marketing-contacts/${id}`)
 

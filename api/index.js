@@ -475,6 +475,25 @@ async function initDB() {
       sort_order INTEGER DEFAULT 0
     )
   `);
+  // Files a customer sends with their enquiry — packing lists, commercial invoices,
+  // product photos. Mirrors the `documents` table used by jobs, and the files live in
+  // the same Supabase Storage bucket, so a lead's paperwork can be carried straight
+  // onto the job when the deal is won rather than being re-sent by the customer.
+  // `source` records how it arrived ('website' | 'manual') because a file the customer
+  // attached themselves carries different weight to one a colleague typed in later.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lead_documents (
+      id SERIAL PRIMARY KEY,
+      lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      file_name TEXT NOT NULL,
+      doc_type TEXT DEFAULT 'Other',
+      file_url TEXT NOT NULL,
+      source TEXT DEFAULT 'manual',
+      uploaded_by TEXT DEFAULT '',
+      upload_date TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_documents_lead_id ON lead_documents (lead_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_lines_card_id ON rate_lines (card_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_cards_lookup ON rate_cards (is_active, mode)`);
 }
@@ -583,6 +602,130 @@ async function uploadToSupabaseStorage(buffer, filename, contentType) {
   return `${supabaseUrl}/storage/v1/object/public/Documents/${filename}`;
 }
 
+// ─── REMOTE ATTACHMENT FETCH ─────────────────────────────────────────────────
+// Pulls a customer's attachment from a URL supplied by the public RFQ webhook and
+// re-stores it in our own bucket, so the file survives whatever the sender's storage
+// does later.
+//
+// This fetches a URL chosen by an unauthenticated caller, which is a server-side
+// request forgery risk: without checks, anyone could point it at an address only our
+// server can reach and use us as a proxy into private infrastructure. Hence the
+// scheme check, the resolved-IP check on every redirect hop, and hard caps on size,
+// hops and time.
+const dnsp = require('dns').promises
+const net = require('net')
+
+const ATTACH_MAX_BYTES = 4 * 1024 * 1024
+const ATTACH_MAX_FILES = 10
+const ATTACH_HOP_LIMIT = 4
+const ATTACH_TIMEOUT_MS = 8000
+const ATTACH_TOTAL_BUDGET_MS = 15000
+
+function isPrivateAddress(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number)
+    return a === 0 || a === 10 || a === 127 ||
+           (a === 172 && b >= 16 && b <= 31) ||
+           (a === 192 && b === 168) ||
+           (a === 169 && b === 254) ||
+           a >= 224
+  }
+  const v = ip.toLowerCase().replace(/^\[|\]$/g, '')
+  return v === '::' || v === '::1' || v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe80')
+}
+
+async function assertPublicUrl(u) {
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error(`unsupported scheme ${u.protocol}`)
+  const { address } = await dnsp.lookup(u.hostname)
+  if (isPrivateAddress(address)) throw new Error(`refusing to fetch private address ${address}`)
+}
+
+async function fetchAttachment(rawUrl) {
+  let url
+  try { url = new URL(rawUrl) } catch { throw new Error('not a valid URL') }
+
+  // Follow redirects by hand so every hop is re-checked — following automatically
+  // would let a public URL bounce us to an internal one.
+  let res
+  for (let hop = 0; ; hop++) {
+    if (hop >= ATTACH_HOP_LIMIT) throw new Error('too many redirects')
+    await assertPublicUrl(url)
+    res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(ATTACH_TIMEOUT_MS) })
+    const location = res.headers.get('location')
+    if (res.status >= 300 && res.status < 400 && location) { url = new URL(location, url); continue }
+    break
+  }
+  if (!res.ok) throw new Error(`responded ${res.status}`)
+
+  const declared = Number(res.headers.get('content-length') || 0)
+  if (declared > ATTACH_MAX_BYTES) throw new Error('file is too large')
+
+  // Read incrementally and abort the moment it exceeds the cap, rather than trusting
+  // content-length (which a sender can understate or omit).
+  const reader = res.body.getReader()
+  const chunks = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.length
+    if (total > ATTACH_MAX_BYTES) { await reader.cancel(); throw new Error('file is too large') }
+    chunks.push(value)
+  }
+
+  return {
+    buffer: Buffer.concat(chunks),
+    contentType: (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim(),
+    urlPath: url.pathname,
+  }
+}
+
+// Accepts what the sending site actually gives us rather than demanding one shape:
+// a bare URL string, or an object using any of the obvious key names.
+function normaliseAttachments(body) {
+  const raw = body.attachments || body.files || body.documents || []
+  if (!Array.isArray(raw)) return []
+  return raw.map(a => {
+    if (typeof a === 'string') return { url: a, name: '' }
+    if (a && typeof a === 'object') {
+      return {
+        url: a.url || a.href || a.link || a.file_url || a.downloadUrl || '',
+        name: a.name || a.filename || a.file_name || a.title || '',
+      }
+    }
+    return { url: '', name: '' }
+  }).filter(a => a.url)
+}
+
+// Stores a lead's attachments, best-effort. An attachment that fails must never cost
+// us the lead itself — a lost enquiry is far more expensive than a missing PDF, and
+// the sender is unlikely to retry just because one file 404'd.
+async function ingestLeadAttachments(leadId, items) {
+  const deadline = Date.now() + ATTACH_TOTAL_BUDGET_MS
+  const saved = []
+  for (const item of items.slice(0, ATTACH_MAX_FILES)) {
+    if (Date.now() > deadline) {
+      console.error(`[ZHL] rfq attachments: budget exhausted, ${items.length - saved.length} not fetched for lead ${leadId}`)
+      break
+    }
+    try {
+      const { buffer, contentType, urlPath } = await fetchAttachment(item.url)
+      const original = item.name || decodeURIComponent(urlPath.split('/').pop() || '') || 'attachment'
+      const stored = `lead-${leadId}-${Date.now()}-${Math.round(Math.random() * 1e9)}-${original}`.replace(/\s+/g, '_')
+      const file_url = await uploadToSupabaseStorage(buffer, stored, contentType)
+      const r = await pool.query(
+        `INSERT INTO lead_documents (lead_id, file_name, doc_type, file_url, source)
+         VALUES ($1,$2,'Other',$3,'website') RETURNING *`,
+        [leadId, original, file_url]
+      )
+      saved.push(r.rows[0])
+    } catch (err) {
+      console.error(`[ZHL] rfq attachment failed (${item.url}): ${err.message}`)
+    }
+  }
+  return saved
+}
+
 // Deleting a job (or a single document) used to only remove the database row, leaving
 // the actual uploaded file sitting in Supabase Storage forever — this cleans that up.
 // Best-effort: a failure here is logged but never blocks the DB delete from succeeding,
@@ -646,7 +789,10 @@ app.use(async (req, res, next) => {
 
 // ─── AUTH GUARD (all /api/* except health checks) ───────────────────────────
 app.use('/api', (req, res, next) => {
-  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq' || req.url === '/leads/purge-old' || req.path === '/track' || req.path === '/customer/documents' || req.path === '/customer/invoices') return next()
+  if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq' || req.url === '/leads/purge-old' || req.path === '/track' || req.path === '/customer/documents' || req.path === '/customer/invoices'
+      // the website pushing a file onto a lead it just created — gated by the same
+      // shared secret as /rfq rather than by a staff session
+      || /^\/rfq\/[^/]+\/documents$/.test(req.path)) return next()
   requireAuth(req, res, next)
 })
 
@@ -2281,8 +2427,21 @@ app.post('/api/leads/:id/convert-to-job', async (req, res) => {
     const job = result.rows[0]
     await pool.query('UPDATE leads SET converted_job_id=$1 WHERE id=$2', [job.id, lead.id])
 
-    console.log(`[ZHL] Converted lead ${lead.ref} -> job ${job.job_number}`)
-    res.status(201).json({ success: true, jobId: job.id, job_number: job.job_number })
+    // Carry the customer's paperwork onto the job. The same stored file is referenced
+    // by both rows rather than copied, so the lead keeps its record of what was sent
+    // and nobody has to ask the customer to re-send a packing list they already gave us.
+    const carried = await pool.query(
+      `INSERT INTO documents (job_id, file_name, doc_type, file_url)
+       SELECT $1, file_name, doc_type, file_url FROM lead_documents WHERE lead_id=$2
+       RETURNING id`,
+      [job.id, lead.id]
+    )
+
+    console.log(`[ZHL] Converted lead ${lead.ref} -> job ${job.job_number}${carried.rowCount ? ` (${carried.rowCount} document(s) carried over)` : ''}`)
+    res.status(201).json({
+      success: true, jobId: job.id, job_number: job.job_number,
+      documents_carried: carried.rowCount,
+    })
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
@@ -2490,8 +2649,19 @@ app.post('/api/rfq', async (req, res) => {
     )
 
     const leadId = r.rows[0].id
-    console.log(`[ZHL] RFQ saved: ${ref} | ${companyName || contactPerson || '(anonymous)'} | ${industry}${quoteRef ? ` | quote ${quoteRef}` : ''}`)
-    res.status(201).json({ success: true, leadId, ref })
+
+    // Attachments are fetched after the lead row exists, so a failing file can never
+    // cost us the enquiry itself. Errors are logged and swallowed inside.
+    const attachments = normaliseAttachments(b)
+    const storedDocs = attachments.length ? await ingestLeadAttachments(leadId, attachments) : []
+
+    console.log(`[ZHL] RFQ saved: ${ref} | ${companyName || contactPerson || '(anonymous)'} | ${industry}${quoteRef ? ` | quote ${quoteRef}` : ''}${attachments.length ? ` | ${storedDocs.length}/${attachments.length} attachments` : ''}`)
+    res.status(201).json({
+      success: true, leadId, ref,
+      // Reported back so the sending site can tell whether its files landed.
+      attachments_received: attachments.length,
+      attachments_stored: storedDocs.length,
+    })
   } catch (err) {
     console.error('[ZHL] POST /api/rfq', err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
@@ -2942,6 +3112,87 @@ app.post('/api/jobs/:id/rate-preview', async (req, res) => {
         ...computeRateAmount(l, metrics, { qty: qtys[l.id] }),
       })),
     })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// ─── LEAD DOCUMENTS ──────────────────────────────────────────────────────────
+// Paperwork attached to an enquiry, either sent by the customer through the website
+// or added by staff from an email.
+
+app.get('/api/leads/:id/documents', async (req, res) => {
+  try {
+    await ensureDB()
+    const r = await pool.query(
+      `SELECT id, lead_id, file_name, doc_type, file_url, source, uploaded_by, upload_date
+       FROM lead_documents WHERE lead_id=$1 ORDER BY upload_date, id`,
+      [req.params.id]
+    )
+    res.json(r.rows)
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.post('/api/leads/:id/documents', upload.single('file'), async (req, res) => {
+  try {
+    await ensureDB()
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+    const { doc_type = 'Other' } = req.body
+    const stored = `lead-${req.params.id}-${Date.now()}-${Math.round(Math.random() * 1e9)}-${req.file.originalname}`.replace(/\s+/g, '_')
+    const file_url = await uploadToSupabaseStorage(req.file.buffer, stored, req.file.mimetype)
+    const r = await pool.query(
+      `INSERT INTO lead_documents (lead_id, file_name, doc_type, file_url, source, uploaded_by)
+       VALUES ($1,$2,$3,$4,'manual',$5) RETURNING *`,
+      [req.params.id, req.file.originalname, doc_type, file_url, req.user?.email || '']
+    )
+    res.status(201).json(r.rows[0])
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+app.delete('/api/leads/:id/documents/:did', async (req, res) => {
+  try {
+    await ensureDB()
+    const doc = (await pool.query(
+      'SELECT file_url FROM lead_documents WHERE id=$1 AND lead_id=$2', [req.params.did, req.params.id])).rows[0]
+    await pool.query('DELETE FROM lead_documents WHERE id=$1 AND lead_id=$2', [req.params.did, req.params.id])
+    if (doc) deleteFromSupabaseStorage(doc.file_url).catch(() => {})  // best effort, never blocks
+    res.json({ success: true })
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'Something went wrong. Please try again.' })
+  }
+})
+
+// Direct upload against a lead's public ref, for the website to push a file it holds
+// as bytes rather than as a URL. Exempt from the staff auth guard and gated by the
+// same shared secret as /api/rfq, so it is only usable by the sending site.
+app.post('/api/rfq/:ref/documents', upload.single('file'), async (req, res) => {
+  rfqCors(res)
+  const rfqSecret = process.env.RFQ_SHARED_SECRET
+  if (rfqSecret && req.headers['x-rfq-secret'] !== rfqSecret) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  try {
+    await ensureDB()
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+    const lead = (await pool.query('SELECT id FROM leads WHERE ref=$1', [req.params.ref])).rows[0]
+    if (!lead) return res.status(404).json({ error: 'Unknown lead reference' })
+    const stored = `lead-${lead.id}-${Date.now()}-${Math.round(Math.random() * 1e9)}-${req.file.originalname}`.replace(/\s+/g, '_')
+    const file_url = await uploadToSupabaseStorage(req.file.buffer, stored, req.file.mimetype)
+    const r = await pool.query(
+      `INSERT INTO lead_documents (lead_id, file_name, doc_type, file_url, source)
+       VALUES ($1,$2,'Other',$3,'website') RETURNING *`,
+      [lead.id, req.file.originalname, file_url]
+    )
+    console.log(`[ZHL] RFQ attachment stored for ${req.params.ref}: ${req.file.originalname}`)
+    res.status(201).json(r.rows[0])
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })

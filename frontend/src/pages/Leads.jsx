@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, Circle, Mail, X, ArrowRight, Check, AlertTriangle, Sparkles, Inbox, ClipboardList } from 'lucide-react'
-import { getLeads, createLead, updateLead, deleteLead, getLeadStats, claimLead, generateEmail, convertLeadToJob, getMarketingContacts, deleteMarketingContact } from '../api'
+import { ChevronDown, Circle, Mail, X, ArrowRight, Check, AlertTriangle, Sparkles, Inbox, ClipboardList, Paperclip, Upload, Trash2 } from 'lucide-react'
+import { getLeads, createLead, updateLead, deleteLead, getLeadStats, claimLead, generateEmail, convertLeadToJob, getMarketingContacts, deleteMarketingContact,
+  getLeadDocuments, uploadLeadDocument, deleteLeadDocument } from '../api'
 import { SectionHead, SectionBox } from '../components/SectionBox'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -244,6 +245,100 @@ function TagButton({ label, active, onClick }) {
 }
 
 // ── Lead Modal ────────────────────────────────────────────────────────────────
+
+// Paperwork attached to an enquiry. Files sent through the website arrive on their
+// own; this is where staff see them, and where they add anything that came in by
+// email instead. Whatever is here follows the lead onto the job when it is won.
+function LeadDocuments({ leadId }) {
+  const [docs, setDocs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const fileRef = useRef(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getLeadDocuments(leadId)
+      .then(({ data }) => { if (!cancelled) setDocs(Array.isArray(data) ? data : []) })
+      .catch(() => { if (!cancelled) setError('Could not load attachments.') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [leadId])
+
+  async function add(file) {
+    if (!file) return
+    // Vercel rejects a request body over roughly 4.5MB before it ever reaches us, so
+    // catch it here where we can say something useful instead of failing obscurely.
+    if (file.size > 4 * 1024 * 1024) {
+      setError(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 4 MB. Compress it at ilovepdf.com and try again.`)
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+    setBusy(true); setError('')
+    try {
+      const { data } = await uploadLeadDocument(leadId, file)
+      setDocs(d => [...d, data])
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Upload failed. Please try again.')
+    } finally {
+      setBusy(false)
+      if (fileRef.current) fileRef.current.value = ''  // let the same file re-trigger onChange
+    }
+  }
+
+  async function remove(doc) {
+    if (!window.confirm(`Remove "${doc.file_name}"?`)) return
+    try {
+      await deleteLeadDocument(leadId, doc.id)
+      setDocs(d => d.filter(x => x.id !== doc.id))
+    } catch { setError('Could not remove that file.') }
+  }
+
+  return (
+    <SectionBox>
+      <SectionHead>Attachments{docs.length ? ` (${docs.length})` : ''}</SectionHead>
+
+      {loading && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>}
+      {error && <div className="alert alert-error" style={{ marginBottom: 8, fontSize: 12 }}>{error}</div>}
+
+      {!loading && docs.length === 0 && (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+          Nothing attached yet. Files the customer sends through the website appear here
+          automatically — or add one they emailed you.
+        </p>
+      )}
+
+      {docs.map(d => (
+        <div key={d.id} style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
+          border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6, background: 'var(--surface)',
+        }}>
+          <Paperclip size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+          <a href={d.file_url} target="_blank" rel="noopener noreferrer"
+            style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: 'var(--link)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {d.file_name}
+          </a>
+          {/* worth distinguishing: a file the customer sent themselves carries more
+              weight than one a colleague added from memory */}
+          <span style={{
+            fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.4px',
+            padding: '2px 6px', borderRadius: 4, flexShrink: 0,
+            background: d.source === 'website' ? 'var(--blue-light)' : 'var(--sub-box-bg)',
+            color: d.source === 'website' ? 'var(--blue)' : 'var(--text-muted)',
+          }}>{d.source === 'website' ? 'from customer' : 'added by us'}</span>
+          <button className="btn btn-ghost btn-xs" style={{ color: 'var(--red)', flexShrink: 0 }}
+            onClick={() => remove(d)} title="Remove"><Trash2 size={12} /></button>
+        </div>
+      ))}
+
+      <label className="btn btn-outline btn-sm" style={{ cursor: busy ? 'wait' : 'pointer', marginTop: 4 }}>
+        {busy ? <><span className="spinner spinner-dark"></span> Uploading…</> : <><Upload size={13} /> Attach a file</>}
+        <input ref={fileRef} type="file" style={{ display: 'none' }} disabled={busy}
+          onChange={e => add(e.target.files[0])} />
+      </label>
+    </SectionBox>
+  )
+}
 
 function LeadModal({ lead, onClose, onSave, onClaim }) {
   const navigate = useNavigate()
@@ -638,6 +733,9 @@ function LeadModal({ lead, onClose, onSave, onClaim }) {
                 </div>
               </SectionBox>
             )}
+
+            {/* Only for saved leads — a lead has to exist before a file can hang off it. */}
+            {!isNew && <LeadDocuments leadId={lead.id} />}
 
             {fieldRow('Notes',
               <textarea {...inp} rows={4} value={form.notes} onChange={e => set('notes', e.target.value)}
