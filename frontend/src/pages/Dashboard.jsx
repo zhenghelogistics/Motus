@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { AlertTriangle, ArrowRight } from 'lucide-react'
 import { getDashboard, getJobs } from '../api'
+import { parseLocalDate } from '../utils/format'
 
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtGP = (n) => n == null ? '—' : `${Number(n).toFixed(1)}%`
@@ -28,16 +29,6 @@ function CountUp({ value, format, duration = 900 }) {
   }, [value, duration])
   if (format) return format(display)
   return Math.round(display)
-}
-
-// Parse a 'YYYY-MM-DD' date-only string as a *local* midnight Date, matching
-// how `today` below is constructed. `new Date(dateString)` parses date-only
-// strings as UTC midnight, which shifts the comparison by the local UTC
-// offset (e.g. in Singapore, UTC+8) and can misclassify a job due yesterday
-// as "due today".
-function parseLocalDate(dateString) {
-  const [year, month, day] = dateString.split('-').map(Number)
-  return new Date(year, month - 1, day)
 }
 
 function deadlineClass(date) {

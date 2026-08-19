@@ -19,6 +19,7 @@ import AuthCallback from './pages/AuthCallback'
 import { AuthProvider, useAuth } from './lib/AuthContext'
 import { CHANGELOG } from './changelog'
 import { getFxRates, updateFxRates, unlockFxRate, getNewLeadsCount } from './api'
+import { nameFromEmail } from './utils/format'
 
 const NAV = [
   { to: '/',       icon: LayoutDashboard, label: 'Dashboard',         exact: true },
@@ -94,12 +95,6 @@ function WhatsNewModal({ onClose }) {
       </div>
     </div>
   )
-}
-
-function nameFromEmail(email) {
-  if (!email) return ''
-  const prefix = email.split('@')[0]
-  return prefix.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ')
 }
 
 function toInverse(fwd) {

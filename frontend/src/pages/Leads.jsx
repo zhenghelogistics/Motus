@@ -221,7 +221,7 @@ function StatusDropdown({ lead, onChange }) {
 
 function StatCard({ label, value, sub }) {
   return (
-    <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', flex: 1, minWidth: 160 }}>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', flex: 1, minWidth: 160 }}>
       <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 900, color: 'var(--heading)' }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
@@ -1043,7 +1043,7 @@ function PipelineCard({ lead, onClick }) {
 
   return (
     <div onClick={onClick} style={{
-      background: 'var(--card-bg)', border: '1px solid var(--border)',
+      background: 'var(--surface)', border: '1px solid var(--border)',
       borderRadius: 10, padding: '12px 14px', cursor: 'pointer', transition: 'box-shadow 0.15s, border-color 0.15s',
     }}
     onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.10)'; e.currentTarget.style.borderColor = 'var(--blue)' }}

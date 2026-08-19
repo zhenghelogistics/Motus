@@ -5,22 +5,13 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { ChevronUp, ChevronDown, Download, FileText, ClipboardList, ArrowRight } from 'lucide-react'
 import { getJobs } from '../api'
+import { parseLocalDate } from '../utils/format'
 
 const MODES = ['', 'Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
 const STATUSES = ['', 'New', 'In Progress', 'Completed', 'On Hold', 'Voided']
 
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtGP = (n) => n == null || isNaN(n) ? '—' : `${Number(n).toFixed(1)}%`
-
-// Parse a 'YYYY-MM-DD' date-only string as a *local* midnight Date, matching
-// how `today` below is constructed. `new Date(dateString)` parses date-only
-// strings as UTC midnight, which shifts the comparison by the local UTC
-// offset (e.g. in Singapore, UTC+8) and can misclassify a job due yesterday
-// as "due today".
-function parseLocalDate(dateString) {
-  const [year, month, day] = dateString.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
 
 function deadlineInfo(date) {
   if (!date) return { label: '—', cls: '' }
@@ -87,6 +78,7 @@ const blue = [0, 110, 255]
 export default function MovementTracker() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterMode, setFilterMode] = useState('')
@@ -127,10 +119,15 @@ export default function MovementTracker() {
       .then(r => {
         if (requestIdRef.current !== requestId) return // stale response, ignore
         setJobs(r.data)
+        setError('')
         setLoading(false)
       })
-      .catch(() => {
+      .catch(err => {
         if (requestIdRef.current !== requestId) return
+        // Without this the list just renders empty, so a dropped connection looks
+        // identical to "no jobs match your filters". Every other list page in the
+        // app surfaces its load failure.
+        setError(err?.response?.data?.error || 'Could not load jobs. Check your connection and try again.')
         setLoading(false)
       })
   }
@@ -401,6 +398,8 @@ export default function MovementTracker() {
       <div className="table-wrap">
         {loading
           ? <div style={{ padding: 40, textAlign: 'center' }}><span className="spinner spinner-dark" style={{width:28,height:28}}></span></div>
+          : error
+          ? <div className="alert alert-error" style={{ margin: 16 }}>{error}</div>
           : jobs.length === 0
             ? <div className="empty-state"><div className="empty-state-icon"><ClipboardList size={36} style={{ color: 'var(--text-muted)' }} /></div><h3>No jobs found</h3><p>Create a new job to get started.</p></div>
             : <table className="spreadsheet">

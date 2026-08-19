@@ -4,6 +4,7 @@ import { X, ArrowRight, Paperclip, Package, Zap, Copy, Check, Upload } from 'luc
 import { parseEmail, parseEmailFile, parseDO, parsePackingList, createJob, getJobs, getCustomers } from '../api'
 import { useAuth } from '../lib/AuthContext'
 import DimensionBoxes from '../components/DimensionBoxes'
+import { nameFromEmail } from '../utils/format'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
 const STATUSES = ['New', 'In Progress', 'Completed', 'On Hold']
@@ -17,12 +18,6 @@ const emptyJob = {
   mode: 'Air Express', agent: '', status: 'New',
   customer_ref: '', deadline_date: '', notes: '',
   billing_lines: []
-}
-
-function nameFromEmail(email) {
-  if (!email) return ''
-  const prefix = email.split('@')[0]
-  return prefix.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ')
 }
 
 export default function EmailIntake() {

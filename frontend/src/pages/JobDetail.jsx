@@ -18,6 +18,7 @@ import {
   ChevronDown, ChevronRight, Check, Upload, AlertTriangle, Pencil, RotateCcw, Paperclip, Info,
   ReceiptText
 } from 'lucide-react'
+import { nameFromEmail } from '../utils/format'
 
 const MODES = ['Air Express', 'Air Freight', 'LCL Express', 'LCL', 'Local Delivery', 'Local Clearance & Delivery', 'Sea FCL', 'Sea LCL', 'Warehousing']
 const CURRENCIES = [
@@ -45,12 +46,6 @@ function deadlineClass(date) {
   if (diff < 0) return 'deadline-past'
   if (diff <= 3) return 'deadline-soon'
   return 'deadline-ok'
-}
-
-function nameFromEmail(email) {
-  if (!email) return ''
-  const prefix = email.split('@')[0]
-  return prefix.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ')
 }
 
 export default function JobDetail() {
@@ -454,7 +449,7 @@ export default function JobDetail() {
       if (job.inventory_movement_id && voidLinkedInventory) {
         try { await voidInventoryMovement(id) } catch (e) {
           const msg = e?.response?.data?.error || e.message
-          console.error('[Nexus] Inventory void failed:', msg)
+          console.error('[Motus] Inventory void failed:', msg)
           alert(`Inventory void failed: ${msg}\n\nThe job was voided but the linked Inventory movement was NOT voided — the two systems are now out of sync. Please void movement #${job.inventory_movement_id} manually in Inventory.`)
         }
       }
@@ -2624,7 +2619,7 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                 <tr>
                   <td></td>
                   <td colSpan={6} style={{ padding: '4px 8px 14px' }}>
-                    <div style={{ background: 'var(--bg-subtle, #f7f9fc)', border: '1px solid var(--border-solid)', borderRadius: 6, padding: '10px 14px' }}>
+                    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border-solid)', borderRadius: 6, padding: '10px 14px' }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--heading)', marginBottom: 4 }}>BILLING</div>
                       {entityBillingLines.length ? entityBillingLines.map(l => (
                         <div key={l.id} className="flex-between" style={{ fontSize: 12, padding: '2px 0' }}>
