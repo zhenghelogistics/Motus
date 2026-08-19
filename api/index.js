@@ -34,6 +34,35 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+// ─── REQUEST TIMING ──────────────────────────────────────────────────────────
+// Answers "why did that feel slow?" with a number instead of a guess. Each request
+// logs one line splitting its time into auth / database / everything else, so a slow
+// page can be traced to the actual culprit from Vercel's function logs.
+//
+// AsyncLocalStorage is what makes this possible: pool.query is a single shared
+// object, so there is no other way to attribute a query to the request that fired it.
+const { AsyncLocalStorage } = require('async_hooks');
+const reqCtx = new AsyncLocalStorage();
+
+// Whether this specific function instance has served anything yet. A cold start pays
+// for module load, the first DB connection and (on a schema change) the DDL, so it is
+// worth knowing which timings are cold — they are the ones users notice.
+let _servedARequest = false;
+
+// Wrap pool.query so every query is counted and timed against the current request.
+const _poolQuery = pool.query.bind(pool);
+pool.query = function (...args) {
+  const ctx = reqCtx.getStore();
+  if (!ctx) return _poolQuery(...args);           // startup/cron work, outside a request
+  const t0 = process.hrtime.bigint();
+  ctx.dbCount++;
+  const out = _poolQuery(...args);
+  if (out && typeof out.then === 'function') {
+    return out.finally(() => { ctx.dbMs += Number(process.hrtime.bigint() - t0) / 1e6; });
+  }
+  return out;                                      // callback style, not used here
+};
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // claude-sonnet-5 runs adaptive thinking by default, so content[0] may be a
@@ -80,9 +109,18 @@ async function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Unauthorized — no token' })
 
   const now = Date.now()
+  const timing = reqCtx.getStore()
+  const authStart = process.hrtime.bigint()
+  const recordAuth = (source) => {
+    if (!timing) return
+    timing.authMs += Number(process.hrtime.bigint() - authStart) / 1e6
+    timing.authSource = source
+  }
+
   const hit = authCache.get(token)
   if (hit && hit.expiresAt > now) {
     req.user = hit.user
+    recordAuth('cached')
     return next()
   }
   if (hit) authCache.delete(token)
@@ -94,7 +132,7 @@ async function requireAuth(req, res, next) {
         'apikey': process.env.SUPABASE_SERVICE_KEY
       }
     })
-    if (!r.ok) return res.status(401).json({ error: 'Unauthorized — invalid or expired session' })
+    if (!r.ok) { recordAuth('remote'); return res.status(401).json({ error: 'Unauthorized — invalid or expired session' }) }
     const user = await r.json()
     if (!user.email?.toLowerCase().endsWith('@zhenghe.com.sg')) {
       return res.status(403).json({ error: 'Forbidden — company account required' })
@@ -109,8 +147,10 @@ async function requireAuth(req, res, next) {
     })
 
     req.user = user
+    recordAuth('remote')
     next()
   } catch (e) {
+    recordAuth('remote-failed')
     console.error('[ZHL] requireAuth error:', e.message)
     res.status(401).json({ error: 'Unauthorized' })
   }
@@ -578,8 +618,22 @@ app.use((req, res, next) => {
     const qs = new URLSearchParams(rest).toString();
     req.url = '/api/' + slug + (qs ? '?' + qs : '');
   }
-  console.log(`[ZHL] ${req.method} ${req.url}`);
-  next();
+  const ctx = { t0: process.hrtime.bigint(), dbMs: 0, dbCount: 0, authMs: 0, authSource: null };
+  const wasCold = !_servedARequest;
+  _servedARequest = true;
+
+  res.on('finish', () => {
+    const total = Number(process.hrtime.bigint() - ctx.t0) / 1e6;
+    const other = total - ctx.dbMs - ctx.authMs;
+    const ms = n => `${n.toFixed(0)}ms`;
+    console.log(
+      `[ZHL:timing] ${req.method} ${req.path} ${res.statusCode} ` +
+      `total=${ms(total)} auth=${ms(ctx.authMs)}${ctx.authSource ? `(${ctx.authSource})` : ''} ` +
+      `db=${ms(ctx.dbMs)}/${ctx.dbCount}q other=${ms(other)}${wasCold ? ' COLD' : ''}`
+    );
+  });
+
+  reqCtx.run(ctx, next);
 });
 
 app.use(async (req, res, next) => {

@@ -8,15 +8,31 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Supabase reports the session several times during a normal page load
+    // (getSession resolves, then onAuthStateChange fires INITIAL_SESSION, and again
+    // on any token refresh). Each report is a fresh object, so calling setUser every
+    // time handed every `useEffect(..., [user])` in the app a new identity and made
+    // it re-run — the dashboard was firing the same fx-rates and leads-count requests
+    // three times per load. Only replace the object when it's genuinely a different
+    // person signing in or out.
+    //
+    // Safe to hold onto the old object across a token refresh: the access token lives
+    // on the session, not on user, and api.js reads it from supabase.auth.getSession()
+    // at request time rather than from here.
+    const apply = (session) => {
+      const next = session?.user ?? null
+      setUser(prev => (prev?.id === next?.id ? prev : next))
+    }
+
     // Check if there's already a session when the app loads
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
+      apply(session)
       setLoading(false)
     })
 
     // Listen for login / logout events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
+      apply(session)
     })
 
     return () => subscription.unsubscribe()
