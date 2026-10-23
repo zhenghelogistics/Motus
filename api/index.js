@@ -9,6 +9,7 @@ const { extractCargoLines } = require('./cargoLines');
 const { deriveMetrics, computeRateAmount } = require('./rateCalc');
 const { deriveLeadMetrics, deriveReengagementList } = require('./monthlyReport');
 const { periodWindow, deriveMovementMetrics, deriveTrend, compareBreakdown, compareMargins } = require('./movementReport');
+const { parseTokens: parseMcpTokens, identifyToken: identifyMcpToken, handleRpc: handleMcpRpc } = require('./mcp');
 const app = express();
 
 // Return NUMERIC/DECIMAL (type OID 1700) as a JS number instead of a string.
@@ -812,7 +813,9 @@ app.use('/api', (req, res, next) => {
   if (req.url === '/health' || req.url === '/dbtest' || req.url === '/fx-rates/sync' || req.url === '/rfq' || req.url === '/leads/purge-old' || req.path === '/track' || req.path === '/customer/documents' || req.path === '/customer/invoices'
       // the website pushing a file onto a lead it just created — gated by the same
       // shared secret as /rfq rather than by a staff session
-      || /^\/rfq\/[^/]+\/documents$/.test(req.path)) return next()
+      || /^\/rfq\/[^/]+\/documents$/.test(req.path)
+      // the MCP endpoint — carries its own bearer token, not a Supabase session
+      || req.path === '/mcp') return next()
   requireAuth(req, res, next)
 })
 
@@ -3579,6 +3582,299 @@ app.delete('/api/marketing-contacts/:id', async (req, res) => {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
     res.status(500).json({ error: 'Something went wrong. Please try again.' })
   }
+})
+
+// ─── MCP SERVER ──────────────────────────────────────────────────────────────
+// Lets Claude read Motus directly: ask "how did sea freight do last quarter" and get an
+// answer from live data instead of from a deck someone exported last week.
+//
+// The protocol envelope and the tool catalogue live in ./mcp.js so they can be unit
+// tested without a database. What follows is only the implementations — the SQL — plus
+// the HTTP route that joins the two.
+//
+// Read-only on purpose; see the note at the top of mcp.js.
+
+// Tool results are read into a model's context window, so a search returns a summary
+// rather than SELECT *. The full row is a get_job away when it is actually needed.
+const mcpJobSummary = r => ({
+  job_id: r.id,
+  job_number: r.job_number,
+  customer: r.customer_name || r.shipper || '',
+  shipper: r.shipper || '',
+  consignee: r.consignee || '',
+  mode: r.mode || '',
+  status: r.status || '',
+  agent: r.agent || '',
+  handled_by: r.created_by || '',
+  date_out: r.date_out,
+  date_delivered: r.date_delivered,
+  deadline_date: r.deadline_date,
+  revenue_sgd: Number(r.sale_sgd) || 0,
+  cost_sgd: Number(r.cost_sgd) || 0,
+  profit_sgd: Number(r.profit_sgd) || 0,
+  gp_percent: Number(r.gp_percent) || 0,
+})
+
+const mcpLimit = (v, fallback = 25) => Math.min(Math.max(parseInt(v, 10) || fallback, 1), 100)
+
+const MCP_IMPLS = {
+  async search_jobs(args) {
+    const where = ['1=1']
+    const p = []
+    if (args.query) {
+      const s = `%${args.query}%`
+      p.push(s, s, s, s, s)
+      const n = p.length
+      where.push(`(j.job_number ILIKE $${n - 4} OR j.shipper ILIKE $${n - 3} OR j.consignee ILIKE $${n - 2} OR j.customer_ref ILIKE $${n - 1} OR j.agent ILIKE $${n})`)
+    }
+    if (args.customer) {
+      p.push(`%${args.customer}%`)
+      where.push(`(COALESCE(NULLIF(j.customer_name,''), j.shipper) ILIKE $${p.length})`)
+    }
+    if (args.status) { p.push(args.status); where.push(`j.status = $${p.length}`) }
+    if (args.mode)   { p.push(args.mode);   where.push(`UPPER(TRIM(j.mode)) = UPPER(TRIM($${p.length}))`) }
+
+    const r = await pool.query(`
+      SELECT j.id, j.job_number, j.customer_name, j.shipper, j.consignee, j.mode, j.status,
+             j.agent, j.created_by, j.date_out, j.date_delivered, j.deadline_date,
+             ROUND(COALESCE(b.total,0)::numeric, 2) AS sale_sgd,
+             ROUND(COALESCE(c.total,0)::numeric, 2) AS cost_sgd,
+             ROUND((COALESCE(b.total,0) - COALESCE(c.total,0))::numeric, 2) AS profit_sgd,
+             CASE WHEN COALESCE(b.total,0) > 0
+                  THEN ROUND(((COALESCE(b.total,0) - COALESCE(c.total,0)) / b.total * 100)::numeric, 1)
+                  ELSE 0 END AS gp_percent
+      FROM jobs j
+      LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+      LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+      WHERE ${where.join(' AND ')}
+      ORDER BY j.id DESC
+      LIMIT ${mcpLimit(args.limit)}
+    `, p)
+
+    return { count: r.rows.length, jobs: r.rows.map(mcpJobSummary) }
+  },
+
+  async get_job(args) {
+    const byNumber = args.job_number && String(args.job_number).trim()
+    const byId = parseInt(args.job_id, 10)
+    if (!byNumber && !Number.isInteger(byId)) throw new Error('Give either job_number or job_id.')
+
+    const found = byNumber
+      ? await pool.query('SELECT * FROM jobs WHERE job_number ILIKE $1', [byNumber])
+      : await pool.query('SELECT * FROM jobs WHERE id = $1', [byId])
+    if (!found.rows.length) throw new Error(`No job found for ${byNumber || byId}.`)
+
+    const job = found.rows[0]
+    const [costRes, billingRes, entitiesRes, billingSplitsRes, costSplitsRes, docsRes] = await Promise.all([
+      pool.query('SELECT * FROM cost_lines WHERE job_id=$1 ORDER BY id', [job.id]),
+      pool.query('SELECT * FROM billing_lines WHERE job_id=$1 ORDER BY id', [job.id]),
+      pool.query('SELECT * FROM split_entities WHERE job_id=$1 ORDER BY sort_order, id', [job.id]),
+      pool.query('SELECT * FROM billing_line_splits WHERE job_id=$1', [job.id]),
+      pool.query('SELECT * FROM cost_line_splits WHERE job_id=$1', [job.id]),
+      pool.query('SELECT file_name, doc_type, upload_date FROM documents WHERE job_id=$1 ORDER BY upload_date DESC', [job.id]),
+    ])
+
+    const enriched = await enrichJob(job)
+    return {
+      ...enriched,
+      cost_lines: costRes.rows.map(c => ({
+        ...c,
+        splits: costSplitsRes.rows.filter(s => s.cost_line_id === c.id),
+      })),
+      billing_lines: billingRes.rows.map(b => ({
+        ...b,
+        total: parseFloat(((b.rate || 0) * (b.qty || 1)).toFixed(2)),
+        splits: billingSplitsRes.rows.filter(s => s.billing_line_id === b.id),
+      })),
+      split_entities: entitiesRes.rows,
+      // File names only. The storage URLs are of no use to a model and there is no
+      // reason to scatter direct download links through a chat transcript.
+      documents: docsRes.rows,
+    }
+  },
+
+  async search_leads(args) {
+    const where = [args.include_archived ? '1=1' : '(is_archived IS NULL OR is_archived = FALSE)']
+    const p = []
+    if (args.query) {
+      const s = `%${args.query}%`
+      p.push(s, s, s, s, s, s, s)
+      const n = p.length
+      where.push(`(customer_name ILIKE $${n - 6} OR customer_email ILIKE $${n - 5} OR contact_person ILIKE $${n - 4} OR ref ILIKE $${n - 3} OR origin ILIKE $${n - 2} OR destination ILIKE $${n - 1} OR commodity_name ILIKE $${n})`)
+    }
+    if (args.status) { p.push(args.status); where.push(`status = $${p.length}`) }
+    if (args.stage)  { p.push(args.stage);  where.push(`stage = $${p.length}`) }
+
+    const r = await pool.query(`
+      SELECT id, ref, customer_name, customer_email, contact_person, phone_number,
+             origin, destination, service_type, load_type, commodity_name,
+             quoted_price, status, stage, lead_score, source, claimed_by, claimed_at,
+             lost_reason, next_follow_up, created_at, won_at, is_archived, converted_job_id
+      FROM leads
+      WHERE ${where.join(' AND ')}
+      ORDER BY created_at DESC
+      LIMIT ${mcpLimit(args.limit)}
+    `, p)
+
+    return { count: r.rows.length, leads: r.rows }
+  },
+
+  movement_report: (args) => buildMovementReport(args.period),
+  pipeline_report: (args) => buildMonthlyReport(args.month),
+
+  async company_stats(args) {
+    const y = parseInt(args.year, 10) || new Date().getFullYear()
+    const m = args.month ? parseInt(args.month, 10) : null
+    if (m !== null && (!Number.isInteger(m) || m < 1 || m > 12)) throw new Error('month must be a number from 1 to 12.')
+    const start = m ? new Date(y, m - 1, 1) : new Date(y, 0, 1)
+    const end   = m ? new Date(y, m, 1)     : new Date(y + 1, 0, 1)
+
+    const p = [start, end]
+    const where = ['j.created_at >= $1 AND j.created_at < $2']
+    if (args.company && args.company !== '__all__') {
+      // Exact match, matching the app's own behaviour: a substring match here would
+      // fold "New ACME Holdings" into a report the user asked about "ACME" for.
+      p.push(args.company)
+      where.push(`(COALESCE(NULLIF(j.customer_name,''), j.shipper) ILIKE $${p.length})`)
+    }
+    if (args.mode && args.mode !== '__all__') {
+      p.push(args.mode)
+      where.push(`UPPER(TRIM(j.mode)) = UPPER(TRIM($${p.length}))`)
+    }
+    const baseWhere = `WHERE ${where.join(' AND ')}`
+
+    const [summary, byMode, trend] = await Promise.all([
+      pool.query(`
+        SELECT COUNT(j.id) AS jobs, COALESCE(SUM(j.packages),0) AS packages,
+               COALESCE(SUM(j.weight),0) AS weight, COALESCE(SUM(j.cbm),0) AS cbm,
+               COALESCE(SUM(b.total),0) AS revenue, COALESCE(SUM(c.total),0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        ${baseWhere}`, p),
+      pool.query(`
+        SELECT COALESCE(NULLIF(UPPER(TRIM(j.mode)),''),'UNSPECIFIED') AS mode, COUNT(*) AS jobs,
+               COALESCE(SUM(b.total),0) AS revenue, COALESCE(SUM(c.total),0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        ${baseWhere} GROUP BY 1 ORDER BY revenue DESC`, p),
+      pool.query(`
+        SELECT TO_CHAR(j.created_at, 'YYYY-MM') AS month, COUNT(*) AS jobs,
+               COALESCE(SUM(b.total),0) AS revenue, COALESCE(SUM(c.total),0) AS cost
+        FROM jobs j
+        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        ${baseWhere} GROUP BY 1 ORDER BY 1`, p),
+    ])
+
+    const money = row => {
+      const revenue = Number(row.revenue) || 0
+      const cost = Number(row.cost) || 0
+      return {
+        revenue: Math.round(revenue * 100) / 100,
+        cost: Math.round(cost * 100) / 100,
+        profit: Math.round((revenue - cost) * 100) / 100,
+        gp_percent: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : 0,
+      }
+    }
+    const s = summary.rows[0] || {}
+
+    return {
+      company: args.company && args.company !== '__all__' ? args.company : 'All customers',
+      period: m ? `${y}-${String(m).padStart(2, '0')}` : String(y),
+      currency: 'SGD',
+      jobs: Number(s.jobs) || 0,
+      packages: Number(s.packages) || 0,
+      weight_kg: Number(s.weight) || 0,
+      cbm: Number(s.cbm) || 0,
+      ...money(s),
+      by_mode: byMode.rows.map(r => ({ mode: r.mode, jobs: Number(r.jobs) || 0, ...money(r) })),
+      by_month: trend.rows.map(r => ({ month: r.month, jobs: Number(r.jobs) || 0, ...money(r) })),
+    }
+  },
+
+  async list_companies() {
+    const [companies, modes] = await Promise.all([
+      pool.query(`
+        SELECT COALESCE(NULLIF(TRIM(customer_name),''), NULLIF(TRIM(shipper),'')) AS name, COUNT(*) AS jobs
+        FROM jobs
+        WHERE COALESCE(NULLIF(TRIM(customer_name),''), NULLIF(TRIM(shipper),'')) IS NOT NULL
+        GROUP BY 1 ORDER BY jobs DESC, name`),
+      pool.query(`SELECT DISTINCT UPPER(TRIM(mode)) AS mode FROM jobs WHERE COALESCE(TRIM(mode),'') <> '' ORDER BY 1`),
+    ])
+    return {
+      companies: companies.rows.filter(r => r.name).map(r => ({ name: r.name, jobs: Number(r.jobs) || 0 })),
+      modes: modes.rows.map(r => r.mode),
+    }
+  },
+
+  async list_rate_cards(args) {
+    const where = []
+    const p = []
+    if (args.vendor) { p.push(`%${args.vendor}%`); where.push(`vendor_name ILIKE $${p.length}`) }
+    if (args.mode)   { p.push(args.mode);          where.push(`(mode = $${p.length} OR COALESCE(mode,'') = '')`) }
+    if (args.active_only !== false) where.push('is_active = TRUE')
+
+    const cards = (await pool.query(
+      `SELECT * FROM rate_cards ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY vendor_name, id`,
+      p
+    )).rows
+    if (!cards.length) return { count: 0, cards: [] }
+
+    const lines = (await pool.query(
+      'SELECT * FROM rate_lines WHERE card_id = ANY($1::int[]) ORDER BY sort_order, id',
+      [cards.map(c => c.id)]
+    )).rows
+    return {
+      count: cards.length,
+      cards: cards.map(c => ({ ...c, lines: lines.filter(l => l.card_id === c.id) })),
+    }
+  },
+}
+
+// The transport. Streamable HTTP in its simplest valid form: one POST, one JSON reply,
+// no sessions and no SSE stream. Everything a tool does finishes in a single round trip,
+// so there is nothing for a long-lived stream to carry.
+app.post('/api/mcp', async (req, res) => {
+  const tokens = parseMcpTokens(process.env.MCP_TOKENS)
+  if (!tokens.length) {
+    // Absent configuration means "off", not "open". Same stance as the customer portal.
+    return res.status(503).json({ error: 'The Motus MCP server is not configured.' })
+  }
+
+  const caller = identifyMcpToken(req.headers.authorization, tokens)
+  if (!caller) {
+    res.setHeader('WWW-Authenticate', 'Bearer realm="Motus MCP"')
+    return res.status(401).json({ error: 'Unauthorized.' })
+  }
+
+  try {
+    await ensureDB()
+    const payload = req.body
+    const batch = Array.isArray(payload) ? payload : [payload]
+    const replies = []
+    for (const message of batch) {
+      if (message && message.method === 'tools/call') {
+        console.log(`[ZHL:mcp] ${caller} -> ${message.params && message.params.name}`)
+      }
+      const reply = await handleMcpRpc(message, MCP_IMPLS)
+      if (reply) replies.push(reply)
+    }
+    // Nothing to say: the batch was all notifications. 202 is what the spec asks for.
+    if (!replies.length) return res.status(202).end()
+    res.json(Array.isArray(payload) ? replies : replies[0])
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Internal error' } })
+  }
+})
+
+// GET would open a server-to-client event stream and DELETE would end a session. We do
+// neither, and the spec's answer for that is 405 rather than silence.
+app.all('/api/mcp', (req, res) => {
+  res.setHeader('Allow', 'POST')
+  res.status(405).json({ error: 'The Motus MCP endpoint accepts POST only.' })
 })
 
 module.exports = app;
