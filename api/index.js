@@ -8,7 +8,7 @@ const { mapLeadToJobFields } = require('./leadConversion');
 const { extractCargoLines } = require('./cargoLines');
 const { deriveMetrics, computeRateAmount } = require('./rateCalc');
 const { deriveLeadMetrics, deriveReengagementList } = require('./monthlyReport');
-const { periodWindow, deriveMovementMetrics, deriveTrend, compareBreakdown, compareMargins } = require('./movementReport');
+const { periodWindow, deriveMovementMetrics, deriveTrend, compareBreakdown, compareMargins, REPORT_CURRENCY } = require('./movementReport');
 const { parseTokens: parseMcpTokens, identifyToken: identifyMcpToken, handleRpc: handleMcpRpc } = require('./mcpServer');
 const oauth = require('./oauthServer');
 const app = express();
@@ -3256,6 +3256,7 @@ async function buildMonthlyReport(monthParam) {
   return {
     month: label,
     generated_at: new Date().toISOString(),
+    currency: REPORT_CURRENCY,
     leads: metrics,
     previous: {
       received: prev.counts.received,

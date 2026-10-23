@@ -9,6 +9,11 @@
 
 const DAY = 1000 * 60 * 60 * 24
 
+// Job money is converted to SGD before it reaches these functions, so the whole report
+// is in one currency. Defined once and exported so the pipeline report says the same
+// thing rather than hardcoding its own copy.
+const REPORT_CURRENCY = 'SGD'
+
 const num = (v) => {
   if (v === null || v === undefined || v === '') return 0
   const n = typeof v === 'number' ? v : parseFloat(v)
@@ -125,6 +130,11 @@ function deriveMovementMetrics(jobs = []) {
   const topShare = sale > 0 && byCustomer.length ? pct1(byCustomer[0].value, sale) : 0
 
   return {
+    // Stated rather than assumed. Every figure below is SGD: job totals are already
+    // converted at the stored FX rate before they reach here. Without this field a
+    // reader has to guess, and a report that goes to leadership should never make
+    // anyone guess what unit the money is in.
+    currency: REPORT_CURRENCY,
     volume: {
       jobs: live.length,
       completed: completed.length,
@@ -279,6 +289,7 @@ function compareMargins(currentModes = [], previousModes = [], { minValue = 500 
 }
 
 module.exports = {
+  REPORT_CURRENCY,
   periodWindow, deriveMovementMetrics, deriveTrend, asDay, rank,
   compareBreakdown, compareMargins,
 }

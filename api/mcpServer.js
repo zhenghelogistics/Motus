@@ -80,7 +80,7 @@ const TOOLS = [
   {
     name: 'movement_report',
     description:
-      'The performance report for a month, quarter or year: jobs moved, tonnage and volume, revenue, cost, gross profit, on-time delivery rate, breakdowns by transport mode and by customer, and a like-for-like comparison against the preceding period showing which customers and service lines moved. This is the single best tool for "how did we do" questions. All figures are computed in the database, so treat them as authoritative and do not recalculate them.',
+      'The performance report for a month, quarter or year: jobs moved, tonnage and volume, revenue, cost, gross profit, on-time delivery rate, breakdowns by transport mode and by customer, and a like-for-like comparison against the preceding period showing which customers and service lines moved. This is the single best tool for "how did we do" questions. Money is in the currency named by the result\'s `currency` field. All figures are computed in the database, so treat them as authoritative and do not recalculate them.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -92,7 +92,7 @@ const TOOLS = [
   {
     name: 'pipeline_report',
     description:
-      'The monthly business-development report: enquiries received, won, lost and still open, win rate, value won, response times, per-salesperson performance, and the reasons recorded for losses. Covers what might come in. For what the business actually moved and earned, use movement_report instead.',
+      'The monthly business-development report: enquiries received, won, lost and still open, win rate, value won, response times, per-salesperson performance, and the reasons recorded for losses. Money is in the currency named by the result\'s `currency` field. Covers what might come in. For what the business actually moved and earned, use movement_report instead.',
     inputSchema: {
       type: 'object',
       properties: {

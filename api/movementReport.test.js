@@ -1,6 +1,14 @@
 const test = require('node:test')
 const assert = require('node:assert')
-const { periodWindow, deriveMovementMetrics, deriveTrend, asDay } = require('./movementReport')
+const { periodWindow, deriveMovementMetrics, deriveTrend, asDay, REPORT_CURRENCY } = require('./movementReport')
+
+// The report went to a reader that had to write "the tool doesn't state the currency,
+// so I've assumed SGD". It guessed right, but a money report presented to leadership
+// should never leave that to a guess.
+test('the report states its currency rather than leaving it to be inferred', () => {
+  assert.equal(REPORT_CURRENCY, 'SGD')
+  assert.equal(deriveMovementMetrics([]).currency, 'SGD')
+})
 
 // A representative month of movements. Sale/cost arrive pre-summed from the query.
 const JOBS = [
