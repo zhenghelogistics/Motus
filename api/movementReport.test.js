@@ -75,12 +75,88 @@ test('reports profit and margin off live jobs only', () => {
   const m = deriveMovementMetrics(JOBS)
   assert.strictEqual(m.money.cost, 11200)
   assert.strictEqual(m.money.profit, 9800)
-  assert.strictEqual(m.money.gpPercent, 46.7)
+  // 46.7% is what the raw sums give, but ZHL-003 carries S$5,000 of revenue with no
+  // supplier cost entered yet, so that figure is flattered. The headline is the margin
+  // on jobs where both sides are known: 4,800 / 16,000.
+  assert.strictEqual(m.money.gpPercentAll, 46.7)
+  assert.strictEqual(m.money.gpPercent, 30)
+  assert.strictEqual(m.money.settledJobs, 3)
 })
 
 test('average job value ignores voided work', () => {
   const m = deriveMovementMetrics(JOBS)
   assert.strictEqual(m.money.avgJobValue, 5250) // 21000 / 4
+})
+
+// ── pricing state ─────────────────────────────────────────────────────────────
+// A Motus job is a workspace: salespeople open one when the enquiry lands and fill it
+// in over the following days. So the month always contains a mix of finished facts and
+// work still being negotiated, and the report has to tell them apart.
+
+// Deliberately separate from JOBS so these cases do not disturb the totals the other
+// tests assert against.
+const MIXED = [
+  { job_number:'A', status:'Completed',   mode:'Air',  sale:1000, cost:600 },  // settled
+  { job_number:'B', status:'Completed',   mode:'Air',  sale:2000, cost:1000 }, // settled
+  { job_number:'C', status:'In Progress', mode:'Air',  sale:4000, cost:0 },    // billed, not costed
+  { job_number:'D', status:'In Progress', mode:'Sea',  sale:0,    cost:300 },  // cost in, nothing billed
+  { job_number:'E', status:'In Progress', mode:'Sea',  sale:0,    cost:0 },    // being negotiated
+  { job_number:'F', status:'New',         mode:'Sea',  sale:0,    cost:0 },    // being negotiated
+  { job_number:'G', status:'Completed',   mode:'Sea',  sale:0,    cost:0 },    // shipped, never billed
+]
+
+test('classifies every job by how far through pricing it is', () => {
+  const p = deriveMovementMetrics(MIXED).pipeline
+  assert.strictEqual(p.settled, 2)
+  assert.strictEqual(p.uncosted, 1)
+  assert.strictEqual(p.unbilled, 1)
+  assert.strictEqual(p.beingPriced, 2, 'E and F only; G is completed, so it is not in negotiation')
+})
+
+test('a job still being negotiated is not reported as a data fault', () => {
+  const m = deriveMovementMetrics(MIXED)
+  // E and F have nothing on them, and that is normal. Only G, which is finished with
+  // nothing billed, is an actual problem.
+  assert.strictEqual(m.risk.completedUnbilled, 1)
+  assert.strictEqual(m.risk.missingCosting, 1, 'C alone: revenue recorded, cost not')
+})
+
+test('the headline margin excludes jobs that are only half entered', () => {
+  const m = deriveMovementMetrics(MIXED)
+  // Raw: sale 7000, cost 1900, profit 5100 -> 72.9%, flattered by C's uncosted 4,000.
+  assert.strictEqual(m.money.gpPercentAll, 72.9)
+  // Settled: A and B only. sale 3000, cost 1600, profit 1400 -> 46.7%.
+  assert.strictEqual(m.money.gpPercent, 46.7)
+  assert.strictEqual(m.pipeline.settledSale, 3000)
+  assert.strictEqual(m.pipeline.settledProfit, 1400)
+})
+
+test('averages are taken over jobs that carry a figure, not over every job', () => {
+  const m = deriveMovementMetrics(MIXED)
+  // 4 of the 7 have a figure. Dividing 7,000 by all 7 would report 1,000 and describe
+  // nobody; the jobs that have actually been priced average 1,750.
+  assert.strictEqual(m.money.pricedJobs, 4)
+  assert.strictEqual(m.money.avgJobValue, 1750)
+})
+
+test('a month where nothing has been costed yet reports no margin rather than a fake one', () => {
+  const m = deriveMovementMetrics([
+    { job_number:'X', status:'New', sale:5000, cost:0 },
+    { job_number:'Y', status:'New', sale:3000, cost:0 },
+  ])
+  assert.strictEqual(m.money.gpPercent, 0, 'nothing is settled, so there is no honest margin to quote')
+  assert.strictEqual(m.money.gpPercentAll, 100, 'the raw figure would claim a 100% margin')
+  assert.strictEqual(m.money.settledJobs, 0)
+  assert.strictEqual(m.risk.missingCosting, 2)
+})
+
+test('voided jobs stay out of the pricing counts', () => {
+  const m = deriveMovementMetrics([
+    ...MIXED,
+    { job_number:'V', status:'Voided', sale:99999, cost:11111 },
+  ])
+  assert.strictEqual(m.pipeline.settled, 2, 'the voided job is not a settled job')
+  assert.strictEqual(m.money.gpPercent, 46.7, 'and it does not move the headline margin')
 })
 
 // ── delivery performance ──────────────────────────────────────────────────────

@@ -80,7 +80,7 @@ const TOOLS = [
   {
     name: 'movement_report',
     description:
-      'The performance report for a month, quarter or year: jobs moved, tonnage and volume, revenue, cost, gross profit, on-time delivery rate, breakdowns by transport mode and by customer, and a like-for-like comparison against the preceding period showing which customers and service lines moved. This is the single best tool for "how did we do" questions. Money is in the currency named by the result\'s `currency` field. All figures are computed in the database, so treat them as authoritative and do not recalculate them.',
+      'The performance report for a month, quarter or year: jobs moved, tonnage and volume, revenue, cost, gross profit, on-time delivery rate, breakdowns by transport mode and by customer, and a like-for-like comparison against the preceding period showing which customers and service lines moved. This is the single best tool for "how did we do" questions. Money is in the currency named by the result\'s `currency` field. All figures are computed in the database, so treat them as authoritative and do not recalculate them. Note that a Motus job is a live workspace rather than a finished record: staff open one when the enquiry arrives and fill it in while they negotiate, so part of any recent period is still being priced. The `pipeline` object says how many jobs are settled, uncosted, unbilled or still being priced; jobs still being priced are normal work in progress and must not be described as missing data or as something anyone forgot. `money.gpPercent` is the margin on settled jobs and is the one to quote; `money.gpPercentAll` is the same sum including part-entered jobs.',
     inputSchema: {
       type: 'object',
       properties: {

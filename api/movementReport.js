@@ -122,9 +122,35 @@ function deriveMovementMetrics(jobs = []) {
     .map(j => (asDay(j.date_delivered) - asDay(j.date_out)) / DAY)
     .filter(d => d >= 0)
 
+  // ─── PRICING STATE ─────────────────────────────────────────────────────────────
+  // A Motus job is a workspace, not a ledger entry. Salespeople open one when the
+  // enquiry lands and fill it in as the week goes on, so at any moment some of the
+  // month's jobs are finished facts and others are someone still negotiating. Averaging
+  // those together describes nobody: October 2026 reported an average job value of $705
+  // when its completed jobs averaged $1,508 and three jobs mid-negotiation sat at zero.
+  //
+  // Classified from the figures rather than from status, because status is hand-
+  // maintained too and lags what has actually been agreed.
+  const hasSale = j => num(j.sale) > 0
+  const hasCost = j => num(j.cost) > 0
+  const settled  = live.filter(j => hasSale(j) && hasCost(j))
+  const uncosted = live.filter(j => hasSale(j) && !hasCost(j))
+  const unbilled = live.filter(j => !hasSale(j) && hasCost(j))
+  const priced   = live.filter(j => hasSale(j) || hasCost(j))
+
+  // The same empty job means opposite things depending on where it sits. Not yet
+  // completed and unpriced is ordinary work in progress and no cause for alarm;
+  // completed with nothing billed is work that shipped and was never invoiced.
+  const completedUnbilled = live.filter(j => j.status === 'Completed' && !hasSale(j))
+  const beingPriced = live.filter(j => !hasSale(j) && !hasCost(j) && j.status !== 'Completed')
+
+  const settledSale = settled.reduce((s, j) => s + num(j.sale), 0)
+  const settledCost = settled.reduce((s, j) => s + num(j.cost), 0)
+  const settledProfit = settledSale - settledCost
+
   // Jobs carrying revenue but no recorded cost. Every one of these overstates profit
   // until somebody enters the supplier invoice, so it is a number worth surfacing.
-  const missingCosting = live.filter(j => num(j.sale) > 0 && num(j.cost) === 0)
+  const missingCosting = uncosted
 
   const byCustomer = rank(live, j => j.customer_name || j.shipper, j => j.sale, { limit: 8 })
   const topShare = sale > 0 && byCustomer.length ? pct1(byCustomer[0].value, sale) : 0
@@ -145,12 +171,35 @@ function deriveMovementMetrics(jobs = []) {
       packages: live.reduce((s, j) => s + num(j.packages), 0),
     },
     money: {
+      // Totals stay as they are: these are facts about money actually recorded.
       sale: round2(sale),
       cost: round2(cost),
       profit: round2(profit),
-      gpPercent: sale > 0 ? Math.round((profit / sale) * 1000) / 10 : 0,
-      avgJobValue: live.length ? round2(sale / live.length) : 0,
-      avgJobProfit: live.length ? round2(profit / live.length) : 0,
+      // The headline margin is the one that cannot be flattered. A job whose selling
+      // price has been entered but whose supplier invoice has not yet arrived reads as
+      // 100% margin, and letting it into the headline makes the month look better than
+      // it was. gpPercentAll is the same calculation over every recorded figure, kept
+      // alongside so the two can be compared and the gap explained.
+      gpPercent: settledSale > 0 ? Math.round((settledProfit / settledSale) * 1000) / 10 : 0,
+      gpPercentAll: sale > 0 ? Math.round((profit / sale) * 1000) / 10 : 0,
+      settledJobs: settled.length,
+      // Averaged over jobs carrying a figure at all. Dividing by every job in the period
+      // lets work that has not been priced yet drag the average toward zero.
+      avgJobValue: priced.length ? round2(sale / priced.length) : 0,
+      avgJobProfit: priced.length ? round2(profit / priced.length) : 0,
+      pricedJobs: priced.length,
+    },
+    // Where the month's jobs sit in the pricing journey. This is reporting, not a fault
+    // list: a job with nothing on it yet is usually someone mid-negotiation, and saying
+    // so plainly stops the commentary calling ordinary work a data-quality problem.
+    pipeline: {
+      settled: settled.length,
+      uncosted: uncosted.length,
+      unbilled: unbilled.length,
+      beingPriced: beingPriced.length,
+      settledSale: round2(settledSale),
+      settledCost: round2(settledCost),
+      settledProfit: round2(settledProfit),
     },
     delivery: {
       judged: judgeable.length,
@@ -168,6 +217,10 @@ function deriveMovementMetrics(jobs = []) {
       topCustomerName: byCustomer[0]?.key || null,
       missingCosting: missingCosting.length,
       missingCostingValue: round2(missingCosting.reduce((s, j) => s + num(j.sale), 0)),
+      // Finished work with nothing billed against it. Unlike a job still being priced,
+      // this one has shipped: the revenue was earned and simply never recorded, so it
+      // belongs here rather than in the pipeline counts.
+      completedUnbilled: completedUnbilled.length,
     },
     byMode: rank(live, j => j.mode, j => j.sale, { limit: 9 }).map(m => {
       const rows = live.filter(j => (j.mode || 'Unspecified') === m.key)

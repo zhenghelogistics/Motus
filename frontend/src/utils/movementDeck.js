@@ -92,6 +92,18 @@ export async function buildMovementDeck(report, narrative, logoDataUrl) {
     kpi.addText(narrative.findings.map(f => ({ text: f, options: { bullet: true, breakLine: true } })),
       { x: 0.5, y: 3.2, w: 9, h: 1.7, fontSize: 11.5, color: INK, lineSpacing: 20, fontFace: 'Inter' })
   }
+  // Salespeople use a job as a live workspace, so some of the period's jobs are still
+  // being priced when the deck is built. The margin above is taken on the ones where
+  // both sides are known; say so on the slide rather than letting someone in the room
+  // divide gross profit by revenue, get a different number, and lose confidence in it.
+  const pipe = report.pipeline
+  if (pipe && mny.settledJobs < v.jobs) {
+    const parts = [`Margin is on the ${mny.settledJobs} of ${v.jobs} jobs with both revenue and cost recorded`]
+    if (mny.gpPercentAll !== mny.gpPercent) parts.push(`across all recorded figures it reads ${pctStr(mny.gpPercentAll)}`)
+    if (pipe.beingPriced > 0) parts.push(`${pipe.beingPriced} still being priced`)
+    kpi.addText(`${parts.join('. ')}.`,
+      { x: 0.5, y: 4.95, w: 9, h: 0.3, fontSize: 10, italic: true, color: HARBOR, fontFace: 'Inter' })
+  }
   kpi.addNotes(notes.overview || '')
 
   // ── 3. Volume moved ─────────────────────────────────────────────────────────
@@ -230,14 +242,26 @@ export async function buildMovementDeck(report, narrative, logoDataUrl) {
 
   // ── 9. Watch list ───────────────────────────────────────────────────────────
   const risks = narrative?.risks || []
-  if (risks.length || report.risk.missingCosting > 0) {
+  if (risks.length || report.risk.missingCosting > 0 || report.risk.completedUnbilled > 0) {
     const rk = slide('Watch list', 'Things worth a decision')
     let y = 1.45
+    // Finished work with nothing billed against it. Deliberately listed above the
+    // uncosted warning: a job still being priced corrects itself when the invoice
+    // arrives, whereas this one has already shipped and nobody is chasing it.
+    if (report.risk.completedUnbilled > 0) {
+      const n = report.risk.completedUnbilled
+      rk.addShape(pptx.ShapeType.roundRect, { x: 0.5, y, w: 9, h: 0.85, fill: { color: 'FDF3E7' }, line: { color: AMBER, width: 1 }, rectRadius: 0.08 })
+      rk.addText(`${n} completed job${n === 1 ? '' : 's'} with nothing billed`,
+        { x: 0.75, y: y + 0.1, w: 8.5, h: 0.32, fontSize: 12.5, bold: true, color: AMBER, fontFace: 'Inter' })
+      rk.addText('The work has shipped, so this is revenue earned and not yet recorded.',
+        { x: 0.75, y: y + 0.44, w: 8.5, h: 0.3, fontSize: 10.5, color: HARBOR, fontFace: 'Inter' })
+      y += 1.05
+    }
     if (report.risk.missingCosting > 0) {
       rk.addShape(pptx.ShapeType.roundRect, { x: 0.5, y, w: 9, h: 0.85, fill: { color: 'FDF3E7' }, line: { color: AMBER, width: 1 }, rectRadius: 0.08 })
       rk.addText(`${report.risk.missingCosting} job${report.risk.missingCosting === 1 ? '' : 's'} carrying ${money(report.risk.missingCostingValue)} of revenue with no supplier cost recorded`,
         { x: 0.75, y: y + 0.1, w: 8.5, h: 0.32, fontSize: 12.5, bold: true, color: AMBER, fontFace: 'Inter' })
-      rk.addText('Margin on this slide is overstated until those invoices are entered.',
+      rk.addText('Held out of the headline margin until those invoices are entered, so the figure is not flattered.',
         { x: 0.75, y: y + 0.44, w: 8.5, h: 0.3, fontSize: 10.5, color: HARBOR, fontFace: 'Inter' })
       y += 1.05
     }

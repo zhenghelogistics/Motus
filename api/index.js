@@ -3506,7 +3506,10 @@ What makes a finding worth including:
 
 Also:
 - Prefer one sharp observation to three obvious ones. If there are only two things genuinely worth saying, return two.
-- risk.missingCosting counts jobs carrying revenue with no supplier cost recorded. Those overstate margin until the invoice is entered, so treat a high number as a data-quality caveat on the margin figures, not as real profit.
+- A job in Motus is a live workspace, not a finished record. Salespeople open one when the enquiry arrives and fill it in over the following days while they negotiate, so at any moment part of the period is still being priced. pipeline.beingPriced counts those. They are NORMAL work in progress. Never describe them as missing data, an error, or something anyone forgot to do.
+- money.gpPercent is the margin on pipeline.settled jobs, where both revenue and cost are known. money.gpPercentAll is the same sum over every recorded figure. Quote gpPercent. If the two differ by more than about two points, say why in one clause, naming pipeline.uncosted.
+- risk.missingCosting counts jobs carrying revenue with no supplier cost recorded yet. They are held out of the headline margin, so they are a coverage note, not inflated profit.
+- risk.completedUnbilled is different and is a real problem: work that shipped with nothing billed against it. If it is above zero, raise it.
 - topCustomerShare above roughly 40% is worth naming as concentration risk.
 - If on-time delivery is poor, say so plainly. This is presented by the team to their own leadership and needs to be credible rather than flattering.
 - Currency is SGD, weight in kilograms, volume in CBM.
