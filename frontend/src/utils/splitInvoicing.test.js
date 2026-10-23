@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { autoFillSplit, computeEntityTotals } from './splitInvoicing'
+import { autoFillSplit, computeEntityTotals, lineSplitStatus, jobSplitIssues } from './splitInvoicing'
 
 describe('autoFillSplit', () => {
   // Real example: two entities with shares 8 and 5 (Amandari / Amankila),
@@ -146,5 +146,109 @@ describe('computeEntityTotals', () => {
     const out = autoFillSplit('100.00', entities)
     expect(out[0].amount + out[1].amount).toBeCloseTo(100, 2)
     expect(out.every(o => !Number.isNaN(o.amount))).toBe(true)
+  })
+})
+
+// The sales manager's rule: "key in the split and it will total up to the whole amount
+// which will reflect on overall invoice." Nothing checked it, so a $100 line split as
+// 60 and 30 sent invoices out $10 short while the overall invoice still read $100.
+describe('lineSplitStatus', () => {
+  it('reports a shortfall as a positive remainder', () => {
+    const s = lineSplitStatus({ rate: 100, qty: 1, splits: [
+      { entity_id: 1, amount: 60 }, { entity_id: 2, amount: 30 },
+    ] }, 'billing')
+    expect(s.lineTotal).toBe(100)
+    expect(s.splitSum).toBe(90)
+    expect(s.remainder).toBe(10)
+    expect(s.reconciled).toBe(false)
+  })
+
+  it('reports an over-allocation as a negative remainder', () => {
+    const s = lineSplitStatus({ rate: 100, qty: 1, splits: [
+      { entity_id: 1, amount: 70 }, { entity_id: 2, amount: 50 },
+    ] }, 'billing')
+    expect(s.remainder).toBe(-20)
+    expect(s.reconciled).toBe(false)
+  })
+
+  it('accepts a split that adds up', () => {
+    const s = lineSplitStatus({ rate: 250, qty: 2, splits: [
+      { entity_id: 1, amount: 300 }, { entity_id: 2, amount: 200 },
+    ] }, 'billing')
+    expect(s.lineTotal).toBe(500)
+    expect(s.reconciled).toBe(true)
+    expect(s.remainder).toBe(0)
+  })
+
+  it('treats an unsplit line as fine, not as a problem', () => {
+    const none = lineSplitStatus({ rate: 100, qty: 1, splits: [] }, 'billing')
+    expect(none.hasSplits).toBe(false)
+    // All zeroes is the same thing: the modal was opened and nothing was entered.
+    const zeroed = lineSplitStatus({ rate: 100, qty: 1, splits: [
+      { entity_id: 1, amount: 0 }, { entity_id: 2, amount: 0 },
+    ] }, 'billing')
+    expect(zeroed.hasSplits).toBe(false)
+  })
+
+  it('reads a cost line from amount rather than rate x qty', () => {
+    const s = lineSplitStatus({ amount: 80, splits: [{ entity_id: 1, amount: 80 }] }, 'cost')
+    expect(s.lineTotal).toBe(80)
+    expect(s.reconciled).toBe(true)
+  })
+
+  it('handles NUMERIC values arriving as strings', () => {
+    const s = lineSplitStatus({ rate: '33.33', qty: '3', splits: [
+      { entity_id: 1, amount: '50.00' }, { entity_id: 2, amount: '49.99' },
+    ] }, 'billing')
+    expect(s.lineTotal).toBeCloseTo(99.99, 2)
+    expect(s.reconciled).toBe(true)
+  })
+
+  it('tolerates a sub-cent rounding difference', () => {
+    const s = lineSplitStatus({ rate: 10, qty: 3, splits: [
+      { entity_id: 1, amount: 10 }, { entity_id: 2, amount: 10 }, { entity_id: 3, amount: 9.999 },
+    ] }, 'billing')
+    expect(s.reconciled).toBe(true)
+  })
+
+  it('defaults a missing qty to 1 rather than to zero', () => {
+    expect(lineSplitStatus({ rate: 45, splits: [] }, 'billing').lineTotal).toBe(45)
+  })
+})
+
+describe('jobSplitIssues', () => {
+  const job = {
+    billing_lines: [
+      { id: 1, service: 'Freight', rate: 100, qty: 1, splits: [{ entity_id: 1, amount: 60 }, { entity_id: 2, amount: 30 }] }, // 10 short
+      { id: 2, service: 'THC', rate: 200, qty: 1, splits: [{ entity_id: 1, amount: 200 }] },                                  // fine
+      { id: 3, service: 'Docs', rate: 50, qty: 1, splits: [] },                                                               // unsplit
+    ],
+    cost_lines: [
+      { id: 9, vendor: 'CargoHub', amount: 80, splits: [{ entity_id: 1, amount: 100 }] },                                     // 20 over
+    ],
+  }
+
+  it('finds only the lines that do not add up', () => {
+    const issues = jobSplitIssues(job)
+    expect(issues.count).toBe(2)
+    expect(issues.billing).toHaveLength(1)
+    expect(issues.billing[0].line.id).toBe(1)
+    expect(issues.cost).toHaveLength(1)
+    expect(issues.cost[0].line.id).toBe(9)
+  })
+
+  it('nets the shortfall against the over-allocation', () => {
+    expect(jobSplitIssues(job).netRemainder).toBe(-10) // +10 short, -20 over
+  })
+
+  it('reports nothing for a job with no splits at all', () => {
+    const clean = jobSplitIssues({ billing_lines: [{ rate: 100, qty: 1, splits: [] }], cost_lines: [] })
+    expect(clean.count).toBe(0)
+    expect(clean.netRemainder).toBe(0)
+  })
+
+  it('survives a job with no lines', () => {
+    expect(jobSplitIssues({}).count).toBe(0)
+    expect(jobSplitIssues().count).toBe(0)
   })
 })

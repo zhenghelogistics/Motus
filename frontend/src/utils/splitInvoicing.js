@@ -27,3 +27,66 @@ export function computeEntityTotals(entity, job) {
   const profit = sale - cost
   return { sale, cost, profit, gp: sale > 0 ? (profit/sale)*100 : 0 }
 }
+
+// ─── RECONCILIATION ──────────────────────────────────────────────────────────
+// The rule the sales manager stated: "key in the split and it will total up to the
+// whole amount which will reflect on overall invoice." Nothing enforced that, so
+// splitting a $100 line as 60 and 30 quietly dropped $10 — the entity invoices went
+// out $10 short while the overall invoice still read $100, and nobody was told.
+//
+// Rounding to the cent before comparing, because the amounts come from NUMERIC columns
+// and from text inputs, and 60.00 + 30.00 + 10.00 can land a fraction of a cent off a
+// line total computed as rate x qty.
+const CENT = 0.005
+
+// qty defaults to 1 only when it is genuinely absent. `Number(undefined) ?? 1` does NOT
+// do that: Number(undefined) is NaN, and ?? only substitutes for null and undefined, so
+// the NaN survives and multiplies the whole line total to zero.
+const qtyOf = (line) =>
+  line.qty === undefined || line.qty === null || line.qty === '' ? 1 : Number(line.qty) || 0
+
+export const lineTotalOf = (line, lineType) =>
+  lineType === 'cost'
+    ? Number(line.amount) || 0
+    : Number(line.total ?? (Number(line.rate) || 0) * qtyOf(line)) || 0
+
+/**
+ * Reconciliation state for one line.
+ * `remainder` is what is still unassigned: positive means short of the line total,
+ * negative means the splits add up to more than the line is worth.
+ */
+export function lineSplitStatus(line, lineType) {
+  const lineTotal = lineTotalOf(line, lineType)
+  const splits = line.splits || []
+  const assigned = splits.filter(s => Number(s.amount) !== 0)
+  const splitSum = splits.reduce((s, x) => s + (Number(x.amount) || 0), 0)
+  const remainder = Math.round((lineTotal - splitSum) * 100) / 100
+  return {
+    lineTotal,
+    splitSum: Math.round(splitSum * 100) / 100,
+    remainder,
+    // A line nobody has split yet is not a problem: it simply bills to the job as a
+    // whole. Only a line that has been split AND does not add up is wrong.
+    hasSplits: assigned.length > 0,
+    reconciled: Math.abs(lineTotal - splitSum) < CENT,
+  }
+}
+
+/** Every split line on the job that does not add up, billing and cost alike. */
+export function jobSplitIssues(job = {}) {
+  const check = (lines, lineType) => (lines || [])
+    .map(l => ({ line: l, lineType, ...lineSplitStatus(l, lineType) }))
+    .filter(s => s.hasSplits && !s.reconciled)
+
+  const billing = check(job.billing_lines, 'billing')
+  const cost = check(job.cost_lines, 'cost')
+  return {
+    billing,
+    cost,
+    count: billing.length + cost.length,
+    // Signed, so "$10 short across 2 lines" and "$10 over" read differently.
+    netRemainder: Math.round(
+      [...billing, ...cost].reduce((s, x) => s + x.remainder, 0) * 100
+    ) / 100,
+  }
+}

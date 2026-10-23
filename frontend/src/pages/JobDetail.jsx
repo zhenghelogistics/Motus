@@ -12,7 +12,7 @@ import {
   getRateCards, previewRates
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
-import { autoFillSplit, computeEntityTotals } from '../utils/splitInvoicing'
+import { autoFillSplit, computeEntityTotals, jobSplitIssues, lineSplitStatus } from '../utils/splitInvoicing'
 import {
   X, ClipboardList, FileText, Ban, ArrowLeft, Download, Truck, Package, Stamp,
   ChevronDown, ChevronRight, Check, Upload, AlertTriangle, Pencil, RotateCcw, Paperclip, Info,
@@ -776,8 +776,28 @@ export default function JobDetail() {
     doc.save(`ZHL_${job.job_number.replace('/', '-')}_Accounts_${exportCcy}.pdf`)
   }
 
+  // Refuses to produce paperwork from splits that do not add up.
+  //
+  // Everywhere else a half-finished split is fine, because a job is a workspace. This is
+  // the one moment it stops being internal: an invoice built from a line split 60/30 of
+  // 100 bills the customer 90 while the overall invoice says 100, and that goes out of
+  // the building. Blocking here keeps the workspace loose and the paperwork correct.
+  function blockedBySplitMismatch(job) {
+    const issues = jobSplitIssues(job)
+    if (!issues.count) return false
+    const lines = [...issues.billing, ...issues.cost]
+      .map(i => `  • ${i.line.service || i.line.vendor || 'line'}: ${i.remainder > 0 ? `${fmt(i.remainder)} unassigned` : `${fmt(-i.remainder)} over`}`)
+      .join('\n')
+    alert(
+      `These splits don't add up, so the invoice would be wrong.\n\n${lines}\n\n` +
+      `Open the split on each line above and make the amounts total the line total, then try again.`
+    )
+    return true
+  }
+
   // ── Split Invoicing: customer-facing invoice (sale-only, no cost/vendor) ──
   function exportEntityInvoice(entity, job = jobRef.current) {
+    if (blockedBySplitMismatch(job)) return
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 30, vw = 61
@@ -858,6 +878,9 @@ export default function JobDetail() {
 
   // ── Split Invoicing: internal breakdown (billing + cost + profit for one entity) ──
   function exportEntityBreakdown(entity, job = jobRef.current) {
+    // Internal, but the profit figure on it is what pricing decisions get made from, so
+    // it is no more use than the invoice if the shares do not add up.
+    if (blockedBySplitMismatch(job)) return
     const doc = new jsPDF('p', 'mm', 'a4')
     const pw = 210, ml = 14, mr = 14, tw = pw - ml - mr
     const lw = 30, vw = 61
@@ -2048,6 +2071,32 @@ export default function JobDetail() {
           Divide this job's billing/cost across separate entities (e.g. different outlets of the same client), each with their own invoice.
           {' '}<strong>①</strong> Add an entity below. <strong>②</strong> Click the <em>Split</em> button on any Cost/Billing line above to assign its amount to each entity. <strong>③</strong> Use <FileText size={12} style={{ verticalAlign: 'text-bottom' }} /> for that entity's invoice or <ClipboardList size={12} style={{ verticalAlign: 'text-bottom' }} /> for an internal breakdown.
         </p>
+        {/* Lines that have been split but do not add up to their own total. Shown above
+            the "not split yet" note because it is a different kind of problem: an
+            unsplit line is simply unfinished, whereas this one is wrong, and it is the
+            thing that silently shorted the invoices before anything checked it. */}
+        {(job.split_entities||[]).length > 0 && (() => {
+          const issues = jobSplitIssues(job)
+          if (!issues.count) return null
+          return (
+            <div style={{ padding: '10px 12px', margin: '0 0 10px', background: '#FDECEC', border: '1px solid #9B1C1C', borderRadius: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: '#9B1C1C', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <AlertTriangle size={14} /> {issues.count} split {issues.count === 1 ? 'line does' : 'lines do'} not add up
+              </div>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 24, fontSize: 12, color: 'var(--heading)' }}>
+                {[...issues.billing, ...issues.cost].map((i, n) => (
+                  <li key={n} style={{ marginBottom: 2 }}>
+                    <strong>{i.line.service || i.line.vendor || 'Line'}</strong>{' '}
+                    ({fmt(i.lineTotal)}): {i.remainder > 0 ? `${fmt(i.remainder)} unassigned` : `${fmt(-i.remainder)} over`}
+                  </li>
+                ))}
+              </ul>
+              <div style={{ fontSize: 11.5, color: '#6B7E93', marginTop: 6 }}>
+                Invoices and breakdowns will not generate until these total their line amount.
+              </div>
+            </div>
+          )
+        })()}
         {(job.split_entities||[]).length > 0 && (() => {
           const allLines = [...(job.billing_lines||[]), ...(job.cost_lines||[])]
           const unsplitCount = allLines.filter(l => !l.splits || l.splits.length === 0).length
@@ -2390,19 +2439,7 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
               </td>
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               {hasSplitEntities && (
-                <td>
-                  {l.splits?.length ? (
-                    <button className="btn btn-xs" style={{ background:'var(--green-light)', color:'var(--green)', border:'1px solid rgba(20,128,74,0.3)', whiteSpace:'nowrap', display:'inline-flex', alignItems:'center', gap:4 }}
-                      onClick={() => onEditSplits(l)} disabled={locked} title="Edit how this line is split across entities">
-                      <Check size={12} /> Split ({l.splits.length})
-                    </button>
-                  ) : (
-                    <button className="btn btn-outline btn-xs" style={{ whiteSpace:'nowrap' }}
-                      onClick={() => onEditSplits(l)} disabled={locked} title="Assign this line's amount across entities">
-                      Split
-                    </button>
-                  )}
-                </td>
+                <td><SplitButton line={l} lineType="cost" onEditSplits={onEditSplits} locked={locked} /></td>
               )}
               <td>
                 <div className="flex gap-2">
@@ -2506,19 +2543,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
               <td><strong style={{ fontSize: 15 }}>{isEdit && total === null ? <span style={{ color:'var(--red)', fontSize:12 }}>Rate unavailable</span> : fmt(isEdit ? total : l.total)}</strong></td>
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
               {hasSplitEntities && (
-                <td>
-                  {l.splits?.length ? (
-                    <button className="btn btn-xs" style={{ background:'var(--green-light)', color:'var(--green)', border:'1px solid rgba(20,128,74,0.3)', whiteSpace:'nowrap', display:'inline-flex', alignItems:'center', gap:4 }}
-                      onClick={() => onEditSplits(l)} disabled={locked} title="Edit how this line is split across entities">
-                      <Check size={12} /> Split ({l.splits.length})
-                    </button>
-                  ) : (
-                    <button className="btn btn-outline btn-xs" style={{ whiteSpace:'nowrap' }}
-                      onClick={() => onEditSplits(l)} disabled={locked} title="Assign this line's amount across entities">
-                      Split
-                    </button>
-                  )}
-                </td>
+                <td><SplitButton line={l} lineType="billing" onEditSplits={onEditSplits} locked={locked} /></td>
               )}
               <td>
                 <div className="flex gap-2">
@@ -2780,6 +2805,44 @@ function SubCertModal({ modal, onClose, onGenerate }) {
   )
 }
 
+// ── Split badge on a cost/billing line ─────────────────────────────────────
+// The green tick used to appear on any line that had splits at all, including ones whose
+// amounts did not add up to the line. A badge reading "done" over a wrong number is
+// worse than no badge, so a line that does not reconcile now says so where the split is
+// edited, rather than only at invoice time.
+function SplitButton({ line, lineType, onEditSplits, locked }) {
+  const s = lineSplitStatus(line, lineType)
+
+  if (!s.hasSplits) {
+    return (
+      <button className="btn btn-outline btn-xs" style={{ whiteSpace: 'nowrap' }}
+        onClick={() => onEditSplits(line)} disabled={locked} title="Assign this line's amount across entities">
+        Split
+      </button>
+    )
+  }
+
+  if (!s.reconciled) {
+    return (
+      <button className="btn btn-xs"
+        style={{ background: '#FDECEC', color: '#9B1C1C', border: '1px solid #9B1C1C', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700 }}
+        onClick={() => onEditSplits(line)} disabled={locked}
+        title={s.remainder > 0
+          ? `${fmt(s.remainder)} of this line is not assigned to anyone`
+          : `The splits are ${fmt(-s.remainder)} more than this line is worth`}>
+        <AlertTriangle size={12} /> {fmt(Math.abs(s.remainder))} {s.remainder > 0 ? 'short' : 'over'}
+      </button>
+    )
+  }
+
+  return (
+    <button className="btn btn-xs" style={{ background: 'var(--green-light)', color: 'var(--green)', border: '1px solid rgba(20,128,74,0.3)', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+      onClick={() => onEditSplits(line)} disabled={locked} title="Edit how this line is split across entities">
+      <Check size={12} /> Split ({line.splits.length})
+    </button>
+  )
+}
+
 // ── Line Split Modal ───────────────────────────────────────────────────────
 function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
   const lineTotal = lineType === 'billing' ? (line.total ?? (line.rate||0)*(line.qty||1)) : (line.amount||0)
@@ -2795,12 +2858,25 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
 
   const splitSum = entities.reduce((s, e) => s + (parseFloat(amounts[e.id]) || 0), 0)
   const reconciled = Math.abs(splitSum - lineTotal) < 0.005
+  // Positive means the splits are short of the line total, negative means they exceed it.
+  const remainder = Math.round((lineTotal - splitSum) * 100) / 100
+  const nothingEntered = entities.every(e => !(parseFloat(amounts[e.id]) || 0))
 
   function autoFill() {
     const filled = autoFillSplit(lineTotal, entities)
     const next = {}
     filled.forEach(f => { next[f.entity_id] = f.amount })
     setAmounts(next)
+  }
+
+  // Drops whatever is unassigned onto one entity. The common case is two parties where
+  // one figure is known and the other is "the rest", and doing that arithmetic by hand
+  // is exactly where the missing cents came from.
+  function giveRemainderTo(entityId) {
+    setAmounts(a => ({
+      ...a,
+      [entityId]: Math.round(((parseFloat(a[entityId]) || 0) + remainder) * 100) / 100,
+    }))
   }
 
   async function handleSave() {
@@ -2838,8 +2914,31 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Split total: {fmt(splitSum)}</span>
             {reconciled
               ? <span style={{ fontSize: 12, color: 'var(--green, #16a34a)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Check size={13} /> Reconciled</span>
-              : <span style={{ fontSize: 12, color: 'var(--amber, #b45309)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertTriangle size={13} /> Doesn't match line total</span>}
+              : <span style={{ fontSize: 12, color: '#9B1C1C', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertTriangle size={13} /> {fmt(Math.abs(remainder))} {remainder > 0 ? 'unassigned' : 'over'}</span>}
           </div>
+
+          {/* The whole point of splitting is that the parts add up to the invoice. Say so
+              in words, with the amount, and offer to fix it in one click: the usual case
+              is two parties where one figure is known and the other is "the rest". */}
+          {!reconciled && !nothingEntered && (
+            <div style={{ marginTop: 12, padding: '10px 12px', background: '#FDECEC', border: '1px solid #9B1C1C', borderRadius: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: '#9B1C1C', marginBottom: 6 }}>
+                {remainder > 0
+                  ? `This doesn't add up. ${fmt(remainder)} of this line isn't assigned to anyone.`
+                  : `This doesn't add up. The splits are ${fmt(-remainder)} more than the line is worth.`}
+              </div>
+              <div style={{ fontSize: 11.5, color: '#6B7E93', marginBottom: 8 }}>
+                Entity invoices are built from these amounts, so saving it like this sends them out wrong.
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {entities.map(e => (
+                  <button key={e.id} className="btn btn-outline btn-xs" onClick={() => giveRemainderTo(e.id)}>
+                    {remainder > 0 ? 'Add' : 'Take'} {fmt(Math.abs(remainder))} {remainder > 0 ? 'to' : 'off'} {e.name || `Entity ${e.id}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex-between" style={{ padding: '12px 24px', borderTop: '1px solid var(--border-solid)' }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
