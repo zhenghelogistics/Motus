@@ -10,6 +10,7 @@ const { deriveMetrics, computeRateAmount } = require('./rateCalc');
 const { deriveLeadMetrics, deriveReengagementList } = require('./monthlyReport');
 const { periodWindow, deriveMovementMetrics, deriveTrend, compareBreakdown, compareMargins } = require('./movementReport');
 const { parseTokens: parseMcpTokens, identifyToken: identifyMcpToken, handleRpc: handleMcpRpc } = require('./mcp');
+const oauth = require('./oauth');
 const app = express();
 
 // Return NUMERIC/DECIMAL (type OID 1700) as a JS number instead of a string.
@@ -504,6 +505,47 @@ async function initDB() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_documents_lead_id ON lead_documents (lead_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_lines_card_id ON rate_lines (card_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_rate_cards_lookup ON rate_cards (is_active, mode)`);
+
+  // ─── OAUTH (the MCP custom connector) ──────────────────────────────────────
+  // Claude registers itself here the first time someone adds the connector, so there is
+  // no client id for anyone to distribute. Secrets are stored as SHA-256 digests.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id TEXT PRIMARY KEY,
+      client_secret_hash TEXT,
+      client_name TEXT DEFAULT '',
+      redirect_uris JSONB NOT NULL,
+      token_endpoint_auth_method TEXT DEFAULT 'none',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  // Authorization codes are single use and live about a minute. `used` is kept rather
+  // than deleting the row: a code presented twice means it was replayed, which is worth
+  // detecting, not quietly treating as "unknown code".
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_codes (
+      code_hash TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      redirect_uri TEXT NOT NULL,
+      code_challenge TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      used BOOLEAN DEFAULT FALSE
+    )
+  `);
+  // The revocable half of the pair. Access tokens are signed JWTs and are deliberately
+  // short-lived precisely because they cannot be revoked; this row can be, instantly.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
+      token_hash TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      revoked BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_oauth_refresh_user ON oauth_refresh_tokens (user_email)`);
 }
 
 // initDB() is ~90 sequential statements. They are all idempotent, but they are also
@@ -815,7 +857,10 @@ app.use('/api', (req, res, next) => {
       // shared secret as /rfq rather than by a staff session
       || /^\/rfq\/[^/]+\/documents$/.test(req.path)
       // the MCP endpoint — carries its own bearer token, not a Supabase session
-      || req.path === '/mcp') return next()
+      || req.path === '/mcp'
+      // the OAuth endpoints that make Motus a custom connector. These ARE the login, so
+      // they cannot sit behind one; each enforces its own rules.
+      || req.path.startsWith('/oauth/')) return next()
   requireAuth(req, res, next)
 })
 
@@ -3584,6 +3629,389 @@ app.delete('/api/marketing-contacts/:id', async (req, res) => {
   }
 })
 
+// ─── OAUTH FOR THE MCP CONNECTOR ─────────────────────────────────────────────
+// Everything needed for Motus to appear under "Add custom connector": discovery, self
+// registration, a login page, and a token endpoint. The protocol rules live in
+// ./oauth.js; this is the storage and the HTTP.
+//
+// Supabase remains the only thing that checks a password. We proxy the credentials
+// straight to it, keep nothing, and a user disabled there is disabled here.
+
+// The issuer has to be the exact origin the client discovered us at, since it is baked
+// into every token we sign. Set MCP_PUBLIC_URL to pin it; otherwise it is derived, which
+// is correct when the same code serves production and preview deployments.
+function issuerFor(req) {
+  if (process.env.MCP_PUBLIC_URL) return process.env.MCP_PUBLIC_URL.replace(/\/+$/, '')
+  const host = req.headers['x-forwarded-host'] || req.headers.host
+  const proto = req.headers['x-forwarded-proto'] || 'https'
+  return `${proto}://${host}`
+}
+
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+// Brute-force damping on the login form. In-memory, so it resets whenever Vercel
+// recycles the instance and is not shared between concurrent instances — it is a speed
+// bump, not a wall. The real limit is Supabase's own per-account rate limiting, which
+// this sits in front of to avoid leaning on it for every attempt.
+const LOGIN_MAX_FAILURES = 6
+const LOGIN_WINDOW_MS = 15 * 60 * 1000
+const loginFailures = new Map()
+
+function loginBlocked(email) {
+  const entry = loginFailures.get(email)
+  if (!entry) return false
+  if (Date.now() > entry.until) { loginFailures.delete(email); return false }
+  return entry.count >= LOGIN_MAX_FAILURES
+}
+
+function recordLoginFailure(email) {
+  const now = Date.now()
+  const entry = loginFailures.get(email)
+  if (!entry || now > entry.until) {
+    loginFailures.set(email, { count: 1, until: now + LOGIN_WINDOW_MS })
+  } else {
+    entry.count++
+  }
+  if (loginFailures.size > 500) loginFailures.clear()
+}
+
+function loginPage({ params, error }) {
+  const hidden = Object.entries(params)
+    .map(([k, v]) => `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}">`)
+    .join('')
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in to Motus</title>
+<style>
+  :root { --navy:#003087; --ink:#11203A; --harbor:#5A6B80; --sail:#F5F8FC; }
+  * { box-sizing:border-box }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--sail);
+         font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:var(--ink); padding:24px }
+  .card { width:100%; max-width:380px; background:#fff; border-radius:14px; padding:32px;
+          box-shadow:0 1px 3px rgba(17,32,58,.08), 0 8px 24px rgba(17,32,58,.08) }
+  h1 { margin:0 0 4px; font-size:21px; letter-spacing:-.01em }
+  p.sub { margin:0 0 24px; color:var(--harbor); font-size:14px }
+  label { display:block; font-size:13px; font-weight:600; margin-bottom:6px }
+  input[type=email], input[type=password] { width:100%; padding:11px 13px; margin-bottom:16px;
+          border:1px solid #d9e0ea; border-radius:9px; font-size:15px; font-family:inherit }
+  input:focus { outline:2px solid var(--navy); outline-offset:-1px; border-color:transparent }
+  button { width:100%; padding:12px; background:var(--navy); color:#fff; border:0; border-radius:9px;
+          font-size:15px; font-weight:600; font-family:inherit; cursor:pointer }
+  button:hover { background:#002169 }
+  .err { background:#fdeeee; color:#9b1c1c; padding:10px 13px; border-radius:9px; font-size:14px; margin-bottom:18px }
+  .foot { margin-top:20px; font-size:12.5px; color:var(--harbor); text-align:center }
+</style>
+</head><body>
+<form class="card" method="post" action="/api/oauth/authorize">
+  <h1>Sign in to Motus</h1>
+  <p class="sub">Claude is asking to read your Motus data.</p>
+  ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
+  ${hidden}
+  <label for="email">Work email</label>
+  <input id="email" type="email" name="email" autocomplete="username" required autofocus>
+  <label for="password">Password</label>
+  <input id="password" type="password" name="password" autocomplete="current-password" required>
+  <button type="submit">Sign in and allow</button>
+  <p class="foot">Read only. Claude cannot change or delete anything in Motus.</p>
+</form>
+</body></html>`
+}
+
+function errorPage(message) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Motus</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#F5F8FC;
+font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#11203A;padding:24px;text-align:center}
+div{max-width:420px}h1{font-size:19px;margin:0 0 8px}p{color:#5A6B80;margin:0}</style></head>
+<body><div><h1>That sign-in link is not valid</h1><p>${escapeHtml(message)}</p></div></body></html>`
+}
+
+// Discovery. A client expects these at /.well-known/... on the root of the domain, which
+// on Vercel is reached by the rewrites in vercel.json; the routes are also registered at
+// the real paths so the server is correct when run directly, without the rewrite layer.
+//
+// The trailing wildcards are RFC 9728's path-suffixed form, where a client asks for
+// /.well-known/oauth-protected-resource/api/mcp to describe one specific resource. We
+// only have one resource, so every form answers the same thing.
+const AS_METADATA_PATHS = [
+  '/api/oauth/meta/authorization-server',
+  '/.well-known/oauth-authorization-server',
+  '/.well-known/oauth-authorization-server/*',
+]
+const PR_METADATA_PATHS = [
+  '/api/oauth/meta/protected-resource',
+  '/.well-known/oauth-protected-resource',
+  '/.well-known/oauth-protected-resource/*',
+]
+
+app.get(AS_METADATA_PATHS, (req, res) => {
+  res.json(oauth.authServerMetadata(issuerFor(req)))
+})
+
+app.get(PR_METADATA_PATHS, (req, res) => {
+  res.json(oauth.protectedResourceMetadata(issuerFor(req)))
+})
+
+// Dynamic client registration (RFC 7591).
+app.post('/api/oauth/register', async (req, res) => {
+  if (!process.env.MCP_OAUTH_SECRET) {
+    return res.status(503).json({ error: 'server_error', error_description: 'OAuth is not configured.' })
+  }
+  try {
+    await ensureDB()
+    const meta = oauth.validateRegistration(req.body)
+    const clientId = oauth.randomToken(16)
+
+    // Confidential clients are supported, but a public client using PKCE is both the
+    // normal case here and the safer one: there is no secret to leak from a desktop app.
+    const needsSecret = meta.token_endpoint_auth_method !== 'none'
+    const clientSecret = needsSecret ? oauth.randomToken(32) : null
+
+    await pool.query(
+      `INSERT INTO oauth_clients (client_id, client_secret_hash, client_name, redirect_uris, token_endpoint_auth_method)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [clientId, clientSecret ? oauth.hashToken(clientSecret) : null, meta.client_name,
+       JSON.stringify(meta.redirect_uris), meta.token_endpoint_auth_method]
+    )
+    console.log(`[ZHL:oauth] registered client ${clientId} (${meta.client_name})`)
+
+    res.status(201).json({
+      client_id: clientId,
+      ...(clientSecret ? { client_secret: clientSecret } : {}),
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      client_name: meta.client_name,
+      redirect_uris: meta.redirect_uris,
+      token_endpoint_auth_method: meta.token_endpoint_auth_method,
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      scope: oauth.SCOPE,
+    })
+  } catch (err) {
+    if (err.oauthCode) return res.status(err.status || 400).json({ error: err.oauthCode, error_description: err.message })
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'server_error' })
+  }
+})
+
+async function loadOAuthClient(clientId) {
+  if (!clientId) return null
+  const r = await pool.query('SELECT * FROM oauth_clients WHERE client_id = $1', [clientId])
+  if (!r.rows.length) return null
+  const row = r.rows[0]
+  return { ...row, redirect_uris: Array.isArray(row.redirect_uris) ? row.redirect_uris : JSON.parse(row.redirect_uris) }
+}
+
+// The login page. A failure here is rendered as HTML rather than redirected, because
+// until the redirect_uri is known to be registered there is nowhere safe to send anyone.
+app.get('/api/oauth/authorize', async (req, res) => {
+  if (!process.env.MCP_OAUTH_SECRET) return res.status(503).send(errorPage('OAuth is not configured on this deployment.'))
+  try {
+    await ensureDB()
+    const client = await loadOAuthClient(req.query.client_id)
+    const parsed = oauth.validateAuthorizeParams(req.query, client)
+    res.set('Cache-Control', 'no-store').send(loginPage({
+      params: {
+        client_id: req.query.client_id,
+        redirect_uri: parsed.redirectUri,
+        code_challenge: parsed.codeChallenge,
+        state: parsed.state,
+      },
+      error: '',
+    }))
+  } catch (err) {
+    if (err.oauthCode) return res.status(err.status || 400).send(errorPage(err.message))
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).send(errorPage('Something went wrong. Please try again.'))
+  }
+})
+
+app.post('/api/oauth/authorize', express.urlencoded({ extended: false }), async (req, res) => {
+  if (!process.env.MCP_OAUTH_SECRET) return res.status(503).send(errorPage('OAuth is not configured on this deployment.'))
+  const f = req.body || {}
+  // Re-validated from scratch. The form is attacker-controlled like any other input;
+  // that it was rendered by us a moment ago means nothing.
+  let client, parsed
+  try {
+    await ensureDB()
+    client = await loadOAuthClient(f.client_id)
+    parsed = oauth.validateAuthorizeParams({
+      response_type: 'code',
+      redirect_uri: f.redirect_uri,
+      code_challenge: f.code_challenge,
+      code_challenge_method: 'S256',
+      state: f.state,
+    }, client)
+  } catch (err) {
+    if (err.oauthCode) return res.status(err.status || 400).send(errorPage(err.message))
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    return res.status(500).send(errorPage('Something went wrong. Please try again.'))
+  }
+
+  const formParams = {
+    client_id: f.client_id, redirect_uri: parsed.redirectUri,
+    code_challenge: parsed.codeChallenge, state: parsed.state,
+  }
+  const reject = (message) => res.status(401).send(loginPage({ params: formParams, error: message }))
+
+  const email = String(f.email || '').trim().toLowerCase()
+  if (loginBlocked(email)) {
+    return reject('Too many attempts. Wait a few minutes and try again.')
+  }
+
+  try {
+    // Supabase does the password check. We never store it and never see it again.
+    const auth = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: process.env.SUPABASE_SERVICE_KEY },
+      body: JSON.stringify({ email, password: String(f.password || '') }),
+    })
+    if (!auth.ok) {
+      recordLoginFailure(email)
+      console.log(`[ZHL:oauth] failed sign-in for ${email}`)
+      return reject('That email or password is not right.')
+    }
+    const session = await auth.json()
+    const verifiedEmail = String(session.user?.email || email).toLowerCase()
+    // The same company-account rule the app itself enforces.
+    if (!verifiedEmail.endsWith('@zhenghe.com.sg')) {
+      return reject('That account cannot be used here. Use your Zhenghe work email.')
+    }
+
+    const code = oauth.randomToken(32)
+    await pool.query(
+      `INSERT INTO oauth_codes (code_hash, client_id, redirect_uri, code_challenge, user_email, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [oauth.hashToken(code), f.client_id, parsed.redirectUri, parsed.codeChallenge, verifiedEmail,
+       new Date(Date.now() + oauth.AUTH_CODE_TTL_MS)]
+    )
+    loginFailures.delete(email)
+    console.log(`[ZHL:oauth] authorized ${verifiedEmail} for client ${f.client_id}`)
+    res.redirect(302, oauth.buildRedirect(parsed.redirectUri, { code, state: parsed.state }))
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).send(errorPage('Something went wrong. Please try again.'))
+  }
+})
+
+// Confidential clients may present their secret in the body or via Basic auth; public
+// clients present nothing, which is fine because PKCE is what actually protects them.
+function clientSecretFrom(req) {
+  if (req.body && req.body.client_secret) return { id: req.body.client_id, secret: req.body.client_secret }
+  const header = req.headers.authorization || ''
+  if (/^Basic /i.test(header)) {
+    const [id, ...rest] = Buffer.from(header.slice(6), 'base64').toString().split(':')
+    return { id, secret: rest.join(':') }
+  }
+  return { id: req.body && req.body.client_id, secret: null }
+}
+
+app.post('/api/oauth/token', express.urlencoded({ extended: false }), async (req, res) => {
+  const secret = process.env.MCP_OAUTH_SECRET
+  if (!secret) return res.status(503).json({ error: 'server_error', error_description: 'OAuth is not configured.' })
+
+  const fail = (code, description, status = 400) =>
+    res.status(status).set('Cache-Control', 'no-store').json({ error: code, error_description: description })
+
+  try {
+    await ensureDB()
+    const f = req.body || {}
+    const presented = clientSecretFrom(req)
+    const client = await loadOAuthClient(presented.id || f.client_id)
+    if (!client) return fail('invalid_client', 'Unknown client', 401)
+
+    if (client.token_endpoint_auth_method !== 'none') {
+      if (!presented.secret || oauth.hashToken(presented.secret) !== client.client_secret_hash) {
+        return fail('invalid_client', 'Client authentication failed', 401)
+      }
+    }
+
+    const issuer = issuerFor(req)
+
+    if (f.grant_type === 'authorization_code') {
+      const codeHash = oauth.hashToken(f.code || '')
+      const r = await pool.query('SELECT * FROM oauth_codes WHERE code_hash = $1', [codeHash])
+      const row = r.rows[0]
+      if (!row) return fail('invalid_grant', 'Unknown or expired code')
+
+      if (row.used) {
+        // A code offered twice means it was captured. Burn every refresh token that came
+        // from this user+client pair rather than just refusing this one request.
+        console.error(`[ZHL:oauth] REPLAYED authorization code for ${row.user_email} (client ${row.client_id})`)
+        await pool.query(
+          'UPDATE oauth_refresh_tokens SET revoked = TRUE WHERE user_email = $1 AND client_id = $2',
+          [row.user_email, row.client_id]
+        )
+        return fail('invalid_grant', 'Code already used')
+      }
+      await pool.query('UPDATE oauth_codes SET used = TRUE WHERE code_hash = $1', [codeHash])
+
+      if (new Date(row.expires_at) < new Date()) return fail('invalid_grant', 'Code has expired')
+      if (row.client_id !== client.client_id) return fail('invalid_grant', 'Code was issued to another client')
+      if (f.redirect_uri && f.redirect_uri !== row.redirect_uri) return fail('invalid_grant', 'redirect_uri does not match')
+      if (!oauth.verifyPkce(f.code_verifier, row.code_challenge, 'S256')) {
+        return fail('invalid_grant', 'code_verifier does not match the challenge')
+      }
+
+      return res.set('Cache-Control', 'no-store').json(
+        await issueTokens(row.user_email, client.client_id, secret, issuer)
+      )
+    }
+
+    if (f.grant_type === 'refresh_token') {
+      const hash = oauth.hashToken(f.refresh_token || '')
+      const r = await pool.query('SELECT * FROM oauth_refresh_tokens WHERE token_hash = $1', [hash])
+      const row = r.rows[0]
+      if (!row || row.revoked) return fail('invalid_grant', 'Refresh token is not valid')
+      if (new Date(row.expires_at) < new Date()) return fail('invalid_grant', 'Refresh token has expired')
+      if (row.client_id !== client.client_id) return fail('invalid_grant', 'Token was issued to another client')
+
+      // Rotated on every use: the old one dies here, so a stolen copy is good for at most
+      // one request and its use is what reveals the theft.
+      await pool.query('UPDATE oauth_refresh_tokens SET revoked = TRUE WHERE token_hash = $1', [hash])
+      return res.set('Cache-Control', 'no-store').json(
+        await issueTokens(row.user_email, client.client_id, secret, issuer)
+      )
+    }
+
+    return fail('unsupported_grant_type', `Unsupported grant_type: ${f.grant_type}`)
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+    res.status(500).json({ error: 'server_error' })
+  }
+})
+
+async function issueTokens(email, clientId, secret, issuer) {
+  const refresh = oauth.randomToken(32)
+  await pool.query(
+    `INSERT INTO oauth_refresh_tokens (token_hash, client_id, user_email, expires_at) VALUES ($1,$2,$3,$4)`,
+    [oauth.hashToken(refresh), clientId, email, new Date(Date.now() + oauth.REFRESH_TOKEN_TTL_MS)]
+  )
+  return {
+    access_token: oauth.signAccessToken({ email, clientId }, secret, { issuer }),
+    token_type: 'Bearer',
+    expires_in: oauth.ACCESS_TOKEN_TTL_S,
+    refresh_token: refresh,
+    scope: oauth.SCOPE,
+  }
+}
+
+// Revocation (RFC 7009). Always answers 200, even for a token that was never valid:
+// telling a caller which of its tokens exist is itself a disclosure.
+app.post('/api/oauth/revoke', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    await ensureDB()
+    const token = (req.body && req.body.token) || ''
+    if (token) {
+      await pool.query('UPDATE oauth_refresh_tokens SET revoked = TRUE WHERE token_hash = $1', [oauth.hashToken(token)])
+    }
+  } catch (err) {
+    console.error(`[ZHL] ${req.method} ${req.url}`, err.message)
+  }
+  res.status(200).end()
+})
+
 // ─── MCP SERVER ──────────────────────────────────────────────────────────────
 // Lets Claude read Motus directly: ask "how did sea freight do last quarter" and get an
 // answer from live data instead of from a deck someone exported last week.
@@ -3837,15 +4265,31 @@ const MCP_IMPLS = {
 // no sessions and no SSE stream. Everything a tool does finishes in a single round trip,
 // so there is nothing for a long-lived stream to carry.
 app.post('/api/mcp', async (req, res) => {
+  // Two ways in, and a deployment can enable either or both:
+  //   MCP_TOKENS       static per-person tokens, for Claude Code and Desktop config files
+  //   MCP_OAUTH_SECRET the custom connector flow, where each user logs in as themselves
   const tokens = parseMcpTokens(process.env.MCP_TOKENS)
-  if (!tokens.length) {
+  const oauthSecret = process.env.MCP_OAUTH_SECRET
+  if (!tokens.length && !oauthSecret) {
     // Absent configuration means "off", not "open". Same stance as the customer portal.
     return res.status(503).json({ error: 'The Motus MCP server is not configured.' })
   }
 
-  const caller = identifyMcpToken(req.headers.authorization, tokens)
+  let caller = identifyMcpToken(req.headers.authorization, tokens)
+  if (!caller && oauthSecret) {
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+    const claims = oauth.verifyAccessToken(bearer, oauthSecret, { issuer: issuerFor(req) })
+    if (claims) caller = claims.sub
+  }
+
   if (!caller) {
-    res.setHeader('WWW-Authenticate', 'Bearer realm="Motus MCP"')
+    // The resource_metadata pointer is what starts discovery: an unauthenticated client
+    // reads this header, fetches the metadata, finds the authorization server and runs
+    // the login flow. Without it, "Add custom connector" has no idea where to send anyone.
+    res.setHeader(
+      'WWW-Authenticate',
+      `Bearer realm="Motus MCP", resource_metadata="${issuerFor(req)}/.well-known/oauth-protected-resource"`
+    )
     return res.status(401).json({ error: 'Unauthorized.' })
   }
 

@@ -20,15 +20,59 @@ JSON-RPC 2.0 over a single HTTP POST. There is no AI running in the server; it i
 existing database queries with machine-readable labels on them.
 
 The endpoint lives at `POST /api/mcp`, inside the same Vercel function as the rest of the
-API. No new infrastructure.
+API. No new infrastructure and no new database.
 
 ---
 
-## Setup
+## Two ways to connect
 
-### 1. Generate a token for each person
+**Custom connector (recommended).** Each person adds Motus from Claude's Connectors
+screen and signs in with their own Motus account. No tokens to hand out, and revoking
+someone in Supabase revokes them here. Needs `MCP_OAUTH_SECRET` set.
 
-One token per person, so the logs say who called.
+**Static token.** A per-person token pasted into a config file. Works in Claude Code and
+Claude Desktop. Useful for scripts and for a quick trial. Needs `MCP_TOKENS` set.
+
+Both can be enabled at once, and if neither is set the endpoint returns 503 and nothing
+is reachable. Missing configuration means off, not open.
+
+---
+
+## Setup: custom connector
+
+### 1. Set the signing secret
+
+Generate one:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+In Vercel, Settings, Environment Variables, add `MCP_OAUTH_SECRET` with that value for
+Production. Redeploy.
+
+Changing this value later signs everyone out, which is the emergency stop if you ever
+need one.
+
+### 2. Add the connector
+
+In Claude, Settings, Connectors, **Add custom connector**:
+
+- **Name:** Motus
+- **MCP server URL:** `https://zhlmotus.vercel.app/api/mcp`
+
+Claude discovers the rest by itself, registers, and opens a Motus sign-in page. Sign in
+with your normal `@zhenghe.com.sg` email and password. That is the whole flow.
+
+### 3. Check it worked
+
+The connector shows as connected with 8 tools. Ask it "how did we do last quarter".
+
+---
+
+## Setup: static token
+
+### 1. Generate a token per person
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -36,28 +80,25 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ### 2. Add them to Vercel
 
-Project settings, Environment Variables, add `MCP_TOKENS` for Production:
+Add `MCP_TOKENS` for Production as comma-separated `label:secret` pairs:
 
 ```
 max:<token>,director:<token>
 ```
 
-Comma-separated `label:secret` pairs. The label is only for the logs. Redeploy for it to
-take effect.
-
-If `MCP_TOKENS` is not set, the endpoint returns 503 and no tools are reachable. That is
-deliberate: missing configuration means off, not open.
+The label is only for the logs, so a call is attributable to a person rather than to
+"someone with a valid token". Redeploy.
 
 ### 3. Connect
 
-**Claude Code** (one line, per machine):
+Claude Code:
 
 ```bash
 claude mcp add --transport http motus https://zhlmotus.vercel.app/api/mcp \
   --header "Authorization: Bearer <your token>"
 ```
 
-**Claude Desktop**, in `claude_desktop_config.json`:
+Claude Desktop, in Settings, Developer, Edit Config:
 
 ```json
 {
@@ -79,9 +120,6 @@ curl -s https://zhlmotus.vercel.app/api/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -c 400
 ```
-
-A list of tools means you are done. `401` means the token is wrong, `503` means
-`MCP_TOKENS` is not set on the deployment you are hitting.
 
 ---
 
@@ -117,38 +155,57 @@ Adding writes later is reasonable, in this order:
 2. Low-blast-radius creates first: a lead, a note, a cost line.
 3. Never `delete_*`. If something has to be removed, a human does it in the app.
 
+A unit test fails if a tool named `create_*`, `update_*` or `delete_*` is added, so this
+cannot be undone by accident.
+
 ---
 
-## What this is not, yet
+## How the OAuth side works
 
-This is a **personal** connector: it authenticates with a static token, which works in
-Claude Code and Claude Desktop where you control the config file.
+Enough of OAuth 2.1 to be a custom connector, and no more:
 
-It is not yet a **custom connector** on claude.ai, the kind anyone on the team adds from
-Settings. That flow expects OAuth so that each user logs in as themselves and the
-connector holds a token scoped to that person. Motus does not have an OAuth server, only
-Supabase sessions, so that needs an authorize endpoint, a token endpoint and dynamic
-client registration added on our side, with Supabase still doing the actual login.
+- **Discovery.** An unauthenticated call to `/api/mcp` answers 401 with a
+  `WWW-Authenticate` header naming `/.well-known/oauth-protected-resource`, which points
+  at the authorization server, whose metadata lists the endpoints. The two `.well-known`
+  paths are served by rewrites in `vercel.json`.
+- **Registration.** Claude registers itself (RFC 7591), so there is no client id to
+  distribute. Registration rejects any redirect URI that is not https, loopback http or
+  a private scheme.
+- **Login.** Supabase does the password check. Motus never sees or stores a password, and
+  the same `@zhenghe.com.sg` rule as the app applies. Disabling someone in Supabase
+  disables them here.
+- **PKCE is mandatory**, S256 only. `plain` is refused.
+- **Access tokens** are signed JWTs valid for one hour, so verifying a call costs no
+  database round trip. **Refresh tokens** are rows, rotate on every use, and last 30 days.
+- **Replay detection.** An authorization code presented twice revokes every refresh token
+  for that user and client, and logs it.
 
-Worth doing once it is clear people use this. Not worth doing first.
+Tables: `oauth_clients`, `oauth_codes`, `oauth_refresh_tokens`. They are created
+automatically on deploy by the usual schema bootstrap. There is no SQL to run by hand.
 
 ---
 
 ## Troubleshooting
 
-**503 "not configured"** — `MCP_TOKENS` is unset on that deployment, or it was added
-without a redeploy.
+**503 "not configured"** — neither `MCP_OAUTH_SECRET` nor `MCP_TOKENS` is set on that
+deployment, or they were added without a redeploy.
 
-**401** — token mismatch. Check for a trailing comma or a stray space in `MCP_TOKENS`;
-the secret is everything after the first colon, so a space after the colon becomes part
-of the secret.
+**401 on a static token** — check for a stray space in `MCP_TOKENS`. The secret is
+everything after the first colon, so a space after the colon becomes part of the secret.
 
-**Claude says a customer does not exist** — `company_stats` matches the name exactly.
-Ask it to call `list_companies` first.
+**The connector will not add** — check that
+`https://zhlmotus.vercel.app/.well-known/oauth-protected-resource` returns JSON rather
+than the app's HTML. HTML means the rewrites in `vercel.json` did not deploy.
 
-**A tool returns an error message instead of data** — that is by design. Tool failures
-come back inside a normal result so Claude can read what went wrong and correct itself,
-rather than aborting the turn.
+**Everyone signed out at once** — `MCP_OAUTH_SECRET` changed. Every token signed with the
+old value is now invalid. People just reconnect.
 
-**Finding the logs** — Vercel function logs, filter for `[ZHL:mcp]`. Each tool call logs
-the token label and the tool name.
+**Claude says a customer does not exist** — `company_stats` matches the name exactly. Ask
+it to call `list_companies` first.
+
+**A tool returns an error message instead of data** — by design. Tool failures come back
+inside a normal result so Claude can read what went wrong and correct itself, rather than
+aborting the turn.
+
+**Logs** — Vercel function logs. `[ZHL:mcp]` for tool calls, `[ZHL:oauth]` for sign-ins,
+registrations and replay warnings.
