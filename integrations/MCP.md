@@ -53,7 +53,7 @@ deliberate: missing configuration means off, not open.
 **Claude Code** (one line, per machine):
 
 ```bash
-claude mcp add --transport http motus https://<motus-domain>/api/mcp \
+claude mcp add --transport http motus https://zhlmotus.vercel.app/api/mcp \
   --header "Authorization: Bearer <your token>"
 ```
 
@@ -64,7 +64,7 @@ claude mcp add --transport http motus https://<motus-domain>/api/mcp \
   "mcpServers": {
     "motus": {
       "type": "http",
-      "url": "https://<motus-domain>/api/mcp",
+      "url": "https://zhlmotus.vercel.app/api/mcp",
       "headers": { "Authorization": "Bearer <your token>" }
     }
   }
@@ -74,7 +74,7 @@ claude mcp add --transport http motus https://<motus-domain>/api/mcp \
 ### 4. Check it works
 
 ```bash
-curl -s https://<motus-domain>/api/mcp \
+curl -s https://zhlmotus.vercel.app/api/mcp \
   -H "Authorization: Bearer <your token>" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -c 400
