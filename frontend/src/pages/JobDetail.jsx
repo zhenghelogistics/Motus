@@ -12,7 +12,7 @@ import {
   getRateCards, previewRates
 } from '../api'
 import DimensionBoxes from '../components/DimensionBoxes'
-import { autoFillSplit, computeEntityTotals, jobSplitIssues, lineSplitStatus } from '../utils/splitInvoicing'
+import { autoFillSplit, computeEntityTotals, jobSplitIssues, lineSplitStatus, lineTotalOf } from '../utils/splitInvoicing'
 import {
   X, ClipboardList, FileText, Ban, ArrowLeft, Download, Truck, Package, Stamp,
   ChevronDown, ChevronRight, Check, Upload, AlertTriangle, Pencil, RotateCcw, Paperclip, Info,
@@ -393,6 +393,52 @@ export default function JobDetail() {
     else await setCostLineSplits(id, line.id, splits)
     setSplitModal(null)
     refreshTotals()
+  }
+
+  // Splits every line on the job in one go, using each entity's share.
+  //
+  // Doing it a line at a time means three numbers per line, and as the sales manager put
+  // it, by the third one you would rather just bill the lump sum. That is how split
+  // invoicing stops getting used. Shares are set once on the entities; this applies them
+  // everywhere, and any line that needs a different division can still be edited by hand
+  // afterwards.
+  const [autoSplitting, setAutoSplitting] = useState(false)
+  async function autoSplitEveryLine() {
+    const job = jobRef.current
+    const entities = job.split_entities || []
+    if (!entities.length) return
+
+    const totalShare = entities.reduce((s, e) => s + (Number(e.default_share) || 0), 0)
+    if (!totalShare) {
+      alert('Set a share against each entity first, otherwise there is nothing to divide by.')
+      return
+    }
+
+    const billing = job.billing_lines || []
+    const cost = job.cost_lines || []
+    if (!billing.length && !cost.length) return
+    if (!confirm(
+      `Split all ${billing.length + cost.length} line(s) across ${entities.length} entities by their shares?\n\n` +
+      `This overwrites any split amounts already entered on this job.`
+    )) return
+
+    setAutoSplitting(true)
+    try {
+      // Sequential rather than parallel: each call rewrites a row set for the job, and a
+      // burst of them against a 2-connection pool is how the dashboard used to time out.
+      for (const l of billing) {
+        await setBillingLineSplits(id, l.id, autoFillSplit(lineTotalOf(l, 'billing'), entities))
+      }
+      for (const l of cost) {
+        await setCostLineSplits(id, l.id, autoFillSplit(lineTotalOf(l, 'cost'), entities))
+      }
+      refreshTotals()
+    } catch (err) {
+      console.error('[ZHL] auto-split failed', err)
+      alert('Could not split every line. Refresh and check which ones went through.')
+    } finally {
+      setAutoSplitting(false)
+    }
   }
 
   function refreshTotals() { getJob(id).then(r => setJob(r.data)) }
@@ -816,6 +862,9 @@ export default function JobDetail() {
     doc.text('INVOICE', pw - mr, 15, { align: 'right' })
     doc.setFontSize(9); doc.setFont('helvetica', 'normal')
     doc.text(`Invoice No.: ${entity.invoice_no || '—'}`, pw - mr, 28, { align: 'right' })
+    // The consignee's own reference. Capturing it is only worth anything if it reaches
+    // the paperwork they have to match against their records.
+    if (entity.consignee_ref) doc.text(`Your Ref: ${entity.consignee_ref}`, pw - mr, 33, { align: 'right' })
 
     const labelCol = { fontStyle: 'bold', fillColor: [237, 242, 248], textColor: navy, cellWidth: lw }
     const valCol   = { cellWidth: vw }
@@ -2065,7 +2114,15 @@ export default function JobDetail() {
       <div className="card mb-4">
         <div className="section-title">
           Split Invoicing
-          <button className="btn btn-outline btn-sm" onClick={addEntity}>+ Add Entity</button>
+          <span style={{ display: 'inline-flex', gap: 8 }}>
+            {(job.split_entities||[]).length > 0 && (
+              <button className="btn btn-navy btn-sm" onClick={autoSplitEveryLine} disabled={autoSplitting || job.status === 'Voided'}
+                title="Divide every cost and billing line across the entities using their shares">
+                {autoSplitting ? 'Splitting…' : 'Split all lines by share'}
+              </button>
+            )}
+            <button className="btn btn-outline btn-sm" onClick={addEntity}>+ Add Entity</button>
+          </span>
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.6 }}>
           Divide this job's billing/cost across separate entities (e.g. different outlets of the same client), each with their own invoice.
@@ -2584,7 +2641,9 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
       <thead>
         <tr>
           <th style={{width:24}}></th>
-          <th>Name</th><th>Contact</th><th style={{width:110}}>Invoice No.</th>
+          <th>Name</th><th>Contact</th>
+          <th style={{width:110}} title="The consignee's own reference for this invoice, e.g. their PO number">Their Ref</th>
+          <th style={{width:110}}>Invoice No.</th>
           <th style={{width:90}} title="Relative weight used only by the 'Auto-fill by share' button when splitting a line — e.g. 8 vs 5 means this entity gets 8/13 when you click auto-fill.">Default Share <Info size={12} style={{ verticalAlign: 'text-bottom' }} /></th>
           <th style={{width:230}}>Totals</th><th style={{width:150}}></th>
         </tr>
@@ -2620,6 +2679,10 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                     <span style={{ fontSize:12 }}>{e.contact_name || '—'}{e.contact_number ? ` · ${e.contact_number}` : ''}</span>
                   )}
                 </td>
+                {/* The consignee's own reference, e.g. their PO number. Distinct from
+                    Invoice No., which is ours. Split billing goes to different consignees
+                    for the same shipper, and each wants their own reference on the paperwork. */}
+                <td>{isEdit ? <input className="form-control form-control-sm" value={d.consignee_ref||''} onChange={ev => setDraft(e.id,'consignee_ref',ev.target.value)} placeholder="Their PO / ref" /> : (e.consignee_ref||'—')}</td>
                 <td>{isEdit ? <input className="form-control form-control-sm" value={d.invoice_no||''} onChange={ev => setDraft(e.id,'invoice_no',ev.target.value)} /> : (e.invoice_no||'—')}</td>
                 <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.default_share ?? 1} onChange={ev => setDraft(e.id,'default_share',parseFloat(ev.target.value)||0)} /> : (e.default_share ?? 1)}</td>
                 <td style={{ fontSize:11 }}>
@@ -2894,13 +2957,39 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
           <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="modal-body" style={{ padding: '20px 24px' }}>
+          {/* The line being split, spelled out. Splitting is done against one charge at a
+              time and the person doing it needs to see which charge and what it is made
+              of, not just a total. */}
+          <div style={{ padding: '10px 12px', marginBottom: 14, background: 'var(--sail, #F5F8FC)', borderRadius: 8 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--heading)' }}>
+              {lineType === 'cost' ? (line.vendor || 'Cost line') : (line.service || 'Billing line')}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+              {lineType === 'cost'
+                ? `${line.service ? `${line.service} · ` : ''}${fmt(lineTotal)}`
+                : `${fmt(line.rate || 0)}${line.unit ? ` / ${line.unit}` : ''} × ${line.qty ?? 1} = ${fmt(lineTotal)}`}
+            </div>
+          </div>
+
           <div className="flex-between mb-3">
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Line total: {fmt(lineTotal)}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Assign to each consignee</span>
             <button className="btn btn-ghost btn-xs" onClick={autoFill}>Auto-fill by share</button>
           </div>
           {entities.map(e => (
             <div key={e.id} className="form-group mb-2" style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <label className="form-label" style={{ flex:1, marginBottom:0 }}>{e.name || `Entity ${e.id}`}</label>
+              <div style={{ flex:1, minWidth:0 }}>
+                {/* Who is being billed, and their own reference for it. Without these the
+                    row said "Entity 3" and the person splitting had to remember which
+                    consignee that was. */}
+                <div className="form-label" style={{ marginBottom:0 }}>{e.name || `Entity ${e.id}`}</div>
+                {(e.consignee_ref || e.invoice_no) && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {e.consignee_ref ? `Their ref: ${e.consignee_ref}` : ''}
+                    {e.consignee_ref && e.invoice_no ? ' · ' : ''}
+                    {e.invoice_no ? `Our inv: ${e.invoice_no}` : ''}
+                  </div>
+                )}
+              </div>
               <input
                 type="number"
                 className="form-control form-control-sm"

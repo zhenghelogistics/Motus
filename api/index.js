@@ -213,6 +213,11 @@ async function initDB() {
   // often staged at a third party (a supplier, a warehouse, a forwarder's dock), and
   // the Pickup Request Order has to name that place, not the shipper of record.
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pickup_company TEXT DEFAULT ''`);
+  // The consignee's own reference for their invoice (their PO or job number), as
+  // distinct from invoice_no, which is OUR invoice number for that entity. Split
+  // billing goes to different consignees for the same shipper, and each one wants to
+  // see their own reference on the paperwork.
+  await pool.query(`ALTER TABLE split_entities ADD COLUMN IF NOT EXISTS consignee_ref TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS rate_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
@@ -1326,12 +1331,12 @@ app.delete('/api/jobs/:id/billing/:lid', async (req, res) => {
 // ─── SPLIT INVOICING (multi-entity billing) ────────────────────────────────
 app.post('/api/jobs/:id/split-entities', async (req, res) => {
   try {
-    const { name='', billing_address='', contact_name='', contact_number='', contact_email='', invoice_no='', default_share=1 } = req.body;
+    const { name='', billing_address='', contact_name='', contact_number='', contact_email='', invoice_no='', consignee_ref='', default_share=1 } = req.body;
     const countRes = await pool.query('SELECT COUNT(*) FROM split_entities WHERE job_id=$1', [req.params.id]);
     const sortOrder = parseInt(countRes.rows[0].count, 10);
     const r = await pool.query(
-      'INSERT INTO split_entities (job_id,name,billing_address,contact_name,contact_number,contact_email,invoice_no,default_share,sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-      [req.params.id, name, billing_address, contact_name, contact_number, contact_email, invoice_no, default_share, sortOrder]
+      'INSERT INTO split_entities (job_id,name,billing_address,contact_name,contact_number,contact_email,invoice_no,consignee_ref,default_share,sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+      [req.params.id, name, billing_address, contact_name, contact_number, contact_email, invoice_no, consignee_ref, default_share, sortOrder]
     );
     res.status(201).json(r.rows[0]);
   } catch (err) {
@@ -1342,10 +1347,10 @@ app.post('/api/jobs/:id/split-entities', async (req, res) => {
 
 app.put('/api/jobs/:id/split-entities/:eid', async (req, res) => {
   try {
-    const { name='', billing_address='', contact_name='', contact_number='', contact_email='', invoice_no='', default_share=1 } = req.body;
+    const { name='', billing_address='', contact_name='', contact_number='', contact_email='', invoice_no='', consignee_ref='', default_share=1 } = req.body;
     const r = await pool.query(
-      'UPDATE split_entities SET name=$1,billing_address=$2,contact_name=$3,contact_number=$4,contact_email=$5,invoice_no=$6,default_share=$7 WHERE id=$8 AND job_id=$9 RETURNING *',
-      [name, billing_address, contact_name, contact_number, contact_email, invoice_no, default_share, req.params.eid, req.params.id]
+      'UPDATE split_entities SET name=$1,billing_address=$2,contact_name=$3,contact_number=$4,contact_email=$5,invoice_no=$6,consignee_ref=$7,default_share=$8 WHERE id=$9 AND job_id=$10 RETURNING *',
+      [name, billing_address, contact_name, contact_number, contact_email, invoice_no, consignee_ref, default_share, req.params.eid, req.params.id]
     );
     res.json(r.rows[0]);
   } catch (err) {
