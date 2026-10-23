@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { AlertTriangle, ArrowRight } from 'lucide-react'
 import { getDashboard, getJobs } from '../api'
-import { parseLocalDate } from '../utils/format'
+import { parseLocalDate, nameFromEmail } from '../utils/format'
 
 const fmt = (n) => n == null ? '—' : `$${Number(n).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtGP = (n) => n == null ? '—' : `${Number(n).toFixed(1)}%`
@@ -70,7 +70,8 @@ export default function Dashboard() {
   if (loading) return <div className="empty-state"><div className="spinner spinner-dark" style={{ width: 32, height: 32, margin: '48px auto' }}></div></div>
   if (!data) return <div className="alert alert-error">Failed to load dashboard: {error}</div>
 
-  const { this_month: m, trend, upcoming_deadlines, flagged_jobs, status_counts, missing_costing_count } = data
+  const { this_month: m, trend, upcoming_deadlines, flagged_jobs, status_counts, missing_costing_count, needs_invoicing } = data
+  const unbilled = needs_invoicing || { total: 0, oldest_days: 0, by_owner: [] }
 
   return (
     <div>
@@ -163,29 +164,51 @@ export default function Dashboard() {
           }
         </div>
 
-        {/* Flagged jobs */}
+        {/* Work that has shipped and still has nothing billed against it. Deliberately
+            not a list of "jobs with no billing line": a job is a workspace, so most of
+            those are simply still being negotiated, and a count nobody is responsible
+            for is a count nobody acts on. Each row names an owner and how long it has
+            been waiting. */}
         <div className="card">
-          <div className="section-title">Jobs Missing Costing</div>
+          <div className="section-title">
+            Waiting To Be Invoiced
+            {unbilled.total > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 700, color: unbilled.oldest_days >= 7 ? '#9B1C1C' : '#92400E' }}>
+                {unbilled.total} job{unbilled.total === 1 ? '' : 's'}
+                {unbilled.oldest_days > 0 && ` · oldest ${unbilled.oldest_days}d`}
+              </span>
+            )}
+          </div>
           {flagged_jobs.length === 0
-            ? <p className="text-muted" style={{ fontSize: 13 }}>All jobs have billing lines.</p>
-            : <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  {['Job No.', 'Shipper', 'Status'].map(h => (
-                    <th key={h} style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11, color: '#6B7E93', fontWeight: 700, textTransform: 'uppercase', borderBottom: '1px solid #D1DCE8', background: 'none' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {flagged_jobs.map(j => (
-                  <tr key={j.id} className="tr-link" onClick={() => navigate(`/jobs/${j.id}`)}>
-                    <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--heading)', fontSize: 13 }}>{j.job_number}</td>
-                    <td style={{ padding: '7px 8px', fontSize: 13 }}>{j.shipper || '—'}</td>
-                    <td style={{ padding: '7px 8px' }}><StatusPill status={j.status} /></td>
+            ? <p className="text-muted" style={{ fontSize: 13 }}>Everything delivered has been billed.</p>
+            : <>
+              {unbilled.by_owner.length > 0 && (
+                <p style={{ fontSize: 12.5, color: '#6B7E93', margin: '0 0 10px' }}>
+                  {unbilled.by_owner.map(o => `${nameFromEmail(o.owner)} ${o.jobs}`).join(' · ')}
+                </p>
+              )}
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {['Job No.', 'Consignee', 'Owner', 'Waiting'].map(h => (
+                      <th key={h} style={{ textAlign: h === 'Waiting' ? 'right' : 'left', padding: '6px 8px', fontSize: 11, color: '#6B7E93', fontWeight: 700, textTransform: 'uppercase', borderBottom: '1px solid #D1DCE8', background: 'none' }}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {flagged_jobs.map(j => (
+                    <tr key={j.id} className="tr-link" onClick={() => navigate(`/jobs/${j.id}`)}>
+                      <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--heading)', fontSize: 13 }}>{j.job_number}</td>
+                      <td style={{ padding: '7px 8px', fontSize: 13 }}>{j.consignee || j.shipper || '—'}</td>
+                      <td style={{ padding: '7px 8px', fontSize: 13 }}>{nameFromEmail(j.owner)}</td>
+                      <td style={{ padding: '7px 8px', fontSize: 13, textAlign: 'right', fontWeight: 700, color: j.days_waiting >= 7 ? '#9B1C1C' : j.days_waiting >= 3 ? '#92400E' : '#6B7E93' }}>
+                        {j.days_waiting}d
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           }
         </div>
       </div>

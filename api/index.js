@@ -1841,7 +1841,7 @@ app.get('/api/dashboard', async (req, res) => {
     const in7days = new Date(now.getTime() + 7*24*60*60*1000).toISOString().split('T')[0];
 
     // All queries run in parallel — no loops, no N+1
-    const [monthRes, byModeRes, trendRes, upcomingRes, flaggedRes, statusRes, missingCountRes] = await Promise.all([
+    const [monthRes, byModeRes, trendRes, upcomingRes, flaggedRes, statusRes, unbilledByOwnerRes] = await Promise.all([
       // This month KPIs
       pool.query(`
         SELECT COUNT(DISTINCT j.id) AS jobs,
@@ -1883,10 +1883,27 @@ app.get('/api/dashboard', async (req, res) => {
         [today, in7days]
       ),
 
-      // Flagged — no billing lines
-      pool.query(
-        'SELECT j.id,j.job_number,j.shipper,j.status FROM jobs j WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id) ORDER BY j.id DESC LIMIT 10'
-      ),
+      // Jobs that have finished and still have nothing billed against them.
+      //
+      // This used to be every job with no billing line, whatever its status. A job is a
+      // workspace here: staff open one when the enquiry lands and price it over the
+      // following days, so that old query counted everything anyone was still
+      // negotiating. It produced a large number that was nobody's fault and nobody's
+      // job, which is the reliable way to make a warning invisible.
+      //
+      // The trigger is delivery, not status: `status` is hand-maintained and lags, while
+      // date_delivered is a statement that the cargo landed. Either is enough.
+      pool.query(`
+        SELECT j.id, j.job_number, j.shipper, j.consignee, j.status, j.date_delivered,
+               COALESCE(NULLIF(TRIM(j.salesperson),''), NULLIF(TRIM(j.created_by),''), 'Unassigned') AS owner,
+               GREATEST(0, DATE_PART('day', NOW() - COALESCE(j.date_delivered::timestamp, j.created_at)))::int AS days_waiting
+        FROM jobs j
+        WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id = j.id)
+          AND j.status <> 'Voided'
+          AND (j.status = 'Completed' OR (j.date_delivered IS NOT NULL AND j.date_delivered::date <= CURRENT_DATE))
+        ORDER BY days_waiting DESC, j.id DESC
+        LIMIT 25
+      `),
 
       // Status counts (for status overview widget)
       pool.query(`
@@ -1896,14 +1913,27 @@ app.get('/api/dashboard', async (req, res) => {
         GROUP BY status
       `),
 
-      // Total missing costing count (not limited to 10)
+      // The same set, per person, so the number has an owner rather than being a
+      // company-wide total. "Brandon, 3 jobs, oldest 11 days" gets acted on; "47 jobs
+      // missing costing" does not.
       pool.query(`
-        SELECT COUNT(j.id) AS count
+        SELECT COALESCE(NULLIF(TRIM(j.salesperson),''), NULLIF(TRIM(j.created_by),''), 'Unassigned') AS owner,
+               COUNT(j.id) AS jobs,
+               MAX(GREATEST(0, DATE_PART('day', NOW() - COALESCE(j.date_delivered::timestamp, j.created_at))))::int AS oldest_days
         FROM jobs j
-        WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id=j.id)
-          AND j.status != 'Voided'
+        WHERE NOT EXISTS (SELECT 1 FROM billing_lines b WHERE b.job_id = j.id)
+          AND j.status <> 'Voided'
+          AND (j.status = 'Completed' OR (j.date_delivered IS NOT NULL AND j.date_delivered::date <= CURRENT_DATE))
+        GROUP BY 1
+        ORDER BY oldest_days DESC, jobs DESC
       `),
     ]);
+
+    const byOwner = unbilledByOwnerRes.rows.map(r => ({
+      owner: r.owner,
+      jobs: parseInt(r.jobs),
+      oldest_days: parseInt(r.oldest_days) || 0,
+    }));
 
     const m = monthRes.rows[0];
     const monthRevenue = parseFloat(m.revenue);
@@ -1940,7 +1970,17 @@ app.get('/api/dashboard', async (req, res) => {
       upcoming_deadlines: upcomingRes.rows,
       flagged_jobs: flaggedRes.rows,
       status_counts: Object.fromEntries(statusRes.rows.map(r => [r.status, parseInt(r.count)])),
-      missing_costing_count: parseInt(missingCountRes.rows[0].count)
+      // Work that has shipped and has not been billed, with an owner against each one.
+      // `flagged_jobs` is capped at 25 rows for display, so the total comes from the
+      // per-owner aggregate instead of that list's length.
+      needs_invoicing: {
+        total: byOwner.reduce((s, r) => s + r.jobs, 0),
+        oldest_days: byOwner.reduce((m, r) => Math.max(m, r.oldest_days), 0),
+        by_owner: byOwner,
+      },
+      // Retained under its original name so nothing reading it breaks. Its meaning has
+      // narrowed from "no billing line yet" to "finished and still unbilled".
+      missing_costing_count: byOwner.reduce((s, r) => s + r.jobs, 0)
     });
   } catch (err) {
     console.error(`[ZHL] ${req.method} ${req.url}`, err.message);
