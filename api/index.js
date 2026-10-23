@@ -9,8 +9,8 @@ const { extractCargoLines } = require('./cargoLines');
 const { deriveMetrics, computeRateAmount } = require('./rateCalc');
 const { deriveLeadMetrics, deriveReengagementList } = require('./monthlyReport');
 const { periodWindow, deriveMovementMetrics, deriveTrend, compareBreakdown, compareMargins } = require('./movementReport');
-const { parseTokens: parseMcpTokens, identifyToken: identifyMcpToken, handleRpc: handleMcpRpc } = require('./mcp');
-const oauth = require('./oauth');
+const { parseTokens: parseMcpTokens, identifyToken: identifyMcpToken, handleRpc: handleMcpRpc } = require('./mcpServer');
+const oauth = require('./oauthServer');
 const app = express();
 
 // Return NUMERIC/DECIMAL (type OID 1700) as a JS number instead of a string.
@@ -3632,7 +3632,7 @@ app.delete('/api/marketing-contacts/:id', async (req, res) => {
 // ─── OAUTH FOR THE MCP CONNECTOR ─────────────────────────────────────────────
 // Everything needed for Motus to appear under "Add custom connector": discovery, self
 // registration, a login page, and a token endpoint. The protocol rules live in
-// ./oauth.js; this is the storage and the HTTP.
+// ./oauthServer.js; this is the storage and the HTTP.
 //
 // Supabase remains the only thing that checks a password. We proxy the credentials
 // straight to it, keep nothing, and a user disabled there is disabled here.
@@ -4016,11 +4016,11 @@ app.post('/api/oauth/revoke', express.urlencoded({ extended: false }), async (re
 // Lets Claude read Motus directly: ask "how did sea freight do last quarter" and get an
 // answer from live data instead of from a deck someone exported last week.
 //
-// The protocol envelope and the tool catalogue live in ./mcp.js so they can be unit
+// The protocol envelope and the tool catalogue live in ./mcpServer.js so they can be unit
 // tested without a database. What follows is only the implementations — the SQL — plus
 // the HTTP route that joins the two.
 //
-// Read-only on purpose; see the note at the top of mcp.js.
+// Read-only on purpose; see the note at the top of mcpServer.js.
 
 // Tool results are read into a model's context window, so a search returns a summary
 // rather than SELECT *. The full row is a get_job away when it is actually needed.

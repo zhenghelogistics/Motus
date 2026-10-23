@@ -5,7 +5,7 @@ const {
   SCOPE, randomToken, hashToken, isUsableRedirectUri, isRegisteredRedirectUri,
   verifyPkce, validateRegistration, validateAuthorizeParams, buildRedirect,
   signAccessToken, verifyAccessToken, authServerMetadata, protectedResourceMetadata,
-} = require('./oauth')
+} = require('./oauthServer')
 
 const ISSUER = 'https://zhlmotus.vercel.app'
 const SECRET = 'test-signing-secret'

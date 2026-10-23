@@ -1,10 +1,44 @@
 const test = require('node:test')
 const assert = require('node:assert')
+const fs = require('node:fs')
+const path = require('node:path')
 const {
   TOOLS, LATEST_PROTOCOL, parseTokens, identifyToken, handleRpc,
-} = require('./mcp')
+} = require('./mcpServer')
 
 const noImpls = {}
+
+// ─── DEPLOYMENT SHAPE ────────────────────────────────────────────────────────
+// This one is here because it took production down.
+//
+// Vercel turns every file under /api into its own serverless function, named after the
+// file. A helper called api/mcp.js therefore IS the route /api/mcp, it wins over the
+// rewrite that sends /api/* to index.js, and Vercel invokes a module that exports a
+// plain object instead of a handler. The result is FUNCTION_INVOCATION_FAILED on every
+// request to that path, with the rest of the app looking perfectly healthy.
+//
+// Hence mcpServer.js rather than mcp.js. The existing helpers (rateCalc, movementReport,
+// leadConversion) never hit this only because none of their names happen to match a route.
+test('no helper module is named after a route it would then shadow', () => {
+  const apiDir = __dirname
+  const modules = fs.readdirSync(apiDir)
+    .filter(f => f.endsWith('.js') && f !== 'index.js')
+    .map(f => f.replace(/\.js$/, ''))
+
+  const source = fs.readFileSync(path.join(apiDir, 'index.js'), 'utf8')
+  const firstSegments = new Set()
+  for (const m of source.matchAll(/app\.(?:get|post|put|delete|all|use)\(\s*'\/api\/([^'/\s]+)/g)) {
+    firstSegments.add(m[1])
+  }
+  assert.ok(firstSegments.size > 10, 'route scan found almost nothing, so this test is not actually checking anything')
+
+  for (const mod of modules) {
+    assert.ok(
+      !firstSegments.has(mod),
+      `api/${mod}.js collides with the route /api/${mod}: Vercel would serve the module as the function and the route would 500. Rename the module.`
+    )
+  }
+})
 
 // ─── TOOL CATALOGUE ──────────────────────────────────────────────────────────
 
