@@ -1803,6 +1803,7 @@ export default function JobDetail() {
           entities={job.split_entities||[]}
           onClose={() => setSplitModal(null)}
           onSave={splits => saveLineSplits(splitModal.line, splitModal.lineType, splits)}
+          onSaveEntityRef={(entity, consignee_ref) => saveEntity(entity.id, { ...entity, consignee_ref })}
         />
       )}
 
@@ -2907,7 +2908,7 @@ function SplitButton({ line, lineType, onEditSplits, locked }) {
 }
 
 // ── Line Split Modal ───────────────────────────────────────────────────────
-function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
+function LineSplitModal({ line, lineType, entities, onClose, onSave, onSaveEntityRef }) {
   const lineTotal = lineType === 'billing' ? (line.total ?? (line.rate||0)*(line.qty||1)) : (line.amount||0)
   const [amounts, setAmounts] = useState(() => {
     const init = {}
@@ -2917,7 +2918,34 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
     })
     return init
   })
+  // The consignee's own reference, edited here rather than only in the entity table,
+  // because this is the screen someone is on when they are thinking about who gets what.
+  const [refs, setRefs] = useState(() => {
+    const init = {}
+    entities.forEach(e => { init[e.id] = e.consignee_ref || '' })
+    return init
+  })
   const [saving, setSaving] = useState(false)
+
+  // Splitting a freight charge is really a split of quantity: three of the ten cartons
+  // go to this consignee. Entering dollars means doing rate x qty in your head for every
+  // party on every line, which is what made people give up and bill the lot to one of
+  // them. Qty is derived from the stored amount rather than stored itself, so there is no
+  // second source of truth to drift.
+  const rate = lineType === 'billing' ? (Number(line.rate) || 0) : 0
+  const splitByQty = rate > 0
+  const qtyFor = (entityId) => {
+    const amt = parseFloat(amounts[entityId])
+    if (!Number.isFinite(amt) || !splitByQty) return ''
+    return Math.round((amt / rate) * 1000) / 1000
+  }
+  const setQty = (entityId, raw) => {
+    const q = parseFloat(raw)
+    setAmounts(a => ({
+      ...a,
+      [entityId]: raw === '' || !Number.isFinite(q) ? '' : Math.round(q * rate * 100) / 100,
+    }))
+  }
 
   const splitSum = entities.reduce((s, e) => s + (parseFloat(amounts[e.id]) || 0), 0)
   const reconciled = Math.abs(splitSum - lineTotal) < 0.005
@@ -2944,6 +2972,13 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
 
   async function handleSave() {
     setSaving(true)
+    // References first: they belong to the entity, not to this line, and saving the
+    // splits closes the modal.
+    if (onSaveEntityRef) {
+      for (const e of entities) {
+        if ((refs[e.id] || '') !== (e.consignee_ref || '')) await onSaveEntityRef(e, refs[e.id] || '')
+      }
+    }
     const splits = entities.map(e => ({ entity_id: e.id, amount: parseFloat(amounts[e.id]) || 0 }))
     await onSave(splits)
     setSaving(false)
@@ -2951,7 +2986,7 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Split — {line.service || (lineType==='cost' ? line.vendor : '')}</h2>
           <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
@@ -2972,33 +3007,67 @@ function LineSplitModal({ line, lineType, entities, onClose, onSave }) {
           </div>
 
           <div className="flex-between mb-3">
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Assign to each consignee</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {splitByQty ? 'Enter quantity or amount for each consignee' : 'Assign to each consignee'}
+            </span>
             <button className="btn btn-ghost btn-xs" onClick={autoFill}>Auto-fill by share</button>
           </div>
-          {entities.map(e => (
-            <div key={e.id} className="form-group mb-2" style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                {/* Who is being billed, and their own reference for it. Without these the
-                    row said "Entity 3" and the person splitting had to remember which
-                    consignee that was. */}
-                <div className="form-label" style={{ marginBottom:0 }}>{e.name || `Entity ${e.id}`}</div>
-                {(e.consignee_ref || e.invoice_no) && (
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {e.consignee_ref ? `Their ref: ${e.consignee_ref}` : ''}
-                    {e.consignee_ref && e.invoice_no ? ' · ' : ''}
-                    {e.invoice_no ? `Our inv: ${e.invoice_no}` : ''}
-                  </div>
-                )}
-              </div>
-              <input
-                type="number"
-                className="form-control form-control-sm"
-                style={{ width:120 }}
-                value={amounts[e.id] ?? ''}
-                onChange={ev => setAmounts(a => ({ ...a, [e.id]: ev.target.value }))}
-              />
-            </div>
-          ))}
+
+          {/* Laid out as the cost and billing tables are, with the consignee and their
+              own reference in front of the figures, so this reads as the same kind of
+              thing rather than a bare list of boxes labelled "Entity 3". */}
+          <table className="inline-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>Consignee</th>
+                <th style={{ width: 130 }} title="The consignee's own reference, e.g. their PO number">Customer Ref</th>
+                {lineType === 'cost'
+                  ? <th style={{ width: 120 }}>Vendor</th>
+                  : <>
+                      <th style={{ width: 90, textAlign: 'right' }}>Rate</th>
+                      <th style={{ width: 90 }}>Qty</th>
+                    </>}
+                <th style={{ width: 120 }}>{lineType === 'cost' ? 'Amount' : 'Total'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entities.map(e => (
+                <tr key={e.id}>
+                  <td style={{ fontWeight: 600, color: 'var(--heading)' }}>
+                    {e.name || `Entity ${e.id}`}
+                    {e.invoice_no && (
+                      <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--text-muted)' }}>Our inv: {e.invoice_no}</div>
+                    )}
+                  </td>
+                  <td>
+                    <input className="form-control form-control-sm" placeholder="Their PO / ref"
+                      value={refs[e.id] ?? ''}
+                      onChange={ev => setRefs(r => ({ ...r, [e.id]: ev.target.value }))} />
+                  </td>
+                  {lineType === 'cost'
+                    ? <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{line.vendor || '—'}</td>
+                    : <>
+                        {/* Read-only: the rate belongs to the line, and every consignee
+                            pays the same one. Splitting changes who takes how much of it. */}
+                        <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)' }}>
+                          {fmt(rate)}{line.unit ? <span style={{ fontSize: 10.5 }}> /{line.unit}</span> : null}
+                        </td>
+                        <td>
+                          <input type="number" className="form-control form-control-sm" disabled={!splitByQty}
+                            title={splitByQty ? '' : 'This line has no rate, so enter the amount directly'}
+                            value={qtyFor(e.id)}
+                            onChange={ev => setQty(e.id, ev.target.value)} />
+                        </td>
+                      </>}
+                  <td>
+                    <input type="number" className="form-control form-control-sm"
+                      value={amounts[e.id] ?? ''}
+                      onChange={ev => setAmounts(a => ({ ...a, [e.id]: ev.target.value }))} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <div className="flex-between" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-solid)' }}>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Split total: {fmt(splitSum)}</span>
             {reconciled
