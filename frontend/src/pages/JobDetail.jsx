@@ -340,6 +340,23 @@ export default function JobDetail() {
     refreshTotals()
     await autoMirrorToBilling(data.service, data.amount)
   }
+  // Saved the moment it is clicked, rather than through the row's edit mode.
+  //
+  // It used to put the row into edit mode and wait for that row's tick button. People
+  // ticked the box and then pressed the page's "Save Changes", which saves job fields and
+  // not line drafts, so the flag was silently discarded and the figures did not move. A
+  // lone checkbox has nothing to validate or convert, so there is no reason to stage it.
+  async function toggleCostBackToBack(lid, value) {
+    const r = await updateCostLine(id, lid, { is_back_to_back: value })
+    setJob(j => ({ ...j, cost_lines: j.cost_lines.map(l => l.id === lid ? { ...l, ...r.data } : l) }))
+    refreshTotals()
+  }
+  async function toggleBillingBackToBack(lid, value) {
+    const r = await updateBillingLine(id, lid, { is_back_to_back: value })
+    setJob(j => ({ ...j, billing_lines: j.billing_lines.map(l => l.id === lid ? { ...l, ...r.data } : l) }))
+    refreshTotals()
+  }
+
   async function removeCost(lid) {
     const line = job.cost_lines.find(l => l.id === lid)
     if (line?.splits?.length && !window.confirm('This line has split-invoice amounts assigned. Deleting it will remove those splits too. Continue?')) return
@@ -2135,7 +2152,8 @@ export default function JobDetail() {
           </div>
         </div>
         <CostTable lines={job.cost_lines||[]} onSave={saveCost} onDelete={removeCost} fxRates={fxRates}
-          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'cost')} locked={job.status === 'Voided'} />
+          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'cost')} locked={job.status === 'Voided'}
+          onToggleBackToBack={toggleCostBackToBack} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.cost_lines?.length||0} line(s)</span>
           <span style={{ fontWeight: 700, color: 'var(--heading)' }}>Total Cost: {fmt(totalCost)}</span>
@@ -2149,7 +2167,8 @@ export default function JobDetail() {
           <button className="btn btn-outline btn-sm" onClick={addBilling} disabled={job.status === 'Voided'}>+ Add Row</button>
         </div>
         <BillingTable lines={job.billing_lines||[]} onSave={saveBilling} onDelete={removeBilling} fxRates={fxRates}
-          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'billing')} locked={job.status === 'Voided'} />
+          splitEntities={job.split_entities||[]} onEditSplits={l => openSplitModal(l, 'billing')} locked={job.status === 'Voided'}
+          onToggleBackToBack={toggleBillingBackToBack} />
         <div className="flex-between" style={{ paddingTop: 8, borderTop: '1px solid var(--border-solid)', marginTop: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{job.billing_lines?.length||0} line(s)</span>
           <span style={{ fontWeight: 700, color: 'var(--heading)' }}>Total Sale: {fmt(totalSale)}</span>
@@ -2457,7 +2476,7 @@ function InfoEdit({ form, setField, staffList = [] }) {
   )
 }
 
-function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits, locked=false }) {
+function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits, locked=false, onToggleBackToBack }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
@@ -2562,7 +2581,13 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
               <td style={{ textAlign: 'center' }}>
                 <input type="checkbox" disabled={locked}
                   checked={isEdit ? !!d.is_back_to_back : !!l.is_back_to_back}
-                  onChange={ev => { if (!isEdit) startEdit(l); setDraft(l.id,'is_back_to_back',ev.target.checked) }}
+                  onChange={ev => {
+                    const next = ev.target.checked
+                    // Written straight away. If the row happens to be open for editing,
+                    // the draft is updated too so the tick does not revert on screen.
+                    if (isEdit) setDraft(l.id, 'is_back_to_back', next)
+                    onToggleBackToBack(l.id, next)
+                  }}
                   title="Back-to-back charge, excluded from profit and GP%" />
               </td>
               {hasSplitEntities && (
@@ -2583,7 +2608,7 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
   )
 }
 
-function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits, locked=false }) {
+function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditSplits, locked=false, onToggleBackToBack }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
@@ -2676,7 +2701,13 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
               <td style={{ textAlign: 'center' }}>
                 <input type="checkbox" disabled={locked}
                   checked={isEdit ? !!d.is_back_to_back : !!l.is_back_to_back}
-                  onChange={ev => { if (!isEdit) startEdit(l); setDraft(l.id,'is_back_to_back',ev.target.checked) }}
+                  onChange={ev => {
+                    const next = ev.target.checked
+                    // Written straight away. If the row happens to be open for editing,
+                    // the draft is updated too so the tick does not revert on screen.
+                    if (isEdit) setDraft(l.id, 'is_back_to_back', next)
+                    onToggleBackToBack(l.id, next)
+                  }}
                   title="Back-to-back charge, excluded from profit and GP%" />
               </td>
               {hasSplitEntities && (
