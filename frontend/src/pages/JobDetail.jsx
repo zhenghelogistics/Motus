@@ -395,6 +395,28 @@ export default function JobDetail() {
     refreshTotals()
   }
 
+  // Saves one consignee's share of many lines at once.
+  //
+  // The per-line Split button asks "for this charge, who pays what". People think the
+  // other way round: "this consignee, what are they being billed". Both views write the
+  // same rows; this is the second one. Each line's other entities keep whatever they
+  // already had, so editing one consignee never silently rewrites another's share.
+  async function saveEntityLineSplits(entityId, changes) {
+    const job = jobRef.current
+    for (const ch of changes) {
+      const lines = ch.lineType === 'billing' ? (job.billing_lines || []) : (job.cost_lines || [])
+      const line = lines.find(l => l.id === ch.lineId)
+      if (!line) continue
+      const others = (line.splits || [])
+        .filter(s => s.entity_id !== entityId)
+        .map(s => ({ entity_id: s.entity_id, amount: Number(s.amount) || 0 }))
+      const splits = [...others, { entity_id: entityId, amount: ch.amount }].filter(s => s.amount !== 0)
+      if (ch.lineType === 'billing') await setBillingLineSplits(id, ch.lineId, splits)
+      else await setCostLineSplits(id, ch.lineId, splits)
+    }
+    refreshTotals()
+  }
+
   // Splits every line on the job in one go, using each entity's share.
   //
   // Doing it a line at a time means three numbers per line, and as the sales manager put
@@ -2198,6 +2220,7 @@ export default function JobDetail() {
           onDelete={removeEntity}
           onGenerateInvoice={async (e) => { if (await ensureInfoSaved()) exportEntityInvoice(e) }}
           onGenerateBreakdown={async (e) => { if (await ensureInfoSaved()) exportEntityBreakdown(e) }}
+          onSaveEntityLines={saveEntityLineSplits}
         />
       </div>
 
@@ -2674,7 +2697,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
   )
 }
 
-function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, onGenerateBreakdown }) {
+function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, onGenerateBreakdown, onSaveEntityLines }) {
   const [editing, setEditing] = useState({})
   const [drafts, setDrafts] = useState({})
   const [saving, setSaving] = useState({})
@@ -2711,8 +2734,6 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
           const totals = computeEntityTotals(e, job)
           const hasSplits = totals.sale > 0 || totals.cost > 0
           const isExpanded = expanded[e.id]
-          const entityBillingLines = (job.billing_lines||[]).filter(l => l.splits?.some(s => s.entity_id === e.id))
-          const entityCostLines = (job.cost_lines||[]).filter(l => l.splits?.some(s => s.entity_id === e.id))
           return (
             <Fragment key={e.id}>
               <tr onDoubleClick={() => startEdit(e)}>
@@ -2773,33 +2794,12 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                 <tr>
                   <td></td>
                   <td colSpan={6} style={{ padding: '4px 8px 14px' }}>
-                    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border-solid)', borderRadius: 6, padding: '10px 14px' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--heading)', marginBottom: 4 }}>BILLING</div>
-                      {entityBillingLines.length ? entityBillingLines.map(l => (
-                        <div key={l.id} className="flex-between" style={{ fontSize: 12, padding: '2px 0' }}>
-                          <span>{l.service || '—'}</span>
-                          <span>{fmt(l.splits.find(s => s.entity_id === e.id)?.amount || 0)}</span>
-                        </div>
-                      )) : <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No billing lines split to this entity.</div>}
-                      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, borderTop: '1px solid var(--border-solid)', marginTop: 4, paddingTop: 4 }}>
-                        <span>Total Sale</span><span>{fmt(totals.sale)}</span>
-                      </div>
-
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--heading)', margin: '10px 0 4px' }}>COST</div>
-                      {entityCostLines.length ? entityCostLines.map(l => (
-                        <div key={l.id} className="flex-between" style={{ fontSize: 12, padding: '2px 0' }}>
-                          <span>{l.vendor ? `${l.vendor} — ` : ''}{l.service || '—'}</span>
-                          <span>{fmt(l.splits.find(s => s.entity_id === e.id)?.amount || 0)}</span>
-                        </div>
-                      )) : <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No cost lines split to this entity.</div>}
-                      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, borderTop: '1px solid var(--border-solid)', marginTop: 4, paddingTop: 4 }}>
-                        <span>Total Cost</span><span>{fmt(totals.cost)}</span>
-                      </div>
-
-                      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, marginTop: 10, color: 'var(--heading)' }}>
-                        <span>Profit / GP</span><span>{fmt(totals.profit)} / {totals.gp.toFixed(1)}%</span>
-                      </div>
-                    </div>
+                    <EntityLinesEditor
+                      entity={e}
+                      job={job}
+                      totals={totals}
+                      onSave={onSaveEntityLines}
+                    />
                   </td>
                 </tr>
               )}
@@ -2929,6 +2929,106 @@ function SubCertModal({ modal, onClose, onGenerate }) {
             <Stamp size={14} /> Generate Sub Cert PDF
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── One consignee's billing and cost ───────────────────────────────────────
+// The other way of looking at a split. The Split button on a line asks "for this charge,
+// who pays what"; this asks "this consignee, what are they billed", which is how people
+// actually describe it. Same rows underneath, entered from whichever end suits the job.
+//
+// Every line is listed, not only the ones already assigned, because a line missing from
+// the list is exactly the line someone forgets to split.
+function EntityLinesEditor({ entity, job, totals, onSave }) {
+  const billing = job.billing_lines || []
+  const cost = job.cost_lines || []
+
+  // Found by entity id alone, so the line's type is irrelevant here.
+  const current = (line) => {
+    const amt = (line.splits || []).find(s => s.entity_id === entity.id)?.amount
+    return amt == null ? '' : String(amt)
+  }
+  const keyOf = (lineType, id) => `${lineType}-${id}`
+
+  const [draft, setDraft] = useState(() => {
+    const init = {}
+    billing.forEach(l => { init[keyOf('billing', l.id)] = current(l) })
+    cost.forEach(l => { init[keyOf('cost', l.id)] = current(l) })
+    return init
+  })
+  const [saving, setSaving] = useState(false)
+
+  const dirty = [
+    ...billing.map(l => ({ l, lineType: 'billing' })),
+    ...cost.map(l => ({ l, lineType: 'cost' })),
+  ].filter(({ l, lineType }) => (draft[keyOf(lineType, l.id)] ?? '') !== current(l))
+
+  async function save() {
+    setSaving(true)
+    try {
+      await onSave(entity.id, dirty.map(({ l, lineType }) => ({
+        lineId: l.id, lineType, amount: parseFloat(draft[keyOf(lineType, l.id)]) || 0,
+      })))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Shows the whole line total beside the input so the ceiling is visible. Without it the
+  // only way to know whether 300 is most of the line or a tenth of it is to scroll up.
+  const rows = (lines, lineType, label) => (
+    <>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--heading)', margin: '10px 0 4px' }}>{label}</div>
+      {lines.length ? lines.map(l => {
+        const status = lineSplitStatus(l, lineType)
+        return (
+          <div key={l.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 110px', gap: 8, alignItems: 'center', padding: '2px 0' }}>
+            <span style={{ fontSize: 12 }}>
+              {lineType === 'cost' ? `${l.vendor ? `${l.vendor} — ` : ''}${l.service || '—'}` : (l.service || '—')}
+              {l.is_back_to_back && (
+                <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, background: '#EEF2F7', color: '#5A6B80', padding: '1px 4px', borderRadius: 3 }}>B2B</span>
+              )}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>of {fmt(status.lineTotal)}</span>
+            <input type="number" className="form-control form-control-sm"
+              value={draft[keyOf(lineType, l.id)] ?? ''}
+              onChange={ev => setDraft(d => ({ ...d, [keyOf(lineType, l.id)]: ev.target.value }))} />
+          </div>
+        )
+      }) : <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No {label.toLowerCase()} lines on this job yet.</div>}
+    </>
+  )
+
+  return (
+    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border-solid)', borderRadius: 6, padding: '10px 14px' }}>
+      {rows(billing, 'billing', 'BILLING')}
+      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, borderTop: '1px solid var(--border-solid)', marginTop: 4, paddingTop: 4 }}>
+        <span>Total Sale</span><span>{fmt(totals.sale)}</span>
+      </div>
+
+      {rows(cost, 'cost', 'COST')}
+      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, borderTop: '1px solid var(--border-solid)', marginTop: 4, paddingTop: 4 }}>
+        <span>Total Cost</span><span>{fmt(totals.cost)}</span>
+      </div>
+
+      <div className="flex-between" style={{ fontSize: 12, fontWeight: 700, marginTop: 10, color: 'var(--heading)' }}>
+        <span>Profit / GP</span><span>{fmt(totals.profit)} / {totals.gp.toFixed(1)}%</span>
+      </div>
+      {totals.btbSale > 0 && (
+        <div className="flex-between" style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+          <span>Back-to-back (excluded from GP)</span><span>{fmt(totals.btbSale)} · invoice {fmt(totals.invoiceTotal)}</span>
+        </div>
+      )}
+
+      <div className="flex-between" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-solid)' }}>
+        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+          {dirty.length ? `${dirty.length} line${dirty.length === 1 ? '' : 's'} changed` : 'No changes'}
+        </span>
+        <button className="btn btn-navy btn-xs" onClick={save} disabled={!dirty.length || saving}>
+          {saving ? 'Saving…' : 'Save amounts'}
+        </button>
       </div>
     </div>
   )
