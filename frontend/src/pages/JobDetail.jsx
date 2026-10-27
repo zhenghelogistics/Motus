@@ -608,9 +608,16 @@ export default function JobDetail() {
     y = doc.lastAutoTable.finalY + 5
     autoTable(doc, {
       startY: y,
+      // Back-to-back charges are listed in the tables above but excluded from these
+      // figures, so the summary has to say so. Without the row, the billing lines visibly
+      // add up to more than Total Sale and the sheet looks broken.
       body: [
         ['Total Cost',  fmt(job.cost_sgd)],
         ['Total Sale',  fmt(job.sale_sgd)],
+        ...((job.btb_sale_sgd || job.btb_cost_sgd)
+          ? [['Back-to-back (excluded)', fmt(job.btb_sale_sgd || 0)],
+             ['Invoice Total', fmt(job.invoice_total_sgd ?? ((job.sale_sgd||0) + (job.btb_sale_sgd||0)))]]
+          : []),
         ['Profit',      fmt(job.profit_sgd)],
         ['GP Margin',   `${Number(job.gp_percent||0).toFixed(1)}%${job.gp_override != null ? '  (manual)' : ''}`],
       ],
@@ -1136,9 +1143,16 @@ export default function JobDetail() {
     const gpDisplay = job.gp_override != null ? job.gp_override : (job.gp_percent||0)
     autoTable(doc, {
       startY: y,
+      // See the note on the job sheet's summary: the tables above include back-to-back
+      // lines, these figures do not, so the difference is stated rather than left to look
+      // like an arithmetic error.
       body: [
         ['Total Cost',  fmt(job.cost_sgd)],
         ['Total Sale',  fmt(job.sale_sgd)],
+        ...((job.btb_sale_sgd || job.btb_cost_sgd)
+          ? [['Back-to-back (excluded)', fmt(job.btb_sale_sgd || 0)],
+             ['Invoice Total', fmt(job.invoice_total_sgd ?? ((job.sale_sgd||0) + (job.btb_sale_sgd||0)))]]
+          : []),
         ['Profit',      fmt(profit)],
         ['GP Margin',   `${Number(gpDisplay).toFixed(1)}%${job.gp_override != null ? '  (manual)' : ''}`],
       ],
@@ -1768,8 +1782,17 @@ export default function JobDetail() {
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><span className="spinner spinner-dark" style={{width:32,height:32}}></span></div>
   if (!job) return <div className="alert alert-error">Job not found.</div>
 
-  const totalCost = (job.cost_lines||[]).reduce((s,l) => s+(l.amount||0), 0)
-  const totalSale = (job.billing_lines||[]).reduce((s,l) => s+(l.rate||0)*(l.qty||1), 0)
+  // Back-to-back charges are paid on the customer's behalf and billed straight back at
+  // cost: NOA fees, GST. The customer owes them, so they belong on the invoice, but they
+  // are not ours to earn on. Counting them raises sale and cost by the same amount,
+  // leaves profit untouched and wrecks the margin: a $1,000 job at 40% reads 6.7% once a
+  // $5,000 GST payment passes through it. Same rule as BILLING_TOTALS on the server.
+  const isBtb = l => !!l.is_back_to_back
+  const totalCost = (job.cost_lines||[]).filter(l => !isBtb(l)).reduce((s,l) => s+(l.amount||0), 0)
+  const totalSale = (job.billing_lines||[]).filter(l => !isBtb(l)).reduce((s,l) => s+(l.rate||0)*(l.qty||1), 0)
+  const btbCost = (job.cost_lines||[]).filter(isBtb).reduce((s,l) => s+(l.amount||0), 0)
+  const btbSale = (job.billing_lines||[]).filter(isBtb).reduce((s,l) => s+(l.rate||0)*(l.qty||1), 0)
+  const invoiceTotal = totalSale + btbSale
   const profit = totalSale - totalCost
   const computedGP = totalSale > 0 ? (profit/totalSale)*100 : 0
   const displayGP = job.gp_override != null ? job.gp_override : computedGP
@@ -2188,6 +2211,19 @@ export default function JobDetail() {
           <div className="total-item-label">Total Sale</div>
           <div className="total-item-value">{fmt(totalSale)}</div>
         </div>
+        {/* Only shown when there are any, so an ordinary job looks exactly as it did.
+            The invoice total is spelled out because it is no longer the same number as
+            Total Sale, and someone checking the invoice against this panel needs to see
+            where the difference comes from rather than assume something is broken. */}
+        {(btbSale > 0 || btbCost > 0) && (
+          <div className="total-item">
+            <div className="total-item-label" title="Paid on the customer's behalf and billed back at cost. Excluded from profit and GP%.">
+              Back-to-back
+            </div>
+            <div className="total-item-value" style={{ opacity: 0.85 }}>{fmt(btbSale)}</div>
+            <div style={{ fontSize: 10.5, opacity: 0.7, marginTop: 2 }}>Invoice total {fmt(invoiceTotal)}</div>
+          </div>
+        )}
         <div className="total-item">
           <div className="total-item-label">Profit</div>
           <div className={`total-item-value ${profit >= 0 ? 'green' : 'red'}`}>{fmt(profit)}</div>
@@ -2444,6 +2480,7 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
       <thead>
         <tr>
           <th>Vendor</th><th>Service</th><th>Invoice No.</th><th>Invoice Date</th><th style={{width:140}}>Amount</th><th style={{width:120}}>Total Payable</th><th>Remarks</th>
+          <th style={{width:70}} title="Back-to-back: paid on the customer's behalf and billed back at cost. Kept out of profit and GP%.">B2B</th>
           {hasSplitEntities && <th style={{width:100}}>Split</th>}
           <th style={{width:80}}></th>
         </tr>
@@ -2496,6 +2533,15 @@ function CostTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEditS
                 }
               </td>
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
+              {/* Tagging a line here rather than by naming it "GST" or "NOA" keeps the
+                  rule explicit: the flag decides what counts toward margin, not a string
+                  someone has to spell consistently. */}
+              <td style={{ textAlign: 'center' }}>
+                <input type="checkbox" disabled={locked}
+                  checked={isEdit ? !!d.is_back_to_back : !!l.is_back_to_back}
+                  onChange={ev => { if (!isEdit) startEdit(l); setDraft(l.id,'is_back_to_back',ev.target.checked) }}
+                  title="Back-to-back charge, excluded from profit and GP%" />
+              </td>
               {hasSplitEntities && (
                 <td><SplitButton line={l} lineType="cost" onEditSplits={onEditSplits} locked={locked} /></td>
               )}
@@ -2559,6 +2605,7 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
       <thead>
         <tr>
           <th>Service</th><th style={{width:150}}>Rate</th><th style={{width:80}}>Qty</th><th style={{width:110}}>Total (SGD)</th><th>Remarks</th>
+          <th style={{width:70}} title="Back-to-back: paid on the customer's behalf and billed back at cost. Kept out of profit and GP%.">B2B</th>
           {hasSplitEntities && <th style={{width:100}}>Split</th>}
           <th style={{width:80}}></th>
         </tr>
@@ -2600,6 +2647,15 @@ function BillingTable({ lines, onSave, onDelete, fxRates, splitEntities=[], onEd
               <td>{isEdit ? <input type="number" className="form-control form-control-sm" value={d.qty||''} onChange={e => setDraft(l.id,'qty',parseFloat(e.target.value)||1)} /> : l.qty}</td>
               <td><strong style={{ fontSize: 15 }}>{isEdit && total === null ? <span style={{ color:'var(--red)', fontSize:12 }}>Rate unavailable</span> : fmt(isEdit ? total : l.total)}</strong></td>
               <td>{isEdit ? <input type="text" className="form-control form-control-sm" value={d.remarks||''} onChange={e => setDraft(l.id,'remarks',e.target.value)} /> : (l.remarks||'')}</td>
+              {/* Tagging a line here rather than by naming it "GST" or "NOA" keeps the
+                  rule explicit: the flag decides what counts toward margin, not a string
+                  someone has to spell consistently. */}
+              <td style={{ textAlign: 'center' }}>
+                <input type="checkbox" disabled={locked}
+                  checked={isEdit ? !!d.is_back_to_back : !!l.is_back_to_back}
+                  onChange={ev => { if (!isEdit) startEdit(l); setDraft(l.id,'is_back_to_back',ev.target.checked) }}
+                  title="Back-to-back charge, excluded from profit and GP%" />
+              </td>
               {hasSplitEntities && (
                 <td><SplitButton line={l} lineType="billing" onEditSplits={onEditSplits} locked={locked} /></td>
               )}
@@ -2692,6 +2748,15 @@ function SplitEntityTable({ entities, job, onSave, onDelete, onGenerateInvoice, 
                     <span>Cost: <strong>{fmt(totals.cost)}</strong></span>
                     <span>Profit: <strong>{fmt(totals.profit)}</strong></span>
                     <span>GP: <strong>{totals.gp.toFixed(1)}%</strong></span>
+                    {/* Sale above is margin-bearing only. The invoice this entity receives
+                        also carries their share of any back-to-back charge, so show that
+                        figure here rather than letting it differ from the PDF unexplained. */}
+                    {totals.btbSale > 0 && (
+                      <>
+                        <span style={{ opacity: 0.75 }}>B2B: <strong>{fmt(totals.btbSale)}</strong></span>
+                        <span style={{ opacity: 0.75 }}>Invoice: <strong>{fmt(totals.invoiceTotal)}</strong></span>
+                      </>
+                    )}
                   </div>
                 </td>
                 <td>

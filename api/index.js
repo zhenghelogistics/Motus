@@ -38,6 +38,32 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+// ─── JOB MONEY ───────────────────────────────────────────────────────────────
+// One definition of what a job earned, used by every query that reports money.
+//
+// It used to be written inline in 27 places. That is 27 chances for one of them to drift,
+// and a job whose margin depends on which screen you opened is worse than no margin at
+// all, so the sum lives here and nowhere else.
+//
+// `total` deliberately EXCLUDES back-to-back charges: money paid on the customer's behalf
+// and billed straight back at cost, such as NOA fees and GST. Including them inflates
+// revenue and cost by the same amount, leaving profit untouched and destroying the
+// margin: a $1,000 job at 40% reads 6.7% once a $5,000 GST payment passes through it.
+// `btb` carries those amounts separately so invoices still add up to what is owed.
+//
+// COALESCE around the flag because the column was added to existing rows, and in SQL
+// `NOT NULL` is NULL rather than true, which would silently drop every pre-existing line
+// from the totals.
+const BILLING_TOTALS = `SELECT job_id,
+    COALESCE(SUM(rate*qty) FILTER (WHERE NOT COALESCE(is_back_to_back, FALSE)), 0) AS total,
+    COALESCE(SUM(rate*qty) FILTER (WHERE COALESCE(is_back_to_back, FALSE)), 0) AS btb
+  FROM billing_lines GROUP BY job_id`
+
+const COST_TOTALS = `SELECT job_id,
+    COALESCE(SUM(amount) FILTER (WHERE NOT COALESCE(is_back_to_back, FALSE)), 0) AS total,
+    COALESCE(SUM(amount) FILTER (WHERE COALESCE(is_back_to_back, FALSE)), 0) AS btb
+  FROM cost_lines GROUP BY job_id`
+
 // ─── REQUEST TIMING ──────────────────────────────────────────────────────────
 // Answers "why did that feel slow?" with a number instead of a guess. Each request
 // logs one line splitting its time into auth / database / everything else, so a slow
@@ -218,6 +244,12 @@ async function initDB() {
   // billing goes to different consignees for the same shipper, and each one wants to
   // see their own reference on the paperwork.
   await pool.query(`ALTER TABLE split_entities ADD COLUMN IF NOT EXISTS consignee_ref TEXT DEFAULT ''`);
+  // Back-to-back charges: money paid on the customer's behalf and billed straight
+  // back at cost, such as NOA fees and GST. They belong on the invoice because the
+  // customer genuinely owes them, but they are not ours to earn on, so they are kept
+  // out of every margin figure. See BILLING_TOTALS below for why that matters.
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS is_back_to_back BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS is_back_to_back BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
   await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS rate_local REAL`);
   await pool.query(`ALTER TABLE cost_lines ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'SGD'`);
@@ -593,16 +625,30 @@ async function ensureDB() {
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 async function enrichJob(job) {
+  // Same split as BILLING_TOTALS / COST_TOTALS: the margin figures exclude back-to-back
+  // charges, and those are returned separately so the invoice can still show what is
+  // actually owed.
   const [costs, billing] = await Promise.all([
-    pool.query('SELECT COALESCE(SUM(amount),0) as total FROM cost_lines WHERE job_id=$1', [job.id]),
-    pool.query('SELECT COALESCE(SUM(rate*qty),0) as total FROM billing_lines WHERE job_id=$1', [job.id]),
+    pool.query(`SELECT
+        COALESCE(SUM(amount) FILTER (WHERE NOT COALESCE(is_back_to_back, FALSE)), 0) AS total,
+        COALESCE(SUM(amount) FILTER (WHERE COALESCE(is_back_to_back, FALSE)), 0) AS btb
+      FROM cost_lines WHERE job_id=$1`, [job.id]),
+    pool.query(`SELECT
+        COALESCE(SUM(rate*qty) FILTER (WHERE NOT COALESCE(is_back_to_back, FALSE)), 0) AS total,
+        COALESCE(SUM(rate*qty) FILTER (WHERE COALESCE(is_back_to_back, FALSE)), 0) AS btb
+      FROM billing_lines WHERE job_id=$1`, [job.id]),
   ]);
   const cost_sgd = parseFloat(Number(costs.rows[0].total || 0).toFixed(2));
   const sale_sgd = parseFloat(Number(billing.rows[0].total || 0).toFixed(2));
+  const btb_cost_sgd = parseFloat(Number(costs.rows[0].btb || 0).toFixed(2));
+  const btb_sale_sgd = parseFloat(Number(billing.rows[0].btb || 0).toFixed(2));
   const profit_sgd = parseFloat((sale_sgd - cost_sgd).toFixed(2));
   const computed_gp = sale_sgd > 0 ? parseFloat(((profit_sgd / sale_sgd) * 100).toFixed(1)) : 0;
   const gp_percent = job.gp_override != null ? parseFloat(Number(job.gp_override).toFixed(1)) : computed_gp;
-  return { ...job, cost_sgd, sale_sgd, profit_sgd, gp_percent, computed_gp };
+  // What the customer is actually invoiced: earnings plus the charges passed through.
+  const invoice_total_sgd = parseFloat((sale_sgd + btb_sale_sgd).toFixed(2));
+  return { ...job, cost_sgd, sale_sgd, profit_sgd, gp_percent, computed_gp,
+           btb_sale_sgd, btb_cost_sgd, invoice_total_sgd };
 }
 
 async function generateJobNumber() {
@@ -924,8 +970,8 @@ app.get('/api/jobs', async (req, res) => {
           ELSE 0
         END AS computed_gp
       FROM jobs j
-      LEFT JOIN (SELECT job_id, SUM(amount)    AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
-      LEFT JOIN (SELECT job_id, SUM(rate*qty)  AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+      LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
+      LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
       ${where}
       ORDER BY j.id DESC
       ${limitClause}
@@ -1058,10 +1104,10 @@ app.delete('/api/jobs/:id', async (req, res) => {
 // ─── COST LINES ─────────────────────────────────────────────────────────────
 app.post('/api/jobs/:id/costs', async (req, res) => {
   try {
-    const { vendor='', amount=0, invoice_no='', invoice_date=null, service='', remarks='', currency='SGD', amount_local=null, total_payable=null } = req.body;
+    const { vendor='', amount=0, invoice_no='', invoice_date=null, service='', remarks='', currency='SGD', amount_local=null, total_payable=null, is_back_to_back=false } = req.body;
     const r = await pool.query(
-      'INSERT INTO cost_lines (job_id,vendor,amount,invoice_no,invoice_date,service,remarks,currency,amount_local,total_payable) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-      [req.params.id, vendor, amount, invoice_no, invoice_date, service, remarks, currency, amount_local, total_payable]
+      'INSERT INTO cost_lines (job_id,vendor,amount,invoice_no,invoice_date,service,remarks,currency,amount_local,total_payable,is_back_to_back) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+      [req.params.id, vendor, amount, invoice_no, invoice_date, service, remarks, currency, amount_local, total_payable, !!is_back_to_back]
     );
     res.status(201).json(r.rows[0]);
   } catch (err) {
@@ -1247,7 +1293,7 @@ app.put('/api/jobs/:id/costs/:lid', async (req, res) => {
     // with a defaulted value even if the caller only sent one field, which today's React
     // UI happens to avoid (it always sends the full row) but silently resets currency to
     // 'SGD' and nulls out amount_local/total_payable for any future caller that doesn't.
-    const allowed = ['vendor','amount','invoice_no','invoice_date','service','remarks','currency','amount_local','total_payable']
+    const allowed = ['vendor','amount','invoice_no','invoice_date','service','remarks','currency','amount_local','total_payable','is_back_to_back']
     const updates = {}
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
     if (!Object.keys(updates).length) {
@@ -1280,10 +1326,10 @@ app.delete('/api/jobs/:id/costs/:lid', async (req, res) => {
 // ─── BILLING LINES ──────────────────────────────────────────────────────────
 app.post('/api/jobs/:id/billing', async (req, res) => {
   try {
-    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null } = req.body;
+    const { service='', unit='', rate=0, qty=1, remarks='', currency='SGD', rate_local=null, is_back_to_back=false } = req.body;
     const r = await pool.query(
-      'INSERT INTO billing_lines (job_id,service,unit,rate,qty,remarks,currency,rate_local) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-      [req.params.id, service, unit, rate, qty, remarks, currency, rate_local]
+      'INSERT INTO billing_lines (job_id,service,unit,rate,qty,remarks,currency,rate_local,is_back_to_back) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.params.id, service, unit, rate, qty, remarks, currency, rate_local, !!is_back_to_back]
     );
     const line = r.rows[0];
     res.status(201).json({ ...line, total: parseFloat(((line.rate||0)*(line.qty||1)).toFixed(2)) });
@@ -1296,7 +1342,7 @@ app.post('/api/jobs/:id/billing', async (req, res) => {
 app.put('/api/jobs/:id/billing/:lid', async (req, res) => {
   try {
     // Partial update — see the matching comment on PUT /api/jobs/:id/costs/:lid above.
-    const allowed = ['service','unit','rate','qty','remarks','currency','rate_local']
+    const allowed = ['service','unit','rate','qty','remarks','currency','rate_local','is_back_to_back']
     const updates = {}
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
     let line
@@ -1853,8 +1899,8 @@ app.get('/api/dashboard', async (req, res) => {
           COALESCE(SUM(b.total),0) AS revenue,
           COALESCE(SUM(c.total),0) AS cost
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+        LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
         WHERE j.created_at >= $1
       `, [monthStart]),
 
@@ -1864,7 +1910,7 @@ app.get('/api/dashboard', async (req, res) => {
           COUNT(j.id) AS count,
           COALESCE(SUM(b.total),0) AS revenue
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
         GROUP BY j.mode
         ORDER BY count DESC
       `),
@@ -1875,8 +1921,8 @@ app.get('/api/dashboard', async (req, res) => {
           COALESCE(SUM(b.total),0) AS revenue,
           COALESCE(SUM(c.total),0) AS cost
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+        LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
         WHERE j.created_at >= $1
         GROUP BY DATE_TRUNC('month', j.created_at)
         ORDER BY month
@@ -2220,8 +2266,8 @@ app.get('/api/stats/company', async (req, res) => {
           COALESCE(SUM(b.total),    0) AS revenue,
           COALESCE(SUM(c.total),    0) AS cost
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+        LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
         ${baseWhere}
       `, params),
 
@@ -2235,8 +2281,8 @@ app.get('/api/stats/company', async (req, res) => {
           COALESCE(SUM(b.total),    0) AS revenue,
           COALESCE(SUM(c.total),    0) AS cost
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+        LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
         ${baseWhere}
         GROUP BY j.mode
         ORDER BY revenue DESC
@@ -2249,8 +2295,8 @@ app.get('/api/stats/company', async (req, res) => {
           COALESCE(SUM(b.total), 0) AS revenue,
           COALESCE(SUM(c.total), 0) AS cost
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+        LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
         ${baseWhere}
         GROUP BY DATE_TRUNC('month', j.created_at)
         ORDER BY month
@@ -3268,8 +3314,8 @@ async function buildMonthlyReport(monthParam) {
     pool.query(`
       SELECT COALESCE(SUM(b.total),0) AS sale, COALESCE(SUM(c.total),0) AS cost, COUNT(*) AS jobs
       FROM jobs j
-      LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-      LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+      LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+      LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
       WHERE j.created_at >= $1 AND j.created_at < $2 AND COALESCE(j.status,'') <> 'Voided'`, [start, end]),
     pool.query(`
       SELECT COALESCE(NULLIF(j.mode,''),'Unspecified') AS mode,
@@ -3277,8 +3323,8 @@ async function buildMonthlyReport(monthParam) {
              COALESCE(SUM(b.total),0) AS sale,
              COALESCE(SUM(c.total),0) AS cost
       FROM jobs j
-      LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-      LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+      LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+      LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
       WHERE j.created_at >= $1 AND j.created_at < $2 AND COALESCE(j.status,'') <> 'Voided'
       GROUP BY 1 ORDER BY sale DESC`, [start, end]),
     // Not restricted to the month: the point of this list is old leads worth chasing.
@@ -3407,8 +3453,8 @@ const MOVEMENT_JOB_SQL = `
          COALESCE(b.total, 0) AS sale,
          COALESCE(c.total, 0) AS cost
   FROM jobs j
-  LEFT JOIN (SELECT job_id, SUM(rate * qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-  LEFT JOIN (SELECT job_id, SUM(amount)     AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+  LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+  LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
   WHERE j.created_at >= $1 AND j.created_at < $2`
 
 async function buildMovementReport(periodRef) {
@@ -4121,8 +4167,8 @@ const MCP_IMPLS = {
                   THEN ROUND(((COALESCE(b.total,0) - COALESCE(c.total,0)) / b.total * 100)::numeric, 1)
                   ELSE 0 END AS gp_percent
       FROM jobs j
-      LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
-      LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
+      LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
+      LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
       WHERE ${where.join(' AND ')}
       ORDER BY j.id DESC
       LIMIT ${mcpLimit(args.limit)}
@@ -4226,22 +4272,22 @@ const MCP_IMPLS = {
                COALESCE(SUM(j.weight),0) AS weight, COALESCE(SUM(j.cbm),0) AS cbm,
                COALESCE(SUM(b.total),0) AS revenue, COALESCE(SUM(c.total),0) AS cost
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+        LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
         ${baseWhere}`, p),
       pool.query(`
         SELECT COALESCE(NULLIF(UPPER(TRIM(j.mode)),''),'UNSPECIFIED') AS mode, COUNT(*) AS jobs,
                COALESCE(SUM(b.total),0) AS revenue, COALESCE(SUM(c.total),0) AS cost
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+        LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
         ${baseWhere} GROUP BY 1 ORDER BY revenue DESC`, p),
       pool.query(`
         SELECT TO_CHAR(j.created_at, 'YYYY-MM') AS month, COUNT(*) AS jobs,
                COALESCE(SUM(b.total),0) AS revenue, COALESCE(SUM(c.total),0) AS cost
         FROM jobs j
-        LEFT JOIN (SELECT job_id, SUM(rate*qty) AS total FROM billing_lines GROUP BY job_id) b ON b.job_id = j.id
-        LEFT JOIN (SELECT job_id, SUM(amount)   AS total FROM cost_lines    GROUP BY job_id) c ON c.job_id = j.id
+        LEFT JOIN (${BILLING_TOTALS}) b ON b.job_id = j.id
+        LEFT JOIN (${COST_TOTALS}) c ON c.job_id = j.id
         ${baseWhere} GROUP BY 1 ORDER BY 1`, p),
     ])
 

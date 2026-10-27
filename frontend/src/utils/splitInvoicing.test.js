@@ -98,7 +98,7 @@ describe('computeEntityTotals', () => {
   it('returns all zeros (not NaN) for an entity with no splits assigned', () => {
     const job = { billing_lines: [{ id: 1, splits: [] }], cost_lines: [{ id: 2, splits: [] }] }
     const totals = computeEntityTotals({ id: 99 }, job)
-    expect(totals).toEqual({ sale: 0, cost: 0, profit: 0, gp: 0 })
+    expect(totals).toEqual({ sale: 0, cost: 0, profit: 0, gp: 0, btbSale: 0, btbCost: 0, invoiceTotal: 0 })
   })
 
   it('does not divide by zero when sale is 0 but cost is not', () => {
@@ -115,7 +115,7 @@ describe('computeEntityTotals', () => {
 
   it('handles missing billing_lines/cost_lines gracefully', () => {
     const totals = computeEntityTotals({ id: 1 }, {})
-    expect(totals).toEqual({ sale: 0, cost: 0, profit: 0, gp: 0 })
+    expect(totals).toEqual({ sale: 0, cost: 0, profit: 0, gp: 0, btbSale: 0, btbCost: 0, invoiceTotal: 0 })
   })
 
   // Regression: money columns are NUMERIC, and a NUMERIC comes back from the database
@@ -250,5 +250,56 @@ describe('jobSplitIssues', () => {
   it('survives a job with no lines', () => {
     expect(jobSplitIssues({}).count).toBe(0)
     expect(jobSplitIssues().count).toBe(0)
+  })
+})
+
+// Finance's request: back-to-back charges (NOA fees, GST paid on behalf) must not move
+// the GP margin. A $5,000 GST pass-through on a $1,000 job used to drag a genuine 40%
+// margin down to about 7%, because it raised sale and cost equally and left profit alone.
+describe('back-to-back charges', () => {
+  const job = {
+    billing_lines: [
+      { service: 'Freight', splits: [{ entity_id: 1, amount: 1000 }] },
+      { service: 'GST paid on behalf', is_back_to_back: true, splits: [{ entity_id: 1, amount: 5000 }] },
+    ],
+    cost_lines: [
+      { vendor: 'CargoHub', splits: [{ entity_id: 1, amount: 600 }] },
+      { vendor: 'Customs', is_back_to_back: true, splits: [{ entity_id: 1, amount: 5000 }] },
+    ],
+  }
+
+  it('keeps pass-through charges out of sale, cost and margin', () => {
+    const t = computeEntityTotals({ id: 1 }, job)
+    expect(t.sale).toBe(1000)
+    expect(t.cost).toBe(600)
+    expect(t.profit).toBe(400)
+    expect(t.gp).toBeCloseTo(40, 1)
+  })
+
+  it('still bills them, so the invoice totals what is owed', () => {
+    const t = computeEntityTotals({ id: 1 }, job)
+    expect(t.btbSale).toBe(5000)
+    expect(t.btbCost).toBe(5000)
+    expect(t.invoiceTotal).toBe(6000)
+  })
+
+  it('is what stops the margin being destroyed', () => {
+    // The old behaviour, for the record: 6000 sale and 5600 cost is the same $400 of
+    // profit reported as a 6.7% margin.
+    const naiveGp = ((6000 - 5600) / 6000) * 100
+    expect(naiveGp).toBeCloseTo(6.7, 1)
+    expect(computeEntityTotals({ id: 1 }, job).gp).toBeCloseTo(40, 1)
+  })
+
+  it('leaves a job with no back-to-back lines completely unchanged', () => {
+    const plain = {
+      billing_lines: [{ splits: [{ entity_id: 1, amount: 900 }] }],
+      cost_lines: [{ splits: [{ entity_id: 1, amount: 500 }] }],
+    }
+    const t = computeEntityTotals({ id: 1 }, plain)
+    expect(t.sale).toBe(900)
+    expect(t.btbSale).toBe(0)
+    expect(t.invoiceTotal).toBe(900)
+    expect(t.gp).toBeCloseTo(44.4, 1)
   })
 })

@@ -21,11 +21,30 @@ export function autoFillSplit(lineTotal, entities) {
 const splitAmount = (line, entityId) =>
   Number(line.splits?.find(x => x.entity_id === entityId)?.amount) || 0
 
+// Back-to-back charges are paid on the customer's behalf and billed back at cost, such
+// as NOA fees and GST. They are owed, so they belong on the entity's invoice, but they
+// are not ours to earn on: counting them lifts sale and cost by the same amount and
+// crushes the margin without changing a cent of profit. `sale` and `gp` therefore
+// exclude them, and `invoiceTotal` is what the entity is actually billed.
+const isBackToBack = (line) => !!line.is_back_to_back
+
 export function computeEntityTotals(entity, job) {
-  const sale = (job.billing_lines||[]).reduce((s,l) => s + splitAmount(l, entity.id), 0)
-  const cost = (job.cost_lines||[]).reduce((s,l) => s + splitAmount(l, entity.id), 0)
+  const bills = job.billing_lines || []
+  const costs = job.cost_lines || []
+  const sum = (lines, pick) => lines.filter(pick).reduce((s, l) => s + splitAmount(l, entity.id), 0)
+
+  const sale = sum(bills, l => !isBackToBack(l))
+  const cost = sum(costs, l => !isBackToBack(l))
+  const btbSale = sum(bills, isBackToBack)
+  const btbCost = sum(costs, isBackToBack)
   const profit = sale - cost
-  return { sale, cost, profit, gp: sale > 0 ? (profit/sale)*100 : 0 }
+
+  return {
+    sale, cost, profit,
+    gp: sale > 0 ? (profit/sale)*100 : 0,
+    btbSale, btbCost,
+    invoiceTotal: sale + btbSale,
+  }
 }
 
 // ─── RECONCILIATION ──────────────────────────────────────────────────────────
