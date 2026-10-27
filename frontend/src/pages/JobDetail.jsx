@@ -285,7 +285,7 @@ export default function JobDetail() {
   function matchesNOA(s) { const v = (s||''); return /\bnoa\b/i.test(v) || /\bnotice of arrival\b/i.test(v) }
   function matchesGST(s) { const v = (s||''); return /\bgst\b/i.test(v) || /\bgoods and services tax\b/i.test(v) }
 
-  async function autoMirrorToBilling(service, amount, currentBillingLines) {
+  async function autoMirrorToBilling(service, amount, currentBillingLines, costLineId) {
     if (!service) return
     const isNOA = matchesNOA(service)
     const isGST = matchesGST(service)
@@ -293,8 +293,27 @@ export default function JobDetail() {
     const billing = currentBillingLines || job.billing_lines || []
     const alreadyExists = billing.some(b => (isNOA && matchesNOA(b.service)) || (isGST && matchesGST(b.service)))
     if (alreadyExists) return
-    const r = await addBillingLine(id, { service, rate: amount || 0, qty: 1, remarks: '' })
+
+    // NOA and GST are paid on the customer's behalf and billed back at cost, so both
+    // sides are tagged back-to-back on creation and accounts stop ticking them by hand.
+    //
+    // Both sides or neither, never one: tagging only the billing side would take the
+    // charge out of revenue while leaving it in cost, understating profit by the whole
+    // amount. That is a worse number than the one this feature exists to fix.
+    const r = await addBillingLine(id, { service, rate: amount || 0, qty: 1, remarks: '', is_back_to_back: true })
     setJob(j => ({ ...j, billing_lines: [...(j.billing_lines || []), r.data] }))
+    if (costLineId) {
+      // Best effort. If this fails the billing side is already flagged, so the totals
+      // would be skewed; untag it again rather than leave the job half-tagged.
+      try {
+        const c = await updateCostLine(id, costLineId, { is_back_to_back: true })
+        setJob(j => ({ ...j, cost_lines: j.cost_lines.map(l => l.id === costLineId ? { ...l, ...c.data } : l) }))
+      } catch (err) {
+        console.error('[ZHL] could not tag the cost side back-to-back', err)
+        await updateBillingLine(id, r.data.id, { is_back_to_back: false })
+        setJob(j => ({ ...j, billing_lines: j.billing_lines.map(l => l.id === r.data.id ? { ...l, is_back_to_back: false } : l) }))
+      }
+    }
     refreshTotals()
   }
 
@@ -338,7 +357,7 @@ export default function JobDetail() {
     const r = await updateCostLine(id, lid, data)
     setJob(j => ({ ...j, cost_lines: j.cost_lines.map(l => l.id === lid ? r.data : l) }))
     refreshTotals()
-    await autoMirrorToBilling(data.service, data.amount)
+    await autoMirrorToBilling(data.service, data.amount, null, lid)
   }
   // Saved the moment it is clicked, rather than through the row's edit mode.
   //
@@ -776,11 +795,14 @@ export default function JobDetail() {
     y = doc.lastAutoTable.finalY + 6
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
     doc.text(`BILLING TO CUSTOMER${rateNote}`, ml, y); y += 2
-    const totalSale = job.billing_lines.reduce((s, l) => s + (l.rate||0)*(l.qty||1), 0)
-    const totalSaleExport = job.billing_lines.reduce((s, l) => {
-      const lineRate = toExport(l.rate||0, l.currency, l.rate_local)
-      return s + lineRate * (l.qty||1)
-    }, 0)
+    // Same rule as the screen: back-to-back charges are listed, because the customer owes
+    // them, but kept out of the figures the margin is read from.
+    const notBtb = (l) => !l.is_back_to_back
+    const isBtbLine = (l) => !!l.is_back_to_back
+    const saleOf = (l) => toExport(l.rate||0, l.currency, l.rate_local) * (l.qty||1)
+    const totalSale = job.billing_lines.filter(notBtb).reduce((s, l) => s + (l.rate||0)*(l.qty||1), 0)
+    const totalSaleExport = job.billing_lines.filter(notBtb).reduce((s, l) => s + saleOf(l), 0)
+    const btbSaleExport = job.billing_lines.filter(isBtbLine).reduce((s, l) => s + saleOf(l), 0)
     autoTable(doc, {
       startY: y,
       head: [['#', 'Service', `Rate (${exportCcy})`, 'Qty', `Total (${exportCcy})`, 'Remarks']],
@@ -790,7 +812,11 @@ export default function JobDetail() {
             return [i+1, l.service || '—', fmtCcy(lineRate), l.qty, fmtCcy(lineRate*(l.qty||1)), l.remarks || '']
           })
         : [['', 'No billing lines', '', '', '', '']],
-      foot: [['', '', '', 'Total Sale', fmtCcy(totalSaleExport), '']],
+      foot: btbSaleExport
+        ? [['', '', '', 'Sale (excl. back-to-back)', fmtCcy(totalSaleExport), ''],
+           ['', '', '', 'Back-to-back', fmtCcy(btbSaleExport), ''],
+           ['', '', '', 'Invoice Total', fmtCcy(totalSaleExport + btbSaleExport), '']]
+        : [['', '', '', 'Total Sale', fmtCcy(totalSaleExport), '']],
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
@@ -803,15 +829,19 @@ export default function JobDetail() {
     y = doc.lastAutoTable.finalY + 6
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
     doc.text('VENDOR COSTS', ml, y); y += 2
-    const totalCost = job.cost_lines.reduce((s, l) => s + (l.amount||0), 0)
+    const totalCost = job.cost_lines.filter(notBtb).reduce((s, l) => s + (l.amount||0), 0)
     const totalCostPayable = job.cost_lines.reduce((s, l) => s + (l.total_payable != null ? l.total_payable : (l.amount||0)), 0)
+    const btbCostTotal = job.cost_lines.filter(isBtbLine).reduce((s, l) => s + (l.amount||0), 0)
     autoTable(doc, {
       startY: y,
       head: [['#', 'Vendor', 'Service', 'Invoice No.', 'Invoice Date', 'Amount (SGD)', 'Total Payable', 'Remarks']],
       body: job.cost_lines.length
         ? job.cost_lines.map((l, i) => [i+1, l.vendor || '—', l.service || '—', l.invoice_no || '—', l.invoice_date || '—', fmt(l.amount), l.total_payable != null ? fmt(l.total_payable) : '—', l.remarks || ''])
         : [['', 'No cost lines', '', '', '', '', '', '']],
-      foot: [['', '', '', '', 'Total', fmt(totalCost), fmt(totalCostPayable), '']],
+      foot: btbCostTotal
+        ? [['', '', '', '', 'Cost (excl. B2B)', fmt(totalCost), fmt(totalCostPayable), ''],
+           ['', '', '', '', 'Back-to-back', fmt(btbCostTotal), '', '']]
+        : [['', '', '', '', 'Total', fmt(totalCost), fmt(totalCostPayable), '']],
       headStyles: { fillColor: [55, 88, 120], fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
@@ -822,7 +852,10 @@ export default function JobDetail() {
 
     // P&L summary (autoTable instead of manual box)
     y = doc.lastAutoTable.finalY + 6
-    const totalCostExport = job.cost_lines.reduce((s, l) => {
+    const totalCostExport = job.cost_lines.filter(notBtb).reduce((s, l) => {
+      return s + toExport(l.amount||0, l.currency, l.amount_local)
+    }, 0)
+    const btbCostExport = job.cost_lines.filter(isBtbLine).reduce((s, l) => {
       return s + toExport(l.amount||0, l.currency, l.amount_local)
     }, 0)
     const profitExport = totalSaleExport - totalCostExport
@@ -833,6 +866,10 @@ export default function JobDetail() {
       body: [
         [`Total Sale (${exportCcy})`,  fmtCcy(totalSaleExport)],
         [`Total Cost (${exportCcy})`,  fmtCcy(totalCostExport)],
+        ...((btbSaleExport || btbCostExport)
+          ? [[`Back-to-back (${exportCcy})`, fmtCcy(btbSaleExport)],
+             [`Invoice Total (${exportCcy})`, fmtCcy(totalSaleExport + btbSaleExport)]]
+          : []),
         [`Profit (${exportCcy})`,      fmtCcy(profitExport)],
         ['GP Margin',                  `${gpDisplay.toFixed(1)}%`],
       ],
@@ -1013,14 +1050,22 @@ export default function JobDetail() {
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...blue)
     doc.text(`BILLING — ${entity.name || ''}`, ml, y); y += 2
     const entityBillingLines = job.billing_lines.filter(l => l.splits?.some(s => s.entity_id === entity.id))
-    const entitySale = entityBillingLines.reduce((s, l) => s + (l.splits.find(x => x.entity_id === entity.id)?.amount || 0), 0)
+    // computeEntityTotals is the tested definition and already excludes back-to-back
+    // charges from sale, cost and GP. Summing the rows here by hand would be a third
+    // copy of the rule, and the one most likely to be forgotten.
+    const et = computeEntityTotals(entity, job)
+    const entitySale = et.sale
     autoTable(doc, {
       startY: y,
       head: [['#', 'Service', 'Amount (SGD)', 'Remarks']],
       body: entityBillingLines.length
         ? entityBillingLines.map((l, i) => [i+1, l.service || '—', fmt(l.splits.find(x => x.entity_id === entity.id)?.amount || 0), l.remarks || ''])
         : [['', 'No split lines assigned', '', '']],
-      foot: [['', 'Total Sale', fmt(entitySale), '']],
+      foot: et.btbSale
+        ? [['', 'Sale (excl. back-to-back)', fmt(entitySale), ''],
+           ['', 'Back-to-back', fmt(et.btbSale), ''],
+           ['', 'Invoice Total', fmt(et.invoiceTotal), '']]
+        : [['', 'Total Sale', fmt(entitySale), '']],
       headStyles: { fillColor: blue, fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [232,241,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
@@ -1033,14 +1078,17 @@ export default function JobDetail() {
     doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy)
     doc.text(`VENDOR COSTS — ${entity.name || ''} share`, ml, y); y += 2
     const entityCostLines = job.cost_lines.filter(l => l.splits?.some(s => s.entity_id === entity.id))
-    const entityCost = entityCostLines.reduce((s, l) => s + (l.splits.find(x => x.entity_id === entity.id)?.amount || 0), 0)
+    const entityCost = et.cost
     autoTable(doc, {
       startY: y,
       head: [['#', 'Vendor', 'Service', 'Amount (SGD)', 'Remarks']],
       body: entityCostLines.length
         ? entityCostLines.map((l, i) => [i+1, l.vendor || '—', l.service || '—', fmt(l.splits.find(x => x.entity_id === entity.id)?.amount || 0), l.remarks || ''])
         : [['', 'No split lines assigned', '', '', '']],
-      foot: [['', '', 'Total Cost', fmt(entityCost), '']],
+      foot: et.btbCost
+        ? [['', '', 'Cost (excl. B2B)', fmt(entityCost), ''],
+           ['', '', 'Back-to-back', fmt(et.btbCost), '']]
+        : [['', '', 'Total Cost', fmt(entityCost), '']],
       headStyles: { fillColor: [55, 88, 120], fontSize: 8, fontStyle: 'bold', textColor: [255,255,255] },
       footStyles: { fillColor: [245,247,250], textColor: navy, fontStyle: 'bold', fontSize: 8.5 },
       styles: { fontSize: 8, cellPadding: 3.5, overflow: 'linebreak' },
@@ -1050,13 +1098,17 @@ export default function JobDetail() {
     })
 
     y = doc.lastAutoTable.finalY + 6
-    const entityProfit = entitySale - entityCost
-    const entityGP = entitySale > 0 ? (entityProfit/entitySale)*100 : 0
+    const entityProfit = et.profit
+    const entityGP = et.gp
     autoTable(doc, {
       startY: y,
       body: [
         ['Total Sale (SGD)',  fmt(entitySale)],
         ['Total Cost (SGD)',  fmt(entityCost)],
+        ...((et.btbSale || et.btbCost)
+          ? [['Back-to-back (SGD)', fmt(et.btbSale)],
+             ['Invoice Total (SGD)', fmt(et.invoiceTotal)]]
+          : []),
         ['Profit (SGD)',      fmt(entityProfit)],
         ['GP Margin',         `${entityGP.toFixed(1)}%`],
       ],
